@@ -42,7 +42,7 @@ private:
     QString folder;
     QString lastRom;
     QHash<int, QImage> cache;       // key = card index
-    QHash<int, bool> missing;       // remembered misses
+    QHash<int, qint64> missing;     // card -> time of last failed lookup (ms); retried after 3 s
     QList<int> order;
     quint64 gen = 0;
     static constexpr int kMaxCached = 48;

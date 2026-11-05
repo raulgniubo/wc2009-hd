@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <cmath>
+#include <QDateTime>
 
 #include "NDS.h"
 #include "NDSCart.h"
@@ -41,7 +42,9 @@ const QImage* WC09Overlay::image(const WC09::CardQuad& q)
     if (folder.isEmpty()) return nullptr;
     auto it = cache.find(q.Card);
     if (it != cache.end()) return &it.value();
-    if (missing.contains(q.Card)) return nullptr;
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    auto miss = missing.find(q.Card);
+    if (miss != missing.end() && now - miss.value() < 3000) return nullptr;   // lets you drop images in while playing
 
     QStringList names;
     if (q.Passcode) names << QString::number(q.Passcode) << QString("%1").arg(q.Passcode, 8, 10, QChar('0'));
@@ -57,7 +60,8 @@ const QImage* WC09Overlay::image(const WC09::CardQuad& q)
         }
         if (!img.isNull()) break;
     }
-    if (img.isNull()) { missing.insert(q.Card, true); return nullptr; }
+    if (img.isNull()) { missing.insert(q.Card, now); return nullptr; }
+    missing.remove(q.Card);
 
     // keep memory sane: cap at 1024px tall, premultiplied RGBA for both painters
     if (img.height() > 1024) img = img.scaledToHeight(1024, Qt::SmoothTransformation);
