@@ -173,7 +173,7 @@ vec4 XbrFetch(sampler2D tex, ivec2 size, vec2 uv)
 
 vec4 BG0Fetch(vec2 coord)
 {
-    if (uSmooth2D && uScaleFactor > 1 && uBGConfig[0].Type < 7)
+    if (uSmooth2D && uScaleFactor > 1 && uBGConfig[0].Type < 7 && !uEnable3D)   // BG0 may be the hi-res 3D layer
         return XbrFetch(BGLayerTex[0], uBGConfig[0].Size, coord);
     return texture(BGLayerTex[0], coord);
 }
