@@ -50,11 +50,18 @@ DefaultList<int> DefaultInts =
 {
     {"Instance*.Keyboard", -1},
     {"Instance*.Joystick", -1},
-    {"Instance*.Window*.Width", 256},
-    {"Instance*.Window*.Height", 384},
     {"Screen.VSyncInterval", 1},
+#ifdef OGLRENDERER_ENABLED
+    // WC09 fork: default to the sharp setup (OpenGL 3D at 4x, OpenGL display)
+    {"3D.Renderer", renderer3D_OpenGL},
+#else
     {"3D.Renderer", renderer3D_Software},
-    {"3D.GL.ScaleFactor", 1},
+#endif
+    {"3D.GL.ScaleFactor", 4},
+    // side by side fits widescreen Mac/PC displays best
+    {"Instance*.Window*.ScreenLayout", 2},
+    {"Instance*.Window*.Width", 1024},
+    {"Instance*.Window*.Height", 384},
 #ifdef JIT_ENABLED
     {"JIT.MaxBlockSize", 32},
 #endif
@@ -96,6 +103,9 @@ RangeList IntRanges =
 DefaultList<bool> DefaultBools =
 {
     {"Screen.Filter", true},
+#ifdef OGLRENDERER_ENABLED
+    {"Screen.UseGL", true},
+#endif
     {"3D.Soft.Threaded", true},
     {"3D.GL.HiresCoordinates", true},
     {"LimitFPS", true},

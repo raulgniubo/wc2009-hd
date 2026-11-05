@@ -25,7 +25,7 @@ public:
     // Enables the core hook if the loaded ROM is WC2009 US. Call once per frame; cheap.
     void update(melonDS::NDS* nds, const QString& romPath);
 
-    bool enabled() const { return active && !folder.isEmpty(); }
+    bool enabled() const { return active && !folder.isEmpty() && melonDS::WC09::GetHDCardsEnabled(); }
 
     // HD image for a card, or nullptr if none was supplied. Cached (LRU-ish, bounded).
     const QImage* image(const melonDS::WC09::CardQuad& q);

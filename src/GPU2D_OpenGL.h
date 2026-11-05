@@ -68,6 +68,7 @@ private:
 
     GLuint SpriteShader {};
     GLint SpriteRenderTransULoc {};
+    GLint SpriteSmoothULoc {-1};
     GLuint SpriteVtxBuffer {};
     GLuint SpriteVtxArray {};
     u16* SpriteVtxData {};
@@ -75,6 +76,7 @@ private:
     GLuint CompositorShader {};
     GLuint CompositorConfigUBO {};
     GLint CompositorScaleULoc {};
+    GLint CompositorSmoothULoc {-1};
 
     // base index for a BG layer within the BG texture arrays
     // based on BG type and size

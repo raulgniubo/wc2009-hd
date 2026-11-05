@@ -19,6 +19,7 @@
 #include <assert.h>
 #include "GPU_OpenGL.h"
 #include "GPU2D_OpenGL.h"
+#include "WC09Cards.h"
 #include "GPU.h"
 #include "GPU3D.h"
 
@@ -125,6 +126,7 @@ bool GLRenderer2D::InitShaders()
     glUniformBlockBinding(SpriteShader, uniloc, 24);
 
     SpriteRenderTransULoc = glGetUniformLocation(SpriteShader, "uRenderTransparent");
+    SpriteSmoothULoc = glGetUniformLocation(SpriteShader, "uSmoothScale");
 
 
     glUseProgram(CompositorShader);
@@ -154,6 +156,7 @@ bool GLRenderer2D::InitShaders()
     glUniformBlockBinding(CompositorShader, uniloc, 23);
 
     CompositorScaleULoc = glGetUniformLocation(CompositorShader, "uScaleFactor");
+    CompositorSmoothULoc = glGetUniformLocation(CompositorShader, "uSmooth2D");
 
     // generate mosaic lookup texture
 
@@ -190,7 +193,9 @@ bool GLRenderer2D::InitShaders(GLRenderer2D& other)
 
     LayerPreCurBGULoc = other.LayerPreCurBGULoc;
     SpriteRenderTransULoc = other.SpriteRenderTransULoc;
+    SpriteSmoothULoc = other.SpriteSmoothULoc;
     CompositorScaleULoc = other.CompositorScaleULoc;
+    CompositorSmoothULoc = other.CompositorSmoothULoc;
 
     MosaicTex = other.MosaicTex;
 
@@ -1619,6 +1624,7 @@ void GLRenderer2D::DoRenderSprites(int line)
     int yend = line;
 
     glUseProgram(SpriteShader);
+    glUniform1i(SpriteSmoothULoc, WC09::GetSmooth2D() ? ScaleFactor : 0);
 
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_STENCIL_TEST);
@@ -1788,6 +1794,7 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
     }
 
     glUseProgram(CompositorShader);
+    glUniform1i(CompositorSmoothULoc, WC09::GetSmooth2D() ? 1 : 0);
 
     glBindBufferBase(GL_UNIFORM_BUFFER, 20, LayerConfigUBO);
     glBindBufferBase(GL_UNIFORM_BUFFER, 22, ScanlineConfigUBO);

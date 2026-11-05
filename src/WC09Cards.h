@@ -52,6 +52,14 @@ void OnVBlank2D(GPU& gpu);
 // Frontend: copy of the most recent completed 3D frame's card quads.
 FrameCards GetLatest();
 
+// Master switch for drawing HD cards (the frontend checks it). On by default.
+void SetHDCardsEnabled(bool on);
+bool GetHDCardsEnabled();
+
+// Smooth (xBR) upscaling of 2D layers in the OpenGL renderer. On by default.
+void SetSmooth2D(bool on);
+bool GetSmooth2D();
+
 // Card index -> passcode (0 if none), or 0 when out of range.
 u32 PasscodeOf(u16 card);
 

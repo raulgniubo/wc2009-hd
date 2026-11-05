@@ -41,6 +41,13 @@ SlotCache Cache[64];
 u32 FrameCounter = 0;
 }
 
+std::atomic<bool> Smooth2D{true};
+std::atomic<bool> HDCards{true};
+void SetHDCardsEnabled(bool on) { HDCards = on; }
+bool GetHDCardsEnabled() { return HDCards; }
+void SetSmooth2D(bool on) { Smooth2D = on; }
+bool GetSmooth2D() { return Smooth2D; }
+
 void SetActive(bool active) { Active = active; }
 bool IsActive() { return Active; }
 

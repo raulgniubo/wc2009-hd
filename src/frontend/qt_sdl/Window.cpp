@@ -73,6 +73,7 @@
 #include "ArchiveUtil.h"
 #include "CameraManager.h"
 #include "Window.h"
+#include "WC09Cards.h"
 #include "AboutDialog.h"
 
 using namespace melonDS;
@@ -571,6 +572,20 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
             actScreenFiltering->setCheckable(true);
             connect(actScreenFiltering, &QAction::triggered, this, &MainWindow::onChangeScreenFiltering);
 
+            actWC09HDCards = menu->addAction("HD cards (Yu-Gi-Oh! WC2009)");
+            actWC09HDCards->setCheckable(true);
+            connect(actWC09HDCards, &QAction::triggered, this, [this](bool on) {
+                windowCfg.SetBool("WC09NoHDCards", !on);
+                melonDS::WC09::SetHDCardsEnabled(on);
+            });
+
+            actWC09Smooth2D = menu->addAction("Smooth 2D graphics (OpenGL, 2x+)");
+            actWC09Smooth2D->setCheckable(true);
+            connect(actWC09Smooth2D, &QAction::triggered, this, [this](bool on) {
+                windowCfg.SetBool("WC09NoSmooth2D", !on);
+                melonDS::WC09::SetSmooth2D(on);
+            });
+
             actShowOSD = menu->addAction("Show OSD");
             actShowOSD->setCheckable(true);
             connect(actShowOSD, &QAction::triggered, this, &MainWindow::onChangeShowOSD);
@@ -728,6 +743,10 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
         }
 
         actScreenFiltering->setChecked(windowCfg.GetBool("ScreenFilter"));
+        actWC09HDCards->setChecked(!windowCfg.GetBool("WC09NoHDCards"));
+        melonDS::WC09::SetHDCardsEnabled(!windowCfg.GetBool("WC09NoHDCards"));
+        actWC09Smooth2D->setChecked(!windowCfg.GetBool("WC09NoSmooth2D"));
+        melonDS::WC09::SetSmooth2D(!windowCfg.GetBool("WC09NoSmooth2D"));
         actShowOSD->setChecked(showOSD);
 
         actLimitFramerate->setChecked(emuInstance->doLimitFPS);

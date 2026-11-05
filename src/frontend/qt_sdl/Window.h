@@ -291,6 +291,8 @@ public:
     QAction** actScreenAspectBot;
     QAction* actNewWindow;
     QAction* actScreenFiltering;
+    QAction* actWC09HDCards;
+    QAction* actWC09Smooth2D;
     QAction* actShowOSD;
     QAction* actLimitFramerate;
     QAction* actAudioSync;
