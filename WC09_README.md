@@ -25,9 +25,21 @@ Cards without an image in `HDCards` show the original art.
 - `wc09/tools`: ROM research tools (pac/card.pac decoders, headless harness, table generator).
 - `wc09/research/FINDINGS.md`: what's verified about the game's card assets.
 
-## Status (v0.1)
-- Covered: the deck editor card view (verified to identify cards correctly).
-- Not yet: duel field cards (if clipped or not 4-vertex), the story-intro card (not a card.pac texture), and both screens showing 3D at once (display capture).
+## Status (v0.2)
+Working (tested live on the real build, both the OpenGL and the standard display):
+- Deck editor card view (3D, 128 px card texture).
+- Duels: the card detail on the top screen (2D background tiles), the raised card in your hand
+  (3D, 64 px), cards in your hand and on the field (3D, 32 px artwork, drawn in perspective).
+
+Not yet:
+- The card in the story intro (it is not one of the 2,934 card images).
+- Both screens showing 3D at once (display capture).
+- Sprites the game draws on top of the 2D card (stars, attribute icon) get covered by the HD card,
+  which has its own.
 - US ROM only.
+
+## Getting HD images
+`wc09/get_hd_cards.sh` downloads every card with a passcode (2,796 cards) from YGOPRODeck
+into `HDCards/`, once. Run it next to your ROM: `bash get_hd_cards.sh`.
 
 No ROMs, game files or card artwork are included. Bring your own.

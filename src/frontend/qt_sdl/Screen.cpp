@@ -49,8 +49,10 @@ uniform mat2x3 uTransform;
 in vec2 vPosition;
 in vec3 vUVQ;
 smooth out vec3 fUVQ;
+smooth out vec2 fDS;
 void main()
 {
+    fDS = vPosition;
     vec4 fpos;
     fpos.xy = vec3(vPosition, 1.0) * uTransform;
     fpos.xy = ((fpos.xy * 2.0) / uScreenSize) - 1.0;
@@ -64,12 +66,15 @@ void main()
 
 static const char* kWC09FS = R"(#version 140
 uniform sampler2D CardTex;
+uniform vec4 uClip;   // u0, v0, u1, v1
 smooth in vec3 fUVQ;
+smooth in vec2 fDS;
 out vec4 oColor;
 void main()
 {
+    if (fDS.x < 0.0 || fDS.x > 256.0 || fDS.y < 0.0 || fDS.y > 192.0) discard;   // stay on this screen
     vec2 uv = fUVQ.xy / fUVQ.z;
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+    if (uv.x < uClip.x || uv.x > uClip.z || uv.y < uClip.y || uv.y > uClip.w) discard;
     oColor = texture(CardTex, uv);
 }
 )";
@@ -839,8 +844,6 @@ void ScreenPanelNative::drawWC09(QPainter& painter)
     wc09Update();
     if (!wc09.enabled()) return;
     melonDS::WC09::FrameCards fc = melonDS::WC09::GetLatest();
-    int kind3D = fc.On3DTop ? 0 : 1;
-
     painter.save();
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -858,11 +861,16 @@ void ScreenPanelNative::drawWC09(QPainter& painter)
         if (!QTransform::quadToQuad(src, dst, t)) continue;
         for (int i = 0; i < numScreens; i++)
         {
-            if (screenKind[i] != kind3D) continue;
+            if (screenKind[i] != q.Screen) continue;
+            // stay inside this DS screen, then inside the card region of the image
+            painter.setTransform(screenTrans[i]);
+            painter.setClipRect(QRect(0, 0, 256, 192));
             painter.setTransform(t * screenTrans[i]);
             QPainterPath clip; clip.addPolygon(src); clip.closeSubpath();
-            QPainterPath imgRect; imgRect.addRect(img->rect());
-            painter.setClipPath(clip.intersected(imgRect));
+            QPainterPath imgRect;
+            imgRect.addRect(QRectF(q.ClipU0 * img->width(), q.ClipV0 * img->height(),
+                                   (q.ClipU1 - q.ClipU0) * img->width(), (q.ClipV1 - q.ClipV0) * img->height()));
+            painter.setClipPath(clip.intersected(imgRect), Qt::IntersectClip);
             painter.drawImage(QPointF(0, 0), *img);
             painter.setClipping(false);
         }
@@ -1110,6 +1118,7 @@ void ScreenPanelGL::initWC09GL()
     glUniform1i(glGetUniformLocation(wc09Program, "CardTex"), 0);
     wc09SizeLoc = glGetUniformLocation(wc09Program, "uScreenSize");
     wc09TransformLoc = glGetUniformLocation(wc09Program, "uTransform");
+    wc09ClipLoc = glGetUniformLocation(wc09Program, "uClip");
 
     glGenBuffers(1, &wc09VBO);
     glBindBuffer(GL_ARRAY_BUFFER, wc09VBO);
@@ -1138,7 +1147,6 @@ void ScreenPanelGL::drawWC09GL(float w, float h)
     if (!wc09.enabled() || !wc09Program) return;
     melonDS::WC09::FrameCards fc = melonDS::WC09::GetLatest();
     if (fc.Quads.empty()) return;
-    int kind3D = fc.On3DTop ? 0 : 1;
 
     glUseProgram(wc09Program);
     glUniform2f(wc09SizeLoc, w, h);
@@ -1186,10 +1194,11 @@ void ScreenPanelGL::drawWC09GL(float w, float h)
             v[k*5+2] = uvq[j][0]; v[k*5+3] = uvq[j][1]; v[k*5+4] = uvq[j][2];
         }
         glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
+        glUniform4f(wc09ClipLoc, q.ClipU0, q.ClipV0, q.ClipU1, q.ClipV1);
 
         for (int i = 0; i < numScreens; i++)
         {
-            if (screenKind[i] != kind3D) continue;
+            if (screenKind[i] != q.Screen) continue;
             glUniformMatrix2x3fv(wc09TransformLoc, 1, GL_TRUE, screenMatrix[i]);
             glDrawArrays(GL_TRIANGLES, 0, 6);
         }

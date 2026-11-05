@@ -232,7 +232,7 @@ private:
     void deinitWC09GL();
     void drawWC09GL(float w, float h);
     GLuint wc09Program = 0, wc09VBO = 0, wc09VAO = 0;
-    GLint wc09SizeLoc = -1, wc09TransformLoc = -1;
+    GLint wc09SizeLoc = -1, wc09TransformLoc = -1, wc09ClipLoc = -1;
     QHash<int, GLuint> wc09Textures;
     QList<int> wc09TexOrder;
     GLuint screenTexture;

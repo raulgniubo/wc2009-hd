@@ -41,3 +41,15 @@ Game code `CY8E`, US ROM. All findings below are verified from the ROM itself.
 
 ## Emulator hook point
 - melonDS master has `GPU3D_Texcache` (XXH64 over VRAM ranges). On a cache miss for fmt 5 at 128/64/32 px, hash the texel words and look up `texhash_us.tsv` to get the card index, then load the HD image instead.
+
+## Duel views (verified live)
+| Where | How the game draws it | Texture |
+| --- | --- | --- |
+| Deck editor card | 3D quad | tx128 (full face) |
+| Duel: top-screen card detail | 2D text BG on the sub engine, 11x16 tiles, 8bpp, sequential tile map | bg128 (full face, no stars) |
+| Duel: raised hand card | 3D quad | tx64 (full face) |
+| Duel: hand row and field cards | 3D quads, perspective on the field | tx32 (artwork only) |
+
+tx32 = artwork only: texels (1,4)-(31,26) show the face region (33,24)-(95,90) of the tx128 face.
+Face bbox: tx128 x 20..108, tx64 x 10..54 (same ratio), full height.
+2D detection: scan text BGs for an 11x16 block of sequential tile numbers, hash the 11,264 bytes of tile data, look up bg128.

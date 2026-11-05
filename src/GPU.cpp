@@ -19,6 +19,7 @@
 #include <string.h>
 #include "NDS.h"
 #include "GPU.h"
+#include "WC09Cards.h"
 
 #include "ARMJIT.h"
 
@@ -1299,6 +1300,8 @@ void GPU::StartScanline(u32 line) noexcept
         GPU3D.VBlank();
 
         Rend->VBlank();
+
+        WC09::OnVBlank2D(*this);
 
         if (CaptureEnable)
         {
