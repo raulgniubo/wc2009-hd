@@ -38,6 +38,7 @@ add_library(core STATIC
     GPU2D.cpp
     GPU2D_Soft.cpp
     GPU3D.cpp
+    WC09Cards.cpp
     GPU3D_Soft.cpp
     GPU3D_Texcache.cpp
     GPU3D_Texcache.h

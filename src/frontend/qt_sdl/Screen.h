@@ -24,6 +24,7 @@
 #include <map>
 
 #include <QWidget>
+#include "WC09Overlay.h"
 #include <QImage>
 #include <QMutex>
 #include <QScreen>
@@ -79,6 +80,9 @@ private slots:
 protected:
     MainWindow* mainWindow;
     EmuInstance* emuInstance;
+
+    WC09Overlay wc09;
+    void wc09Update();
 
     bool filter;
 
@@ -178,6 +182,8 @@ private:
 
     QImage screen[2];
     QTransform screenTrans[kMaxScreenTransforms];
+
+    void drawWC09(QPainter& painter);
 };
 
 
@@ -220,6 +226,15 @@ private:
     bool glInited;
 
     GLuint screenVertexBuffer, screenVertexArray;
+
+    // WC09 HD card overlay
+    void initWC09GL();
+    void deinitWC09GL();
+    void drawWC09GL(float w, float h);
+    GLuint wc09Program = 0, wc09VBO = 0, wc09VAO = 0;
+    GLint wc09SizeLoc = -1, wc09TransformLoc = -1;
+    QHash<int, GLuint> wc09Textures;
+    QList<int> wc09TexOrder;
     GLuint screenTexture;
     GLuint screenShaderProgram;
     GLint screenShaderTransformULoc, screenShaderScreenSizeULoc;

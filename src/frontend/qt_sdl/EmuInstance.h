@@ -91,6 +91,7 @@ public:
     int getConsoleType() { return consoleType; }
     EmuThread* getEmuThread() { return emuThread; }
     melonDS::NDS* getNDS() { return nds; }
+    const std::string& getBaseROMDir() const { return baseROMDir; }
 
     MainWindow* getMainWindow() { return mainWindow; }
     int getNumWindows() { return numWindows; }

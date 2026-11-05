@@ -25,6 +25,7 @@
 #include "GPU3D_Soft.h"
 #include "Platform.h"
 #include "GPU3D.h"
+#include "WC09Cards.h"
 
 namespace melonDS
 {
@@ -1294,6 +1295,8 @@ void GPU3D::SubmitPolygon() noexcept
 
     poly->WBuffer = (FlushAttributes & 0x2);
 
+    WC09::OnPolygon(GPU, TexParam, poly, nverts);
+
     for (int i = 0; i < nverts; i++)
     {
         Vertex* vtx = poly->Vertices[i];
@@ -2489,6 +2492,7 @@ void GPU3D::VBlank() noexcept
             CurRAMBank = CurRAMBank?0:1;
             CurVertexRAM = &VertexRAM[CurRAMBank ? 6144 : 0];
             CurPolygonRAM = &PolygonRAM[CurRAMBank ? 2048 : 0];
+            WC09::OnFlush(GPU.ScreenSwap);
 
             NumVertices = 0;
             NumPolygons = 0;

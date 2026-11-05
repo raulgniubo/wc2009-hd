@@ -23,6 +23,7 @@
 
 #include <QPaintEvent>
 #include <QPainter>
+#include <QPainterPath>
 
 #include <QDateTime>
 
@@ -40,6 +41,38 @@
 #include "Config.h"
 
 #include "main_shaders.h"
+
+// ---- WC09 HD card overlay -------------------------------------------------
+static const char* kWC09VS = R"(#version 140
+uniform vec2 uScreenSize;
+uniform mat2x3 uTransform;
+in vec2 vPosition;
+in vec3 vUVQ;
+smooth out vec3 fUVQ;
+void main()
+{
+    vec4 fpos;
+    fpos.xy = vec3(vPosition, 1.0) * uTransform;
+    fpos.xy = ((fpos.xy * 2.0) / uScreenSize) - 1.0;
+    fpos.y *= -1;
+    fpos.z = 0.0;
+    fpos.w = 1.0;
+    gl_Position = fpos;
+    fUVQ = vUVQ;
+}
+)";
+
+static const char* kWC09FS = R"(#version 140
+uniform sampler2D CardTex;
+smooth in vec3 fUVQ;
+out vec4 oColor;
+void main()
+{
+    vec2 uv = fUVQ.xy / fUVQ.z;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+    oColor = texture(CardTex, uv);
+}
+)";
 #include "OSD_shaders.h"
 #include "font.h"
 #include "version.h"
@@ -765,6 +798,12 @@ ScreenPanelNative::~ScreenPanelNative()
 {
 }
 
+void ScreenPanel::wc09Update()
+{
+    auto nds = emuInstance->getNDS();
+    wc09.update(nds, QString::fromStdString(emuInstance->getBaseROMDir()) + "/rom");
+}
+
 void ScreenPanelNative::setupScreenLayout()
 {
     ScreenPanel::setupScreenLayout();
@@ -795,6 +834,42 @@ void ScreenPanelNative::drawScreen()
     bufferLock.unlock();
 }
 
+void ScreenPanelNative::drawWC09(QPainter& painter)
+{
+    wc09Update();
+    if (!wc09.enabled()) return;
+    melonDS::WC09::FrameCards fc = melonDS::WC09::GetLatest();
+    int kind3D = fc.On3DTop ? 0 : 1;
+
+    painter.save();
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    for (const auto& q : fc.Quads)
+    {
+        const QImage* img = wc09.image(q);
+        if (!img) continue;
+        QPolygonF src, dst;
+        for (int k = 0; k < 4; k++)
+        {
+            src << QPointF(q.U[k] * img->width(), q.V[k] * img->height());
+            dst << QPointF(q.X[k], q.Y[k]);
+        }
+        QTransform t;
+        if (!QTransform::quadToQuad(src, dst, t)) continue;
+        for (int i = 0; i < numScreens; i++)
+        {
+            if (screenKind[i] != kind3D) continue;
+            painter.setTransform(t * screenTrans[i]);
+            QPainterPath clip; clip.addPolygon(src); clip.closeSubpath();
+            QPainterPath imgRect; imgRect.addRect(img->rect());
+            painter.setClipPath(clip.intersected(imgRect));
+            painter.drawImage(QPointF(0, 0), *img);
+            painter.setClipping(false);
+        }
+    }
+    painter.restore();
+}
+
 void ScreenPanelNative::paintEvent(QPaintEvent* event)
 {
     QPainter painter(this);
@@ -823,6 +898,7 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
             painter.setTransform(screenTrans[i]);
             painter.drawImage(screenrc, screen[screenKind[i]]);
         }
+        drawWC09(painter);
         emuInstance->renderLock.unlock();
     }
 
@@ -1020,8 +1096,105 @@ void ScreenPanelGL::initOpenGL()
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, logo.width(), logo.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, logo.bits());
     logoTexture = tex;
 
+    initWC09GL();
+
     transferLayout();
     glInited = true;
+}
+
+void ScreenPanelGL::initWC09GL()
+{
+    OpenGL::CompileVertexFragmentProgram(wc09Program, kWC09VS, kWC09FS, "WC09Shader",
+                                         {{"vPosition", 0}, {"vUVQ", 1}}, {{"oColor", 0}});
+    glUseProgram(wc09Program);
+    glUniform1i(glGetUniformLocation(wc09Program, "CardTex"), 0);
+    wc09SizeLoc = glGetUniformLocation(wc09Program, "uScreenSize");
+    wc09TransformLoc = glGetUniformLocation(wc09Program, "uTransform");
+
+    glGenBuffers(1, &wc09VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, wc09VBO);
+    glBufferData(GL_ARRAY_BUFFER, 6 * 5 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glGenVertexArrays(1, &wc09VAO);
+    glBindVertexArray(wc09VAO);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5*4, (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5*4, (void*)(2*4));
+}
+
+void ScreenPanelGL::deinitWC09GL()
+{
+    for (GLuint t : wc09Textures) glDeleteTextures(1, &t);
+    wc09Textures.clear(); wc09TexOrder.clear();
+    if (wc09VBO) glDeleteBuffers(1, &wc09VBO);
+    if (wc09VAO) glDeleteVertexArrays(1, &wc09VAO);
+    if (wc09Program) glDeleteProgram(wc09Program);
+    wc09VBO = wc09VAO = wc09Program = 0;
+}
+
+void ScreenPanelGL::drawWC09GL(float w, float h)
+{
+    wc09Update();
+    if (!wc09.enabled() || !wc09Program) return;
+    melonDS::WC09::FrameCards fc = melonDS::WC09::GetLatest();
+    if (fc.Quads.empty()) return;
+    int kind3D = fc.On3DTop ? 0 : 1;
+
+    glUseProgram(wc09Program);
+    glUniform2f(wc09SizeLoc, w, h);
+    glBindBuffer(GL_ARRAY_BUFFER, wc09VBO);
+    glBindVertexArray(wc09VAO);
+    glActiveTexture(GL_TEXTURE0);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);   // images are premultiplied
+
+    for (const auto& q : fc.Quads)
+    {
+        GLuint tex = wc09Textures.value(q.Card, 0);
+        if (!tex)
+        {
+            const QImage* img = wc09.image(q);
+            if (!img) continue;
+            glGenTextures(1, &tex);
+            glBindTexture(GL_TEXTURE_2D, tex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, img->bytesPerLine() / 4);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img->width(), img->height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, img->constBits());
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            glGenerateMipmap(GL_TEXTURE_2D);
+            if (wc09TexOrder.size() >= 64)
+            {
+                GLuint old = wc09Textures.take(wc09TexOrder.front());
+                glDeleteTextures(1, &old);
+                wc09TexOrder.pop_front();
+            }
+            wc09Textures.insert(q.Card, tex);
+            wc09TexOrder.push_back(q.Card);
+        }
+        glBindTexture(GL_TEXTURE_2D, tex);
+
+        auto uvq = WC09Overlay::projectiveUV(q);
+        const int idx[6] = {0, 1, 2, 0, 2, 3};
+        float v[6 * 5];
+        for (int k = 0; k < 6; k++)
+        {
+            int j = idx[k];
+            v[k*5+0] = q.X[j]; v[k*5+1] = q.Y[j];
+            v[k*5+2] = uvq[j][0]; v[k*5+3] = uvq[j][1]; v[k*5+4] = uvq[j][2];
+        }
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
+
+        for (int i = 0; i < numScreens; i++)
+        {
+            if (screenKind[i] != kind3D) continue;
+            glUniformMatrix2x3fv(wc09TransformLoc, 1, GL_TRUE, screenMatrix[i]);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+    }
+    glDisable(GL_BLEND);
 }
 
 void ScreenPanelGL::deinitOpenGL()
@@ -1031,6 +1204,7 @@ void ScreenPanelGL::deinitOpenGL()
 
     glContext->MakeCurrent();
 
+    deinitWC09GL();
     glDeleteTextures(1, &screenTexture);
 
     glDeleteVertexArrays(1, &screenVertexArray);
@@ -1167,6 +1341,8 @@ void ScreenPanelGL::drawScreen()
             glUniformMatrix2x3fv(screenShaderTransformULoc, 1, GL_TRUE, screenMatrix[i]);
             glDrawArrays(GL_TRIANGLES, screenKind[i] == 0 ? 0 : 2 * 3, 2 * 3);
         }
+
+        drawWC09GL(w / factor, h / factor);
 
         screenSettingsLock.unlock();
     }
