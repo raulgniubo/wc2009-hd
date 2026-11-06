@@ -193,14 +193,38 @@ void BuildSpriteIndex(const u8* rom, u32 len)
         for (const PacEntry& pe : ents)
         {
             std::string stem = pe.Name.substr(0, pe.Name.rfind('.'));
-            if (pe.Name.size() > 6 && pe.Name.compare(pe.Name.size() - 6, 6, ".lzncgr") == 0) sets[stem].first = &pe;
-            if (pe.Name.size() > 6 && pe.Name.compare(pe.Name.size() - 6, 6, ".lzncer") == 0) sets[stem].second = &pe;
+            if (pe.Name.size() > 7 && pe.Name.compare(pe.Name.size() - 7, 7, ".lzncgr") == 0) sets[stem].first = &pe;
+            if (pe.Name.size() > 7 && pe.Name.compare(pe.Name.size() - 7, 7, ".lzncer") == 0) sets[stem].second = &pe;
         }
         for (auto& [stem, pr] : sets)
         {
             if (!pr.first || !pr.second) continue;
             IndexCells(set + "/" + stem, Unpack(rom + ref.Start + pr.first->Start, pr.first->Size),
                        Unpack(rom + ref.Start + pr.second->Start, pr.second->Size));
+        }
+    }
+
+    // overworld / story: cells in RPG2D.pac, their tiles in RPG2D_2.pac (story portraits, items,
+    // overworld menus). The player's own avatar parts are recolored at runtime: left out.
+    {
+        FileRef rc, rg;
+        if (FindFile(rom, len, "Data_arc_pac/RPG2D.pac", rc) && FindFile(rom, len, "Data_arc_pac/RPG2D_2.pac", rg))
+        {
+            std::map<std::string, const PacEntry*> cgr;
+            auto gents = ParsePac(rom + rg.Start, rg.Size);
+            for (const PacEntry& pe : gents)
+                if (pe.Name.size() > 7 && pe.Name.compare(pe.Name.size() - 7, 7, ".lzncgr") == 0)
+                    cgr[pe.Name.substr(0, pe.Name.size() - 7)] = &pe;
+            for (const PacEntry& pe : ParsePac(rom + rc.Start, rc.Size))
+            {
+                if (pe.Name.size() <= 7 || pe.Name.compare(pe.Name.size() - 7, 7, ".lzncer") != 0) continue;
+                std::string stem = pe.Name.substr(0, pe.Name.size() - 7);
+                if (stem.rfind("f_", 0) == 0 || stem.rfind("m_", 0) == 0) continue;
+                auto g = cgr.find(stem);
+                if (g == cgr.end()) continue;
+                IndexCells("RPG2D/" + stem, Unpack(rom + rg.Start + g->second->Start, g->second->Size),
+                           Unpack(rom + rc.Start + pe.Start, pe.Size));
+            }
         }
     }
 

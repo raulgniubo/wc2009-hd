@@ -29,15 +29,17 @@ if os.path.isdir(d):
         b = io.BytesIO(); img.save(b, 'JPEG', quality=92); z.writestr(f'HDCards/{f[:-4]}.jpg', b.getvalue()); n += 1
 import json
 # menus and sprites: HDCards/<set>/<name>.png, plus copies for names that share an image
-def add_tree(hd, dupfile):
+def add_tree(hd, dupfile, flat=None, scale=0.75):
     global n
     if not os.path.isdir(hd): return
     done = {}
-    for st in sorted(os.listdir(hd)):
-        for f in sorted(os.listdir(f'{hd}/{st}')):
+    for st in ([None] if flat else sorted(os.listdir(hd))):
+        src = hd if flat else f'{hd}/{st}'
+        st = flat or st
+        for f in sorted(os.listdir(src)):
             if not f.endswith('.png'): continue
             arc = f'HDCards/{st}/{f}'
-            add(Image.open(f'{hd}/{st}/{f}'), arc)
+            add(Image.open(f'{src}/{f}'), arc, scale)
             done[f'{st}/{f[:-4]}'] = last
     if os.path.exists(dupfile):
         for name, canon in json.load(open(dupfile)).items():
@@ -48,5 +50,7 @@ add_tree(f'{SRC}/spr_hd', f'{SRC}/spr_dups.json')
 add_tree(f'{SRC}/menu4_hd', f'{SRC}/menu4_png_dups.json')
 add_tree(f'{SRC}/tex3d_hd', '')
 add_tree(f'{SRC}/nbg_hd', '')
+add_tree(f'{SRC}/mini_hd', '', flat='tex3d', scale=0.5)
+add_tree(f'{SRC}/rpgspr_hd', f'{SRC}/rpgspr_png_dups.json')
 z.close()
 print(n, 'files', os.path.getsize(OUT) // (1 << 20), 'MB')
