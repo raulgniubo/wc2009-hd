@@ -53,3 +53,26 @@ Game code `CY8E`, US ROM. All findings below are verified from the ROM itself.
 tx32 = artwork only: texels (1,4)-(31,26) show the face region (33,24)-(95,90) of the tx128 face.
 Face bbox: tx128 x 20..108, tx64 x 10..54 (same ratio), full height.
 2D detection: scan text BGs for an 11x16 block of sequential tile numbers, hash the 11,264 bytes of tile data, look up bg128.
+
+## 3D textures (verified against textures dumped from the running game)
+- Content hash used by the fork: XXH64 over melonDS's decoded texcache buffer (u32 per texel:
+  R6 | G6<<8 | B6<<16 | A5<<24, exactly as `GPU3D_Texcache` decodes), seed `(width<<16)|height`.
+  `wc09/tools/tex3d.py` reproduces the decoder bit-exactly for all formats.
+- `RPG3D.pac`, `RACE.pac`: standard NSBMD (BMD0 with MDL0 + TEX0). Texture/palette pairing via the
+  MDL0 material dictionaries. 3D info dictionaries: u8 0, u8 count, u16 size; patricia block whose
+  size (u16 at +6) is measured from the dictionary start; data block (u16 elem size, u16 size); names.
+- `monmodel.pac`, `effect.pac`: NARC files holding Konami `YIMD` models. Header u32s at 0x48:
+  texture count, texture table offset, palette count, palette table offset. Texture entry (0x20):
+  u32 fmt, u16 w, u16 h, u32 texel off, u32 texel size, u32 tex4x4 index off, u32 size, ...
+  Palette entry: u32 offset, u32 size.
+- Mini monsters on the duel field: `monmini.pac/monmini_image.bin` = concatenated LZ10 NTTX (IMGE only,
+  64x64 8bpp, color 0 transparent), offsets in `monmini_size.bin`; one shared 256-color palette in
+  `duel3d.pac/monmini.5pl` (NTPL). 9,249 unique.
+- Duel UI on the 3D layer (phase buttons, counters, field zones) is built at runtime: only known by dumping.
+
+## Overworld 2D
+- `RPG2D_2.pac`: NCGR/NCLR/NSCR backgrounds with the same stem (top-screen scenery `bgNN`, radar maps
+  `*_rader`), and the tiles (NCGR/NCLR) for the cells in `RPG2D.pac` (NCER/NANR): story portraits
+  `npcNN_buNN`, items, overworld menus. `f_*`/`m_*` = player avatar parts (recolored at runtime).
+- The story intro card (Red Dragon Archfiend over the stadium) is not a text BG, not a sprite made of
+  bg128 tiles and not a 3D texture: most likely an affine/bitmap BG. Not handled.
