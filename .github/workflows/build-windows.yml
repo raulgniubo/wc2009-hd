@@ -1,7 +1,17 @@
 name: Windows
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'wc09/**'
+      - '*.md'
   workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
 
 
 env:
@@ -42,6 +52,10 @@ jobs:
         configurePreset: release-windows-${{ matrix.arch.name }}
         configurePresetAdditionalArgs: "['-DENABLE_DEBUG_DEPS=OFF', '-DMELONDS_EMBED_BUILD_INFO=ON']"
         buildPreset: release-windows-${{ matrix.arch.name }}
+    - name: Check JPEG support is linked
+      shell: pwsh
+      run: |
+        if (Select-String -Path .\build\release-windows-${{ matrix.arch.name }}\melonDS.exe -Pattern 'QJpegPlugin' -SimpleMatch -Quiet) { 'JPEG plugin linked' } else { 'JPEG plugin missing'; exit 1 }
     - uses: actions/upload-artifact@v7
       with:
         name: melonDS-windows-${{ matrix.arch.name }}
