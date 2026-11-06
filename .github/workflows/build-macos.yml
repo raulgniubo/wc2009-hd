@@ -59,7 +59,9 @@ jobs:
       - name: Check JPEG support is linked
         shell: bash
         run: |
-          strings build/release-mac-${{ matrix.arch }}/melonDS.app/Contents/MacOS/melonDS | grep -m1 -i "jpeg" || (echo "JPEG support missing" && exit 1)
+          strings build/release-mac-${{ matrix.arch }}/melonDS.app/Contents/MacOS/melonDS > strings.txt
+          grep -q "QJpegPlugin" strings.txt || (echo "JPEG plugin missing" && exit 1)
+          echo "JPEG plugin linked"
       - name: Compress app bundle
         shell: bash
         run: |
