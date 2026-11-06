@@ -1,12 +1,7 @@
 name: Windows
 
+# only when asked (Actions > Windows > Run workflow), to save build minutes
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'wc09/**'
-      - '*.md'
   workflow_dispatch:
 
 concurrency:

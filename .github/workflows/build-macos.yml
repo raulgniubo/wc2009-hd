@@ -1,12 +1,7 @@
 name: macOS (Apple Silicon)
 
+# started by hand when a version is ready (Actions > macOS > Run workflow), to save build minutes
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'wc09/**'
-      - '*.md'
   workflow_dispatch:
 
 concurrency:
