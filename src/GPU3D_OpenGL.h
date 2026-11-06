@@ -105,7 +105,8 @@ private:
     GLint RenderModeULoc = 0;
     GLint HDModeULoc = -1;
     // WC09: HD 3D textures by content hash
-    struct HD3DEntry { GLuint Tex; bool Valid; };
+    struct HD3DEntry { GLuint Tex; bool Valid; u64 LastUse; };
+    u64 HD3DFrame = 0;
     std::unordered_map<u64, HD3DEntry> HD3D;
     GLuint GetHD3D(u64 hash);
     GLuint CurShaderID = -1;

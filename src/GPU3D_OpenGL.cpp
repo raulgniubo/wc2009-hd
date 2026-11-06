@@ -104,8 +104,8 @@ void GLRenderer3D::UseRenderShader(bool wbuffer)
 GLuint GLRenderer3D::GetHD3D(u64 hash)
 {
     auto it = HD3D.find(hash);
-    if (it != HD3D.end()) return it->second.Valid ? it->second.Tex : 0;
-    HD3DEntry e {0, false};
+    if (it != HD3D.end()) { it->second.LastUse = HD3DFrame; return it->second.Valid ? it->second.Tex : 0; }
+    HD3DEntry e {0, false, HD3DFrame};
     char name[40]; snprintf(name, sizeof(name), "tex3d/%016llx", (unsigned long long)hash);
     std::vector<u8> rgba; int w = 0, h = 0;
     if (WC09::LoadHDImage(name, rgba, w, h) && w > 0 && h > 0)
@@ -527,6 +527,19 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
     u32 curtexlayer = (u32)-1;
     GLuint curhd = 0; int curhdmode = 0;
     const bool hdon = WC09::IsActive() && WC09::GetHDCardsEnabled();
+    // keep GPU memory in check: drop HD textures not used for a while (they reload when needed)
+    if (++HD3DFrame % 60 == 0 && HD3D.size() > 128)
+    {
+        for (auto it = HD3D.begin(); it != HD3D.end();)
+        {
+            if (HD3DFrame - it->second.LastUse > 300)
+            {
+                if (it->second.Valid) glDeleteTextures(1, &it->second.Tex);
+                it = HD3D.erase(it);
+            }
+            else ++it;
+        }
+    }
 
     for (int i = 0; i < npolys; i++)
     {
