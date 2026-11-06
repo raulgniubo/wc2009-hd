@@ -51,11 +51,11 @@ bool Indexed = false;
 const u8* IndexedROM = nullptr;
 
 std::vector<std::string> CardNames, CardDescs;
-std::vector<int> CardAtk, CardDef;   // printed values, -1 if none
+std::vector<int> CardAtk, CardDef, CardLevel;   // printed values
 
 void LoadCardText(const u8* rom, u32 len)
 {
-    CardNames.clear(); CardDescs.clear(); CardAtk.clear(); CardDef.clear();
+    CardNames.clear(); CardDescs.clear(); CardAtk.clear(); CardDef.clear(); CardLevel.clear();
     FileRef ref;
     if (!FindFile(rom, len, "Data_arc_pac/bin2.pac", ref)) return;
     const u8* pac = rom + ref.Start;
@@ -70,7 +70,9 @@ void LoadCardText(const u8* rom, u32 len)
             for (u32 i = 0; (i + 1) * 8 <= e.Size; i++)
             {
                 u32 p0 = RD32(pac + e.Start + i * 8);
+                u32 p1 = RD32(pac + e.Start + i * 8 + 4);
                 CardAtk.push_back(((p0 >> 14) & 0x1FF) * 10); CardDef.push_back(((p0 >> 23) & 0x1FF) * 10);
+                CardLevel.push_back((p1 >> 10) & 0xF);
             }
     }
     if (!indx || !names || !descs) return;
@@ -328,9 +330,9 @@ namespace
 // Glyph shapes are learned from cards whose shown values equal the printed ones, then any
 // value can be read back and drawn in HD.
 std::unordered_map<u64, int> GlyphDigit;   // glyph hash -> digit, -2 = conflicting
-struct StatPanel { int Card, Atk, Def; bool Bubble; };
+struct StatPanel { int Card, Atk, Def; bool Bubble; int Level, BX, BY; };
 std::map<int, StatPanel> StatPanels;
-std::map<std::tuple<int, int, int, bool>, int> StatPanelIds;
+std::map<std::tuple<int, int, int, bool, int, int, int>, int> StatPanelIds;
 int NextStatPanel = kStatPanelBase;
 
 // Reads the two numbers at screen rows y0..y0+h, x0..x1 of a 4-bit text layer.
@@ -421,26 +423,141 @@ bool ReadStats(GPU& gpu, int engine, int bg, int card, int x0, int x1, int y0, i
 }
 }
 
-bool GetStatPanel(int image, int& card, int& atk, int& def, bool& bubble)
+bool GetStatPanel(int image, StatPanelInfo& out)
 {
     std::lock_guard<std::mutex> lk(Lock);
     auto it = StatPanels.find(image);
     if (it == StatPanels.end()) return false;
-    card = it->second.Card; atk = it->second.Atk; def = it->second.Def; bubble = it->second.Bubble;
+    const StatPanel& p = it->second;
+    out = {p.Card, p.Atk, p.Def, p.Bubble, p.Level, p.BX, p.BY};
     return true;
 }
 
 namespace
 {
 RectHide DetailBadge[2];
+std::atomic<u64> BadgeSeen[2];             // frame + 1 when the badge was last hidden
+std::atomic<int> BadgeX0[2], BadgeY0[2], BadgeX1[2], BadgeY1[2];
 }
 
 bool HideSprite(int engine, int x, int y, int w, int h)
 {
     const RectHide& r = DetailBadge[engine & 1];
     if (!r.On || w > 16 || h > 16) return false;
-    // the level badge the game puts on the card's top-right corner (the HD card shows its stars)
-    return x >= r.X0 + 50 && x + w <= r.X1 + 6 && y >= r.Y0 + 4 && y + h <= r.Y0 + 34;
+    // the level badge the game puts on the card's top-right corner: redrawn in HD by the panel
+    if (!(x >= r.X0 + 50 && x + w <= r.X1 + 6 && y >= r.Y0 + 4 && y + h <= r.Y0 + 34)) return false;
+    int e = engine & 1;
+    u64 now = VBlankCount.load() + 1;
+    if (BadgeSeen[e].load() != now)
+    {
+        BadgeSeen[e] = now;
+        BadgeX0[e] = x; BadgeY0[e] = y; BadgeX1[e] = x + w; BadgeY1[e] = y + h;
+    }
+    else
+    {
+        BadgeX0[e] = std::min(BadgeX0[e].load(), x); BadgeY0[e] = std::min(BadgeY0[e].load(), y);
+        BadgeX1[e] = std::max(BadgeX1[e].load(), x + w); BadgeY1[e] = std::max(BadgeY1[e].load(), y + h);
+    }
+    return true;
+}
+
+namespace
+{
+bool TextLayer[2][4];
+struct TextCacheEntry { u64 Key = 0; bool Text = false; };
+TextCacheEntry TextCache[2][4];
+
+// A text layer uses only palette entries 1..15 of a few 16-colour groups, each group a ramp
+// whose brightest channel climbs from near black (1) to bright (15), and several ramp steps
+// (anti-aliasing). Pictures never look like that.
+bool DetectTextLayer(GPU& gpu, int engine, int bg)
+{
+    const GPU2D& u = engine == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+    u16 cnt = u.BGCnt[bg];
+    bool bpp8 = cnt & 0x80;
+    if (bpp8 && (u.DispCnt & (1u << 30))) return false;     // extended palettes: not handled
+    u32 charBase = ((cnt >> 2) & 0xF) * 0x4000, scrBase = ((cnt >> 8) & 0x1F) * 0x800;
+    if (engine == 0) { charBase += ((u.DispCnt >> 24) & 7) * 0x10000; scrBase += ((u.DispCnt >> 27) & 7) * 0x10000; }
+    int mapW = (cnt >> 14) & 1 ? 64 : 32, mapH = (cnt >> 14) & 2 ? 64 : 32;
+    int sx0 = u.BGXPos[bg] & 0x1FF, sy0 = u.BGYPos[bg] & 0x1FF;
+    const u8* pal = &gpu.Palette[engine * 0x400];
+
+    // visible map entries (and the palette) decide; cache on them
+    static u16 ents[33 * 25];
+    int ne = 0;
+    for (int ty = 0; ty < 25; ty++)
+        for (int tx = 0; tx < 33; tx++)
+        {
+            int mx = ((sx0 >> 3) + tx) & (mapW - 1), my = ((sy0 >> 3) + ty) & (mapH - 1);
+            u32 block = (mx >> 5) + ((my >> 5) * (mapW >> 5));
+            ents[ne++] = ReadBG(gpu, engine, scrBase + block * 0x800 + (((my & 31) * 32 + (mx & 31)) * 2));
+        }
+    // unique tiles and their pixels (the game writes text into the tile data, not the map)
+    static u16 tiles[1024], banks[1024];
+    static u8 data[1024 * 64];
+    int nt = 0;
+    u32 bytes = bpp8 ? 64 : 32;
+    for (int i = 0; i < ne; i++)
+    {
+        u16 t = ents[i] & 0x3FF, bank = bpp8 ? 0 : (ents[i] >> 12);
+        bool dup = false;
+        for (int k = 0; k < nt && !dup; k++) dup = tiles[k] == t && banks[k] == bank;
+        if (dup) continue;
+        if (nt == 1024) return false;
+        tiles[nt] = t; banks[nt] = bank;
+        for (u32 b = 0; b < bytes; b += 2)
+        {
+            u16 two = ReadBG(gpu, engine, charBase + t * bytes + b);
+            data[nt * bytes + b] = two & 0xFF; data[nt * bytes + b + 1] = two >> 8;
+        }
+        nt++;
+    }
+    u64 key = XXH64(data, nt * bytes, cnt) ^ (XXH64(tiles, nt * 2, 7) * 31) ^ (XXH64(banks, nt * 2, 9) * 17) ^ (XXH64(pal, 512, 1) * 131);
+    TextCacheEntry& c = TextCache[engine][bg];
+    if (c.Key == key) return c.Text;
+    c.Key = key; c.Text = false;
+
+    u32 used[16] = {};          // per group: bit k = index k used
+    for (int n = 0; n < nt; n++)
+        for (u32 b = 0; b < bytes; b++)
+        {
+            u8 v = data[n * bytes + b];
+            for (int k = 0; k < (bpp8 ? 1 : 2); k++)
+            {
+                u32 idx = bpp8 ? v : ((v >> (4 * k)) & 0xF);
+                if (!idx) continue;
+                u32 g = bpp8 ? idx >> 4 : banks[n];
+                if ((idx & 15) == 0) return false;
+                used[g] |= 1u << (idx & 15);
+            }
+        }
+    int groups = 0, steps = 0;
+    for (int g = 0; g < 16; g++)
+    {
+        if (!used[g]) continue;
+        if (++groups > 4) return false;
+        steps = std::max(steps, __builtin_popcount(used[g]));
+        int prev = -1, lo = 0, hi = 0;
+        for (int k = 1; k < 16; k++)
+        {
+            u16 col = pal[(g * 16 + k) * 2] | (pal[(g * 16 + k) * 2 + 1] << 8);
+            int m = std::max({col & 31, (col >> 5) & 31, (col >> 10) & 31});
+            if (k == 1) lo = m;
+            if (k == 15) hi = m;
+            if (m + 2 < prev) return false;     // must climb (small wobble allowed)
+            prev = m;
+        }
+        if (lo > 10 || hi < 24) return false;
+    }
+    c.Text = groups > 0 && steps >= 6;
+    return c.Text;
+}
+}
+
+bool IsTextLayer(int engine, int bg)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    return TextLayer[engine & 1][bg & 3];
 }
 
 void OnVBlankBattle(GPU& gpu)
@@ -467,6 +584,26 @@ void OnVBlankBattle(GPU& gpu)
                     printf("OAM %c%d x %d y %d a0 %04x a1 %04x a2 %04x\n", 'A' + e, k, x, y, a[0], a[1], a[2]);
                 }
     }
+    // debug: WC09_DUMP=<file> writes BG/OBJ VRAM, palettes, OAM and registers every 2 seconds
+    if (const char* dd = getenv("WC09_DUMP"); dd && *dd && VBlankCount % 120 == 0)
+        if (FILE* f = fopen(dd, "wb"))
+        {
+            for (u32 a = 0; a < 0x80000; a += 2) { u16 v = gpu.ReadVRAM_ABG<u16>(a); fwrite(&v, 2, 1, f); }
+            for (u32 a = 0; a < 0x20000; a += 2) { u16 v = gpu.ReadVRAM_BBG<u16>(a); fwrite(&v, 2, 1, f); }
+            for (u32 a = 0; a < 0x40000; a += 2) { u16 v = gpu.ReadVRAM_AOBJ<u16>(a); fwrite(&v, 2, 1, f); }
+            for (u32 a = 0; a < 0x20000; a += 2) { u16 v = gpu.ReadVRAM_BOBJ<u16>(a); fwrite(&v, 2, 1, f); }
+            fwrite(gpu.Palette, 1, sizeof(gpu.Palette), f);
+            fwrite(gpu.OAM, 1, sizeof(gpu.OAM), f);
+            for (int e = 0; e < 2; e++)
+            {
+                const GPU2D& u = e == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+                u32 regs[16] = {u.DispCnt, u.BGCnt[0], u.BGCnt[1], u.BGCnt[2], u.BGCnt[3],
+                                u.BGXPos[0], u.BGYPos[0], u.BGXPos[1], u.BGYPos[1], u.BGXPos[2], u.BGYPos[2],
+                                u.BGXPos[3], u.BGYPos[3], u.BlendCnt, (u32)(u.EVA | (u.EVB << 8)), (u32)gpu.ScreenSwap};
+                fwrite(regs, 4, 16, f);
+            }
+            fclose(f);
+        }
     BGReplacement found[2][4];
     if (IsActive() && GetHDCardsEnabled())
     {
@@ -710,13 +847,22 @@ void OnVBlankBattle(GPU& gpu)
             rep.OriginX = kPanelX; rep.OriginY = kPanelY; rep.Width = kPanelW;
             rep.Height = bubble ? kPanelShortH : kPanelH;
 
-            // ATK/DEF under the card: read them back and draw them in HD too (bigger panel
-            // that also covers that row; transparent parts show the original layer)
-            int atk, def;
-            if (ReadStats(gpu, q.Engine, textBG, q.Card, 4, 96, kStatsY, kStatsH, atk, def))
+            // ATK/DEF under the card read back and drawn in HD (-1: not readable, the game's own
+            // digits show), and the level badge redrawn on its corner. One bigger panel; its
+            // fully transparent parts show the game's layer.
+            int atk = -1, def = -1;
+            if (!ReadStats(gpu, q.Engine, textBG, q.Card, 4, 96, kStatsY, kStatsH, atk, def)) atk = def = -1;
+            int level = 0, bx = 0, by = 0;
+            u64 seen = BadgeSeen[q.Engine].load();
+            if (seen && VBlankCount.load() + 1 - seen < 10 && q.Card < (int)CardLevel.size() && CardLevel[q.Card] > 0)
+            {
+                level = CardLevel[q.Card];
+                // centred on the HD card's own star row, right-aligned with it
+                bx = q.X[0] + 82; by = q.Y[0] + 19;
+            }
             {
                 std::lock_guard<std::mutex> lk2(Lock);
-                auto key = std::make_tuple(q.Card, atk, def, bubble);
+                auto key = std::make_tuple(q.Card, atk, def, bubble, level, bx, by);
                 auto it = StatPanelIds.find(key);
                 int id;
                 if (it != StatPanelIds.end()) id = it->second;
@@ -725,7 +871,7 @@ void OnVBlankBattle(GPU& gpu)
                     if (StatPanels.size() > 256) { StatPanels.clear(); StatPanelIds.clear(); }
                     id = NextStatPanel++;
                     if (NextStatPanel >= kStatPanelBase + 400000) NextStatPanel = kStatPanelBase;
-                    StatPanels[id] = {q.Card, atk, def, bubble};
+                    StatPanels[id] = {q.Card, atk, def, bubble, level, bx, by};
                     StatPanelIds[key] = id;
                 }
                 rep.Image = id;
@@ -744,10 +890,31 @@ void OnVBlankBattle(GPU& gpu)
         for (int b = 0; b < 4; b++)
             if (found[e][b].Image >= 0 && found[e][b].Image < kTextPanelBase && !IsCardImage(found[e][b].Image) && !IsCardSet(found[e][b].Image)) onScreen[(e == 0) == gpu.ScreenSwap ? 0 : 1] = true;
 
+    bool textLayer[2][4] = {};
+    if (IsActive() && GetHDTextEnabled())
+        for (int e = 0; e < 2; e++)
+        {
+            const GPU2D& u = e == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+            if (((u.DispCnt >> 16) & 3) != 1) continue;
+            u32 mode = u.DispCnt & 7;
+            for (int b = 0; b < 4; b++)
+            {
+                if (!(u.DispCnt & (1 << (8 + b))) || found[e][b].Image >= 0) continue;
+                if (e == 0 && b == 0 && (u.DispCnt & (1 << 3))) continue;
+                bool text = b < 2 || (b == 2 && mode <= 1) || (b == 3 && mode == 0);
+                if (text) textLayer[e][b] = DetectTextLayer(gpu, e, b);
+            }
+        }
+
     std::lock_guard<std::mutex> lk(Lock);
     OnScreen[0] = onScreen[0]; OnScreen[1] = onScreen[1];
-    DetailBadge[0] = detailBadge[0]; DetailBadge[1] = detailBadge[1];
     static const bool debug = getenv("WC09_DEBUG") != nullptr;
+    for (int e = 0; e < 2; e++) for (int b = 0; b < 4; b++)
+    {
+        if (debug && TextLayer[e][b] != textLayer[e][b]) printf("WC09 text layer: engine %d bg %d %s\n", e, b, textLayer[e][b] ? "on" : "off");
+        TextLayer[e][b] = textLayer[e][b];
+    }
+    DetailBadge[0] = detailBadge[0]; DetailBadge[1] = detailBadge[1];
     for (int e = 0; e < 2; e++) for (int b = 0; b < 4; b++)
     {
         if (debug && found[e][b].Image != Current[e][b].Image)

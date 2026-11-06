@@ -53,6 +53,8 @@ def add_tree(hd, dupfile, flat=None, scale=0.75):
         for name, canon in json.load(open(dupfile)).items():
             if name != canon and canon in done and name not in done:
                 _w(f'HDCards/{name}.png', done[canon]); done[name] = done[canon]; n += 1
+# redesigned UI first: it replaces upscaled versions of the same textures
+add_tree(f'{SRC}/ui_hd', '', scale=1.0)
 add_tree(f'{SRC}/menu_hd', f'{SRC}/menu_dups.json')
 add_tree(f'{SRC}/spr_hd', f'{SRC}/spr_dups.json')
 add_tree(f'{SRC}/menu4_hd', f'{SRC}/menu4_png_dups.json')

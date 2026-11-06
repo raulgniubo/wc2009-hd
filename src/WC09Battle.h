@@ -45,11 +45,16 @@ constexpr int kPanelShortH = 123;
 // rows kStatsY..+kStatsH under the card.
 constexpr int kStatPanelBase = 1600000;
 constexpr int kStatsY = 137, kStatsH = 12;
-bool GetStatPanel(int image, int& card, int& atk, int& def, bool& bubble);
+struct StatPanelInfo { int Card, Atk, Def; bool Bubble; int Level, BadgeRight, BadgeMidY; };   // Atk -1: unknown, Level 0: no badge
+bool GetStatPanel(int image, StatPanelInfo& out);
 
 // Sprites hidden because the HD card already shows them (the level badge on the card view).
 struct RectHide { bool On = false; int X0 = 0, Y0 = 0, X1 = 0, Y1 = 0; };
 bool HideSprite(int engine, int x, int y, int w, int h);
+
+// Background layers holding anti-aliased game text (colour ramps from a dark outline to a bright
+// fill): the compositor redraws them as smooth shapes instead of upscaled pixels.
+bool IsTextLayer(int engine, int bg);
 
 // Deck editor / card lists: HD description (id = base + card*2) and name (+1) on the top screen.
 constexpr int kDeckTextBase = 1500000;

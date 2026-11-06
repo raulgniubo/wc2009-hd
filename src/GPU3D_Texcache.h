@@ -192,6 +192,8 @@ public:
             helper = &it->second.LastVariant;
             LastContentHash = it->second.ContentHash;
             LastCard = it->second.Card;
+            LastAlphaHash = it->second.AlphaHash;
+            LastHalfHash = it->second.HalfHash;
             LastNewPixels = nullptr;
             return;
         }
@@ -268,6 +270,27 @@ public:
         // WC09: hash of the decoded texels, independent of where the texture sits in VRAM
         entry.ContentHash = XXH64(DecodingBuffer, (size_t)width * height * 4, ((u64)width << 16) | height);
         LastContentHash = entry.ContentHash;
+        // WC09: structure hash, the same for any recolouring (palette swaps, pulsing colours):
+        // each texel becomes the order in which its colour first appeared (0 = transparent)
+        {
+            static u16 ids[1024 * 1024];
+            static std::unordered_map<u32, u16> seen;
+            seen.clear();
+            u32 n = width * height;
+            for (u32 i = 0; i < n; i++)
+            {
+                u32 c = DecodingBuffer[i];
+                if (!(c >> 24)) { ids[i] = 0; continue; }
+                auto it = seen.find(c);
+                if (it == seen.end()) it = seen.emplace(c, (u16)(seen.size() + 1)).first;
+                ids[i] = it->second;
+            }
+            entry.AlphaHash = XXH64(ids, n * 2, ((u64)width << 16) | height);
+            // top half only: textures whose unused bottom rows hold leftovers from other data
+            entry.HalfHash = XXH64(ids, n, ((u64)width << 16) | height | (1ull << 40));
+        }
+        LastHalfHash = entry.HalfHash;
+        LastAlphaHash = entry.AlphaHash;
         // WC09: card faces are identified by their raw tex4x4 texel words (see WC09Cards)
         entry.Card = -1;
         if (fmt == 5 && width == height && (width == 128 || width == 64 || width == 32))
@@ -287,7 +310,7 @@ public:
         if (entry.TexPalSize)
             entry.TexPalHash = MaskedHash(GPU.VRAMFlat_TexPal, sizeof(GPU.VRAMFlat_TexPal),
                 entry.TexPalStart, entry.TexPalSize);
-        if (const char* dump = getenv("WC09_DUMP3D"))
+        if (const char* dump = getenv("WC09_DUMP3D"); dump && *dump)
         {
             char fn[512]; snprintf(fn, sizeof(fn), "%s/%016llx_%dx%d_f%d_%016llx.rgb6a5", dump, (unsigned long long)entry.ContentHash,
                                    width, height, fmt, (unsigned long long)entry.TextureHash[0]);
@@ -365,8 +388,10 @@ private:
         u64 TexPalHash {};
         u64 ContentHash {};
         int Card = -1;
+        u64 AlphaHash {}, HalfHash {};
     };
 public:
+    u64 LastAlphaHash = 0, LastHalfHash = 0;   // WC09: structure hashes (whole / top half)
     int LastCard = -1;                // WC09 card index of that texture, -1 if not a card face
     const u32* LastNewPixels = nullptr;   // decoded texels (RGB6A5) if that call created the entry
     u64 LastContentHash = 0;   // content hash of the texture returned by the last GetTexture

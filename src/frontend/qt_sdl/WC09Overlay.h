@@ -16,6 +16,7 @@
 #include <array>
 
 #include "WC09Cards.h"
+#include "WC09Battle.h"
 
 namespace melonDS { class NDS; }
 
@@ -50,7 +51,7 @@ public:
     // deck editor detail view: description (or the name) as outlined text on transparent
     static QImage renderDeckText(int card, float scale, bool nameOnly);
     // duel card view panel plus the ATK/DEF row under the card
-    static QImage renderStatPanel(int card, int atk, int def, bool bubble, float scale);
+    static QImage renderStatPanel(const melonDS::WC09::StatPanelInfo& info, float scale);
 
 private:
     int panelCard = -1; int panelScale = 0; QImage panelImg;

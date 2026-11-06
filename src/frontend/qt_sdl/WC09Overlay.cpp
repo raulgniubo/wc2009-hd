@@ -56,9 +56,9 @@ void WC09Overlay::update(NDS* nds, const QString& romPath)
             QImage img;
             if (n.startsWith("statpanel/"))
             {
-                int card, atk, def; bool bubble;
-                if (WC09::GetStatPanel(n.mid(10).toInt(), card, atk, def, bubble))
-                    img = WC09Overlay::renderStatPanel(card, atk, def, bubble, 8.f);
+                WC09::StatPanelInfo info;
+                if (WC09::GetStatPanel(n.mid(10).toInt(), info))
+                    img = WC09Overlay::renderStatPanel(info, 8.f);
             }
             else if (n.startsWith("decktext/") || n.startsWith("deckname/"))
                 img = WC09Overlay::renderDeckText(n.mid(9).toInt(), 8.f, n.startsWith("deckname/"));
@@ -320,10 +320,11 @@ QImage WC09Overlay::renderDeckText(int card, float k, bool nameOnly)
     return img;
 }
 
-QImage WC09Overlay::renderStatPanel(int card, int atk, int def, bool bubble, float k)
+QImage WC09Overlay::renderStatPanel(const WC09::StatPanelInfo& info, float k)
 {
-    // the usual text panel at x = kPanelX, plus ATK/DEF on a small plate under the card
-    QImage panel = renderTextPanel(card, k, bubble ? WC09::kPanelShortH : WC09::kPanelH);
+    // the usual text panel at x = kPanelX, plus ATK/DEF on a small plate under the card and the
+    // level badge on the card's corner
+    QImage panel = renderTextPanel(info.Card, k, info.Bubble ? WC09::kPanelShortH : WC09::kPanelH);
     if (panel.isNull()) return panel;
     const int W = WC09::kPanelX + WC09::kPanelW, H = WC09::kStatsY + WC09::kStatsH - WC09::kPanelY;
     QImage img((int)std::ceil(W * k), (int)std::ceil(H * k), QImage::Format_RGBA8888_Premultiplied);
@@ -331,24 +332,64 @@ QImage WC09Overlay::renderStatPanel(int card, int atk, int def, bool bubble, flo
     QPainter p(&img);
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setRenderHint(QPainter::TextAntialiasing, true);
-    // alpha 0 = show the game's layer (left of the panel, the ATK/DEF row), faint alpha =
-    // hide it (the panel area, as before: the game's own text and icons stay hidden there)
+    // alpha 0 = show the game's layer (left of the panel, the ATK/DEF row when unknown), faint
+    // alpha = hide it (the panel area, as before: the game's own text and icons stay hidden)
     p.fillRect(QRectF(WC09::kPanelX * k, 0, WC09::kPanelW * k, panel.height()), QColor(0, 0, 0, 77));
     p.drawImage(QPointF(WC09::kPanelX * k, 0), panel);
     p.scale(k, k);
-    const float y0 = WC09::kStatsY - WC09::kPanelY;
-    QPainterPath plate; plate.addRoundedRect(QRectF(13, y0 - 0.5, 84, WC09::kStatsH + 1), 3, 3);
-    p.fillPath(plate, QColor(14, 26, 56));
-    p.setPen(QPen(QColor(140, 190, 255, 230), 0.7)); p.drawPath(plate);
-    p.resetTransform();
+    const QColor fill(14, 26, 56), edge(140, 190, 255, 230);
     QFont f = QFontDatabase::systemFont(QFontDatabase::GeneralFont); f.setBold(true);
-    f.setPixelSize(std::max(1, (int)std::lround(10.5f * k)));
-    p.setFont(f);
-    QRectF ra(14 * k, (y0 - 0.5f) * k, 31 * k, (WC09::kStatsH + 1) * k);
-    QRectF rd(64 * k, (y0 - 0.5f) * k, 31 * k, (WC09::kStatsH + 1) * k);
-    p.setPen(QColor(255, 255, 255));
-    p.drawText(ra, Qt::AlignRight | Qt::AlignVCenter, QString::number(atk));
-    p.drawText(rd, Qt::AlignLeft | Qt::AlignVCenter, QString::number(def));
+
+    if (info.Atk >= 0)
+    {
+        const float y0 = WC09::kStatsY - WC09::kPanelY;
+        QPainterPath plate; plate.addRoundedRect(QRectF(13, y0 - 0.5, 84, WC09::kStatsH + 1), 3, 3);
+        p.fillPath(plate, fill);
+        p.setPen(QPen(edge, 0.7)); p.drawPath(plate);
+        p.save(); p.resetTransform();
+        f.setPixelSize(std::max(1, (int)std::lround(10.5f * k)));
+        p.setFont(f);
+        QRectF ra(14 * k, (y0 - 0.5f) * k, 31 * k, (WC09::kStatsH + 1) * k);
+        QRectF rd(64 * k, (y0 - 0.5f) * k, 31 * k, (WC09::kStatsH + 1) * k);
+        p.setPen(QColor(255, 255, 255));
+        p.drawText(ra, Qt::AlignRight | Qt::AlignVCenter, QString::number(info.Atk));
+        p.drawText(rd, Qt::AlignLeft | Qt::AlignVCenter, QString::number(info.Def));
+        p.restore();
+    }
+
+    if (info.Level > 0)
+    {
+        // "★ 4" on a rounded plate, right edge where the game's badge ended
+        f.setPixelSize(std::max(1, (int)std::lround(9.5f * k)));
+        QString num = QString::number(info.Level);
+        float tw = QFontMetricsF(f).horizontalAdvance(num) / k;
+        const float h = 12.f, star = 8.5f, pad = 2.5f;
+        // wide enough to cover the card's printed stars (about 6.6 px each at this size)
+        float w = std::max(pad + star + 1.5f + tw + pad + 0.5f, info.Level * 6.6f + 3.f);
+        float x1 = info.BadgeRight + 1.f, x0 = x1 - w;
+        float yc = info.BadgeMidY - WC09::kPanelY, y0 = yc - h / 2;
+        QPainterPath plate; plate.addRoundedRect(QRectF(x0, y0, w, h), 3.5, 3.5);
+        p.fillPath(plate, fill);
+        p.setPen(QPen(edge, 0.7)); p.drawPath(plate);
+        // five-pointed star
+        QPainterPath sp;
+        float gx = x0 + (w - (star + 2.f + tw)) / 2;   // star and number centred together
+        float cx = gx + star / 2, cy = yc, ro = star / 2, ri = ro * 0.45f;
+        for (int i = 0; i < 10; i++)
+        {
+            float a = -M_PI / 2 + i * M_PI / 5, r = (i & 1) ? ri : ro;
+            QPointF pt(cx + r * std::cos(a), cy + r * std::sin(a));
+            if (i == 0) sp.moveTo(pt); else sp.lineTo(pt);
+        }
+        sp.closeSubpath();
+        QLinearGradient g(cx, cy - ro, cx, cy + ro);
+        g.setColorAt(0, QColor(255, 236, 140)); g.setColorAt(1, QColor(240, 160, 30));
+        p.setPen(QPen(QColor(120, 60, 0), 0.5)); p.setBrush(g); p.drawPath(sp);
+        p.save(); p.resetTransform();
+        p.setFont(f); p.setPen(QColor(255, 255, 255));
+        p.drawText(QRectF((gx + star + 2.f) * k, y0 * k, (tw + 2) * k, h * k), Qt::AlignLeft | Qt::AlignVCenter, num);
+        p.restore();
+    }
     p.end();
     return img;
 }

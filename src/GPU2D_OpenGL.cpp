@@ -175,6 +175,7 @@ bool GLRenderer2D::InitShaders()
         CompositorHDMirrorULoc[i] = glGetUniformLocation(CompositorShader, ("uHDMirror[" + n + "]").c_str());
         CompositorHDScreenULoc[i] = glGetUniformLocation(CompositorShader, ("uHDScreen[" + n + "]").c_str());
         CompositorHDFallbackULoc[i] = glGetUniformLocation(CompositorShader, ("uHDFallback[" + n + "]").c_str());
+        CompositorTextSmoothULoc[i] = glGetUniformLocation(CompositorShader, ("uTextSmooth[" + n + "]").c_str());
         GLint t = glGetUniformLocation(CompositorShader, ("HDTex[" + n + "]").c_str());
         glUseProgram(CompositorShader);
         glUniform1i(t, 8 + i);
@@ -226,6 +227,7 @@ bool GLRenderer2D::InitShaders(GLRenderer2D& other)
         CompositorHDMirrorULoc[i] = other.CompositorHDMirrorULoc[i];
         CompositorHDScreenULoc[i] = other.CompositorHDScreenULoc[i];
         CompositorHDFallbackULoc[i] = other.CompositorHDFallbackULoc[i];
+        CompositorTextSmoothULoc[i] = other.CompositorTextSmoothULoc[i];
     }
 
     MosaicTex = other.MosaicTex;
@@ -2074,6 +2076,7 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
             glUniform1i(CompositorHDMirrorULoc[i], reps[i].Mirror ? 1 : 0);
             glUniform1i(CompositorHDScreenULoc[i], reps[i].ScreenSpace ? 1 : 0);
             glUniform1i(CompositorHDFallbackULoc[i], reps[i].Fallback ? 1 : 0);
+            glUniform1i(CompositorTextSmoothULoc[i], (!texs[i] && WC09::GetHDTextEnabled() && WC09::IsTextLayer(GPU2D.Num, i)) ? 1 : 0);
         }
     }
     glActiveTexture(GL_TEXTURE0);

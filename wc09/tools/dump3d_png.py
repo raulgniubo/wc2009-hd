@@ -6,7 +6,7 @@ src, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
 items = []
 for f in sorted(os.listdir(src)):
-    m = re.match(r'([0-9a-f]{16})_(\d+)x(\d+)\.rgb6a5$', f)
+    m = re.match(r'([0-9a-f]{16})_(\d+)x(\d+)(?:_f\d+_[0-9a-f]+)?\.rgb6a5$', f)
     if not m: continue
     h, w, hh = m.group(1), int(m.group(2)), int(m.group(3))
     d = open(f'{src}/{f}', 'rb').read()

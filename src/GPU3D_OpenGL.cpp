@@ -117,14 +117,28 @@ GLuint GLRenderer3D::UploadHD3D(const u8* rgba, int w, int h)
     return tex;
 }
 
-GLuint GLRenderer3D::GetHD3D(u64 hash)
+GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash)
 {
     auto it = HD3D.find(hash);
     if (it != HD3D.end()) { it->second.LastUse = HD3DFrame; return it->second.Valid ? it->second.Tex : 0; }
     HD3DEntry e {0, false, HD3DFrame};
     char name[40]; snprintf(name, sizeof(name), "tex3d/%016llx", (unsigned long long)hash);
     std::vector<u8> rgba; int w = 0, h = 0;
-    if (WC09::LoadHDImage(name, rgba, w, h) && w > 0 && h > 0)
+    // redesigned pictures first (they apply to every colour variant): tex3d/s_<structure hash>,
+    // tex3d/h_<structure hash of the top half>; then the exact texture: tex3d/<content hash>
+    bool ok = false;
+    if (alphaHash)
+    {
+        char an[40]; snprintf(an, sizeof(an), "tex3d/s_%016llx", (unsigned long long)alphaHash);
+        ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
+    }
+    if (!ok && halfHash)
+    {
+        char an[40]; snprintf(an, sizeof(an), "tex3d/h_%016llx", (unsigned long long)halfHash);
+        ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
+    }
+    if (!ok) ok = WC09::LoadHDImage(name, rgba, w, h) && w > 0 && h > 0;
+    if (ok)
     {
         e.Tex = UploadHD3D(rgba.data(), w, h);
         e.Valid = true;
@@ -717,7 +731,7 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
                     }
                     else
                     {
-                        curhd = hdon ? GetHD3D(Texcache.LastContentHash) : 0;
+                        curhd = hdon ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash) : 0;
                         curhdmode = (textype == 1 || textype == 6) ? 2 : 1;
                     }
                 }
@@ -736,6 +750,15 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
         rp->TexID = curtexid;
         rp->HDTex = (curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF) ? curhd : 0;
         rp->HDMode = curhdmode;
+        if (static const char* dbg = getenv("WC09_TEXDBG"); dbg && *dbg && curtexlayer != (u32)-1 &&
+            (curtexlayer >> 16) == 0xFFFF && Texcache.LastContentHash == strtoull(dbg, nullptr, 16))
+        {
+            printf("TEX poly %d:", i);
+            for (u32 v = 0; v < poly->NumVertices; v++)
+                printf(" (%d,%d uv %.2f,%.2f a%d)", poly->Vertices[v]->FinalPosition[0], poly->Vertices[v]->FinalPosition[1],
+                       poly->Vertices[v]->TexCoords[0] / 16.f, poly->Vertices[v]->TexCoords[1] / 16.f, poly->Attr >> 16 & 31);
+            printf("\n");
+        }
         rp->TexRepeat = (poly->TexParam >> 16) & 0xF;
 
         // assemble vertices
