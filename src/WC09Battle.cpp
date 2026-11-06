@@ -466,6 +466,7 @@ namespace
 bool TextLayer[2][4];
 std::vector<u8> TextMask[2][4];      // 64x64 map tiles, 255 = text tile
 u32 TextMaskGen[2][4];
+bool TextOutlined[2][4];
 struct TextCacheEntry { u64 Key = 0; bool Text = false; };
 TextCacheEntry TextCache[2][4];
 
@@ -537,46 +538,57 @@ bool DetectTextLayer(GPU& gpu, int engine, int bg)
                 used[bpp8 ? idx >> 4 : banks[n]] |= 1u << (idx & 15);
             }
         }
-    u16 ramp = 0;
+    u16 ramp = 0; int dirSum = 0;
     for (int g = 0; g < 16; g++)
     {
         if (!used[g] || (used[g] & 1) || __builtin_popcount(used[g]) < 6) continue;
-        int prev = -1, lo = 0, hi = 0; bool ok = true;
+        // brightness must move one way along the used indices (dark outline -> bright fill or the
+        // reverse), from near black to bright
+        int prev = -1, first = -1, last = -1, dir = 0; bool ok = true;
         for (int k = 1; k < 16 && ok; k++)
         {
+            if (!(used[g] & (1u << k))) continue;
             u16 col = pal[(g * 16 + k) * 2] | (pal[(g * 16 + k) * 2 + 1] << 8);
-            int m = std::max({col & 31, (col >> 5) & 31, (col >> 10) & 31});
-            if (k == 1) lo = m;
-            if (k == 15) hi = m;
-            if (m + 2 < prev) ok = false;
+            int m = ((col & 31) * 2 + ((col >> 5) & 31) * 4 + ((col >> 10) & 31)) / 7;
+            if (first < 0) first = m;
+            last = m;
+            if (prev >= 0)
+            {
+                int d = m > prev + 1 ? 1 : m < prev - 1 ? -1 : 0;
+                if (d && dir && d != dir) ok = false;
+                if (d) dir = d;
+            }
             prev = m;
         }
-        if (ok && lo <= 10 && hi >= 24) ramp |= 1 << g;
+        int lo = std::min(first, last), hi = std::max(first, last);
+        if (ok && dir && lo <= 10 && hi >= 22) { ramp |= 1 << g; dirSum += dir; }
     }
     // per tile: text when every pixel it shows comes from a ramp group
     std::vector<u8> mask(64 * 64, 0);
     int textTiles = 0;
-    std::vector<s8> tileText(nt, -1);
+    // 255 = only text pixels, 128 = text mixed with small icons (drawn with the generic mode)
+    std::vector<s16> tileText(nt, -1);
     for (int i = 0; i < ne; i++)
     {
         int n = tileOf[i];
         if (tileText[n] < 0)
         {
-            bool any = false, all = true;
-            for (u32 b = 0; b < bytes && all; b++)
+            int text = 0, other = 0;
+            for (u32 b = 0; b < bytes; b++)
             {
                 u8 v = data[n * bytes + b];
                 for (int k = 0; k < (bpp8 ? 1 : 2); k++)
                 {
                     u32 idx = bpp8 ? v : ((v >> (4 * k)) & 0xF);
                     if (!idx) continue;
-                    any = true;
-                    if (!(ramp & (1 << (bpp8 ? idx >> 4 : banks[n])))) { all = false; break; }
+                    if (ramp & (1 << (bpp8 ? idx >> 4 : banks[n]))) text++; else other++;
                 }
             }
-            tileText[n] = any && all;
+            // non-text tiles on a text layer (small icons, digits in other colours): smoothed
+            // with the generic mode too
+            tileText[n] = !text && !other ? 0 : !other ? 255 : 128;
         }
-        if (tileText[n]) { mask[pos[i]] = 255; textTiles++; }
+        if (tileText[n]) { mask[pos[i]] = (u8)tileText[n]; if (tileText[n] == 255) textTiles++; }
     }
     // a few tiles that match by chance are not text: need a real amount of it
     c.Text = textTiles >= 4;
@@ -585,6 +597,7 @@ bool DetectTextLayer(GPU& gpu, int engine, int bg)
         std::lock_guard<std::mutex> lk(Lock);
         TextMask[engine][bg].swap(mask);
         TextMaskGen[engine][bg]++;
+        TextOutlined[engine][bg] = dirSum > 0;   // dark outline, bright fill
     }
     return c.Text;
 }
@@ -596,10 +609,11 @@ bool IsTextLayer(int engine, int bg)
     return TextLayer[engine & 1][bg & 3];
 }
 
-u32 GetTextMask(int engine, int bg, std::vector<u8>& mask)
+u32 GetTextMask(int engine, int bg, std::vector<u8>& mask, bool* outlined)
 {
     std::lock_guard<std::mutex> lk(Lock);
     mask = TextMask[engine & 1][bg & 3];
+    if (outlined) *outlined = TextOutlined[engine & 1][bg & 3];
     return TextMaskGen[engine & 1][bg & 3];
 }
 

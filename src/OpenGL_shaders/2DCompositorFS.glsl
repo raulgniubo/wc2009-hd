@@ -67,7 +67,7 @@ uniform vec4 uHDRect[4];     // origin x, y and size w, h in BG pixels
 uniform bool uHDMirror[4];
 uniform bool uHDScreen[4];   // rect is in screen space (text panels)
 uniform bool uHDFallback[4]; // transparent HD pixels fall back to the original (card sets)
-uniform bool uTextSmooth[4]; // layer holds anti-aliased game text: redraw it as smooth shapes
+uniform int uTextSmooth[4];  // layer holds anti-aliased game text: 1 = dark outline + bright fill, 2 = other
 uniform sampler2D TextMask[4]; // per map tile (64x64 grid): 1 = text tile
 
 vec4 HDScreenFetch(int n, vec2 coord, int line, out bool hit)
@@ -181,10 +181,12 @@ vec4 XbrResolve(vec4 A1, vec4 B1, vec4 C1, vec4 A, vec4 B, vec4 C, vec4 D, vec4 
 // interpolated with a cubic filter and cut with smooth thresholds, which gives clean curved
 // letters at any resolution while keeping the game's exact text and colours.
 
-bool TextTile(sampler2D mask, ivec2 size, vec2 uv)
+int TextTile(sampler2D mask, ivec2 size, vec2 uv, int mode)
 {
+    // 0 = not text, else the mode for this tile (mixed text+icon tiles use the generic mode)
     ivec2 t = ivec2(floor(uv * vec2(size))) >> 3;
-    return texelFetch(mask, ivec2(t.x & 63, t.y & 63), 0).r > 0.5;
+    float m = texelFetch(mask, ivec2(t.x & 63, t.y & 63), 0).r;
+    return m > 0.75 ? mode : (m > 0.25 ? 2 : 0);
 }
 
 vec4 CatmullRom(float t)
@@ -193,13 +195,16 @@ vec4 CatmullRom(float t)
     return vec4(-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2);
 }
 
-vec4 TextFetch(sampler2D tex, ivec2 size, vec2 uv)
+vec4 TextFetch(sampler2D tex, ivec2 size, vec2 uv, int mode)
 {
+    // cubic interpolation of coverage and colour; mode 1 (dark outline, bright fill): the fill is
+    // cut from the interpolated brightness, so letters get clean curved shapes inside the outline
     vec2 pos = uv * vec2(size) - 0.5;
     ivec2 p = ivec2(floor(pos));
     vec2 f = pos - vec2(p);
     vec4 wx = CatmullRom(f.x), wy = CatmullRom(f.y);
-    float A = 0.0, F = 0.0, best = -1.0;
+    vec4 acc = vec4(0.0);
+    float F = 0.0, best = -1.0;
     vec3 hue = vec3(1.0);
     for (int j = 0; j < 4; j++)
         for (int i = 0; i < 4; i++)
@@ -207,14 +212,18 @@ vec4 TextFetch(sampler2D tex, ivec2 size, vec2 uv)
             ivec2 q = p + ivec2(i - 1, j - 1);
             vec4 c = texelFetch(tex, ivec2(q.x & (size.x - 1), q.y & (size.y - 1)), 0);
             float w = wx[i] * wy[j];
+            acc += w * vec4(c.rgb * c.a, c.a);
             float m = max(c.r, max(c.g, c.b)) * c.a;
-            A += w * c.a;
             F += w * m;
             if (i >= 1 && i <= 2 && j >= 1 && j <= 2 && m > best) { best = m; hue = c.rgb / max(m, 0.001); }
         }
-    if (A < 0.5) return vec4(0.0);
-    float fill = smoothstep(0.40, 0.62, F);
-    return vec4(mix(vec3(0.04, 0.045, 0.08), hue * 0.97, fill), 1.0);
+    if (acc.a < 0.5) return vec4(0.0);
+    if (mode == 1)
+    {
+        float fill = smoothstep(0.40, 0.62, F);
+        return vec4(mix(vec3(0.04, 0.045, 0.08), hue * 0.97, fill), 1.0);
+    }
+    return vec4(clamp(acc.rgb / acc.a, 0.0, 1.0), 1.0);
 }
 
 ivec3 ConvertColor(int col)
@@ -253,8 +262,11 @@ vec4 BG0Fetch(vec2 coord)
             if (!uHDFallback[0]) return vec4(0.0);
         }
     }
-    if (uTextSmooth[0] && uScaleFactor > 1 && uBGConfig[0].Type < 7 && TextTile(TextMask[0], uBGConfig[0].Size, coord))
-        return TextFetch(BGLayerTex[0], uBGConfig[0].Size, coord);
+    if (uTextSmooth[0] != 0 && uScaleFactor > 1 && uBGConfig[0].Type < 7)
+    {
+        int tm = TextTile(TextMask[0], uBGConfig[0].Size, coord, uTextSmooth[0]);
+        if (tm != 0) return TextFetch(BGLayerTex[0], uBGConfig[0].Size, coord, tm);
+    }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[0].Type < 7 && !uEnable3D)   // BG0 may be the hi-res 3D layer
         return XbrFetch(BGLayerTex[0], uBGConfig[0].Size, coord);
     return texture(BGLayerTex[0], coord);
@@ -274,8 +286,11 @@ vec4 BG1Fetch(vec2 coord)
             if (!uHDFallback[1]) return vec4(0.0);
         }
     }
-    if (uTextSmooth[1] && uScaleFactor > 1 && uBGConfig[1].Type < 7 && TextTile(TextMask[1], uBGConfig[1].Size, coord))
-        return TextFetch(BGLayerTex[1], uBGConfig[1].Size, coord);
+    if (uTextSmooth[1] != 0 && uScaleFactor > 1 && uBGConfig[1].Type < 7)
+    {
+        int tm = TextTile(TextMask[1], uBGConfig[1].Size, coord, uTextSmooth[1]);
+        if (tm != 0) return TextFetch(BGLayerTex[1], uBGConfig[1].Size, coord, tm);
+    }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[1].Type < 7)
         return XbrFetch(BGLayerTex[1], uBGConfig[1].Size, coord);
     return texture(BGLayerTex[1], coord);
@@ -295,8 +310,11 @@ vec4 BG2Fetch(vec2 coord)
             if (!uHDFallback[2]) return vec4(0.0);
         }
     }
-    if (uTextSmooth[2] && uScaleFactor > 1 && uBGConfig[2].Type < 7 && TextTile(TextMask[2], uBGConfig[2].Size, coord))
-        return TextFetch(BGLayerTex[2], uBGConfig[2].Size, coord);
+    if (uTextSmooth[2] != 0 && uScaleFactor > 1 && uBGConfig[2].Type < 7)
+    {
+        int tm = TextTile(TextMask[2], uBGConfig[2].Size, coord, uTextSmooth[2]);
+        if (tm != 0) return TextFetch(BGLayerTex[2], uBGConfig[2].Size, coord, tm);
+    }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[2].Type < 7)
         return XbrFetch(BGLayerTex[2], uBGConfig[2].Size, coord);
     return texture(BGLayerTex[2], coord);
@@ -316,8 +334,11 @@ vec4 BG3Fetch(vec2 coord)
             if (!uHDFallback[3]) return vec4(0.0);
         }
     }
-    if (uTextSmooth[3] && uScaleFactor > 1 && uBGConfig[3].Type < 7 && TextTile(TextMask[3], uBGConfig[3].Size, coord))
-        return TextFetch(BGLayerTex[3], uBGConfig[3].Size, coord);
+    if (uTextSmooth[3] != 0 && uScaleFactor > 1 && uBGConfig[3].Type < 7)
+    {
+        int tm = TextTile(TextMask[3], uBGConfig[3].Size, coord, uTextSmooth[3]);
+        if (tm != 0) return TextFetch(BGLayerTex[3], uBGConfig[3].Size, coord, tm);
+    }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[3].Type < 7)
         return XbrFetch(BGLayerTex[3], uBGConfig[3].Size, coord);
     return texture(BGLayerTex[3], coord);

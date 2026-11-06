@@ -2114,12 +2114,14 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
             glUniform1i(CompositorHDScreenULoc[i], reps[i].ScreenSpace ? 1 : 0);
             glUniform1i(CompositorHDFallbackULoc[i], reps[i].Fallback ? 1 : 0);
             bool textOn = (!texs[i] || reps[i].ScreenSpace) && WC09::GetHDTextEnabled() && WC09::IsTextLayer(GPU2D.Num, i);
-            glUniform1i(CompositorTextSmoothULoc[i], textOn ? 1 : 0);
+            if (!textOn) glUniform1i(CompositorTextSmoothULoc[i], 0);
             if (textOn)
             {
                 // which map tiles hold text (64x64, BG tile units)
                 static std::vector<u8> mask;
-                u32 gen = WC09::GetTextMask(GPU2D.Num, i, mask);
+                bool outlined = false;
+                u32 gen = WC09::GetTextMask(GPU2D.Num, i, mask, &outlined);
+                glUniform1i(CompositorTextSmoothULoc[i], outlined ? 1 : 2);
                 glActiveTexture(GL_TEXTURE12 + i);
                 if (!TextMaskTex[i])
                 {

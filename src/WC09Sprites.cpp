@@ -217,11 +217,12 @@ void BuildSpriteIndex(const u8* rom, u32 len)
             IndexOBJD(set + "/" + pe.Name.substr(0, pe.Name.find('.')), Unpack(rom + ref.Start + pe.Start, pe.Size));
     }
 
-    for (const char* path : {"duel2d/BustupL", "duel2d/BustupR"})
+    // Nitro cell sets (NCGR + NCER in the same .pac): portraits, coins, menu objects
+    for (const char* path : {"duel2d/BustupL", "duel2d/BustupR", "janken", "trunk", "MainMenu", "DCustom"})
     {
         FileRef ref;
         if (!FindFile(rom, len, std::string("Data_arc_pac/") + path + ".pac", ref)) continue;
-        std::string sp(path), set = sp.substr(sp.rfind('/') + 1);
+        std::string sp(path), set = sp.substr(sp.rfind('/') == std::string::npos ? 0 : sp.rfind('/') + 1);
         std::map<std::string, std::pair<const PacEntry*, const PacEntry*>> sets;
         auto ents = ParsePac(rom + ref.Start, ref.Size);
         for (const PacEntry& pe : ents)

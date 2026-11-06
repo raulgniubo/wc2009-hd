@@ -57,7 +57,7 @@ bool HideSprite(int engine, int x, int y, int w, int h);
 bool IsTextLayer(int engine, int bg);
 // Per map tile (64x64 grid, BG tile units) 255 where the tile is text; returns a generation
 // number that changes whenever the mask does.
-u32 GetTextMask(int engine, int bg, std::vector<u8>& mask);
+u32 GetTextMask(int engine, int bg, std::vector<u8>& mask, bool* outlined = nullptr);
 
 // Deck editor / card lists: HD description (id = base + card*2) and name (+1) on the top screen.
 constexpr int kDeckTextBase = 1500000;

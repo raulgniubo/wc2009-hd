@@ -14,6 +14,8 @@ the fork recognizes what the game draws and swaps in HD versions.
 | HD duelist portraits, big character figures, booster packs | Sprite tiles are indexed at load (Konami OBJD and Nitro cell sets); the sprite shader samples the upscaled image | HD cards |
 | HD 3D textures (duel field, buttons, mini monsters on the field, overworld models, effects) | Each texture the game uploads is hashed by its decoded pixels; if `HDCards/tex3d/<hash>.png` exists, the 3D renderer samples it instead | HD cards |
 | HD overworld backgrounds and map | The overworld's Nitro background screens (RPG2D_2) are indexed like the menus | HD cards |
+| Modern duel UI (phase bar, buttons, action icons, sword, highlights, alerts, list windows, rock-paper-scissors screen) | Redesigned pictures keyed by texture structure (any colour state) in `HDCards/tex3d/s_<hash>[_<hue><level>].png`, sprites in `HDCards/duel2d/`, `HDCards/janken/` | HD cards |
+| Sharp game text (alerts, menus, speech bubbles, deck lists) | Text layers and text sprites are detected by their anti-aliasing colour ramps and redrawn with cubic interpolation | HD card text |
 | Smooth 2D graphics (everything else 2D) | xBR-style edge-directed upscaling of 2D layers and sprites | Smooth 2D graphics |
 | Sharp 3D | OpenGL renderer at 4x by default | Config > Video |
 
