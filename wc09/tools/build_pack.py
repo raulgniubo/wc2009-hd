@@ -7,12 +7,12 @@ OUT = sys.argv[1]   # zip path
 z = zipfile.ZipFile(OUT, 'w', zipfile.ZIP_STORED)
 n = 0
 def add(img, arc, scale=0.75, quant=True):
-    global n
+    global n, last
     if scale != 1: img = img.resize((round(img.width*scale), round(img.height*scale)), Image.LANCZOS)
     if quant:
         img = img.convert('RGBA').quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
     b = io.BytesIO(); img.save(b, 'PNG', optimize=True)
-    z.writestr(arc, b.getvalue()); n += 1
+    last = b.getvalue(); z.writestr(arc, last); n += 1
 for s in ('1', '2'):
     d = f'{SRC}/bm_hd/R{s}'
     for f in sorted(os.listdir(d)):
@@ -27,5 +27,22 @@ if os.path.isdir(d):
     for f in sorted(os.listdir(d)):
         img = Image.open(f'{d}/{f}').convert('RGB')
         b = io.BytesIO(); img.save(b, 'JPEG', quality=92); z.writestr(f'HDCards/{f[:-4]}.jpg', b.getvalue()); n += 1
+import json
+# menus and sprites: HDCards/<set>/<name>.png, plus copies for names that share an image
+def add_tree(hd, dupfile):
+    if not os.path.isdir(hd): return
+    done = {}
+    for st in sorted(os.listdir(hd)):
+        for f in sorted(os.listdir(f'{hd}/{st}')):
+            if not f.endswith('.png'): continue
+            arc = f'HDCards/{st}/{f}'
+            add(Image.open(f'{hd}/{st}/{f}'), arc)
+            done[f'{st}/{f[:-4]}'] = last
+    if os.path.exists(dupfile):
+        for name, canon in json.load(open(dupfile)).items():
+            if name != canon and canon in done and name not in done:
+                z.writestr(f'HDCards/{name}.png', done[canon]); done[name] = done[canon]; n += 1
+add_tree(f'{SRC}/menu_hd', f'{SRC}/menu_dups.json')
+add_tree(f'{SRC}/spr_hd', f'{SRC}/spr_dups.json')
 z.close()
 print(n, 'files', os.path.getsize(OUT) // (1 << 20), 'MB')
