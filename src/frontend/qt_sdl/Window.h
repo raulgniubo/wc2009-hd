@@ -293,6 +293,7 @@ public:
     QAction* actScreenFiltering;
     QAction* actWC09HDCards;
     QAction* actWC09Smooth2D;
+    QAction* actWC09HDText;
     QAction* actShowOSD;
     QAction* actLimitFramerate;
     QAction* actAudioSync;

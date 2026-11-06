@@ -27,6 +27,7 @@ struct CardQuad
     float ClipU0, ClipV0, ClipU1, ClipV1;  // only draw the part of the face inside this rect
     u8 TexSize;        // 128, 64 (full card face), 32 (artwork only), 1 (2D BG card, 88x128)
     u8 Screen;         // 0 = top, 1 = bottom
+    s8 Engine = -1, BG = -1;   // for 2D cards: which 2D engine / background shows it
 };
 
 struct FrameCards
@@ -55,6 +56,10 @@ FrameCards GetLatest();
 // Master switch for drawing HD cards (the frontend checks it). On by default.
 void SetHDCardsEnabled(bool on);
 bool GetHDCardsEnabled();
+
+// Redraw the duel card-detail name/description in a real font. On by default.
+void SetHDTextEnabled(bool on);
+bool GetHDTextEnabled();
 
 // Smooth (xBR) upscaling of 2D layers in the OpenGL renderer. On by default.
 void SetSmooth2D(bool on);

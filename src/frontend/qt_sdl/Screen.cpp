@@ -41,6 +41,7 @@
 #include "Config.h"
 
 #include "main_shaders.h"
+#include "WC09Battle.h"
 
 // ---- WC09 HD card overlay -------------------------------------------------
 static const char* kWC09VS = R"(#version 140
@@ -875,6 +876,22 @@ void ScreenPanelNative::drawWC09(QPainter& painter)
             painter.setClipping(false);
         }
     }
+
+    // card-detail text panel
+    int detail = WC09Overlay::detailCard(fc);
+    if (detail >= 0 && melonDS::WC09::GetHDTextEnabled() && !melonDS::WC09::PanelRenderedRecently())
+    {
+        for (int i = 0; i < numScreens; i++)
+        {
+            if (screenKind[i] != 0) continue;
+            float scale = std::hypot(screenTrans[i].m11(), screenTrans[i].m12()) * devicePixelRatioF();
+            const QImage* panel = wc09.textPanel(detail, scale);
+            if (!panel) break;
+            painter.setTransform(screenTrans[i]);
+            painter.setClipping(false);
+            painter.drawImage(QRectF(WC09Overlay::kPanelX, WC09Overlay::kPanelY, WC09Overlay::kPanelW, WC09Overlay::kPanelH), *panel);
+        }
+    }
     painter.restore();
 }
 
@@ -1134,6 +1151,8 @@ void ScreenPanelGL::initWC09GL()
 void ScreenPanelGL::deinitWC09GL()
 {
     for (GLuint t : wc09Textures) glDeleteTextures(1, &t);
+    if (wc09PanelTex) glDeleteTextures(1, &wc09PanelTex);
+    wc09PanelTex = 0; wc09PanelKey = -1;
     wc09Textures.clear(); wc09TexOrder.clear();
     if (wc09VBO) glDeleteBuffers(1, &wc09VBO);
     if (wc09VAO) glDeleteVertexArrays(1, &wc09VAO);
@@ -1199,6 +1218,43 @@ void ScreenPanelGL::drawWC09GL(float w, float h)
         for (int i = 0; i < numScreens; i++)
         {
             if (screenKind[i] != q.Screen) continue;
+            glUniformMatrix2x3fv(wc09TransformLoc, 1, GL_TRUE, screenMatrix[i]);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+    }
+
+    // card-detail text panel
+    int detail = WC09Overlay::detailCard(fc);
+    if (detail >= 0 && melonDS::WC09::GetHDTextEnabled() && !melonDS::WC09::PanelRenderedRecently())
+    {
+        for (int i = 0; i < numScreens; i++)
+        {
+            if (screenKind[i] != 0) continue;
+            float* m = screenMatrix[i];
+            float scale = std::hypot(m[0], m[1]) * windowInfo.surface_scale;
+            const QImage* panel = wc09.textPanel(detail, scale);
+            if (!panel) break;
+            if (wc09PanelKey != (qint64)panel->cacheKey())
+            {
+                if (!wc09PanelTex) glGenTextures(1, &wc09PanelTex);
+                glBindTexture(GL_TEXTURE_2D, wc09PanelTex);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, panel->bytesPerLine() / 4);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, panel->width(), panel->height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, panel->constBits());
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                wc09PanelKey = panel->cacheKey();
+            }
+            glBindTexture(GL_TEXTURE_2D, wc09PanelTex);
+            const float x0 = WC09Overlay::kPanelX, y0 = WC09Overlay::kPanelY;
+            const float x1 = x0 + WC09Overlay::kPanelW, y1 = y0 + WC09Overlay::kPanelH;
+            const float v[6 * 5] = {
+                x0, y0, 0, 0, 1,   x0, y1, 0, 1, 1,   x1, y1, 1, 1, 1,
+                x0, y0, 0, 0, 1,   x1, y1, 1, 1, 1,   x1, y0, 1, 0, 1 };
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
+            glUniform4f(wc09ClipLoc, 0.f, 0.f, 1.f, 1.f);
             glUniformMatrix2x3fv(wc09TransformLoc, 1, GL_TRUE, screenMatrix[i]);
             glDrawArrays(GL_TRIANGLES, 0, 6);
         }

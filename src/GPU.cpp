@@ -20,6 +20,7 @@
 #include "NDS.h"
 #include "GPU.h"
 #include "WC09Cards.h"
+#include "WC09Battle.h"
 
 #include "ARMJIT.h"
 
@@ -1302,6 +1303,7 @@ void GPU::StartScanline(u32 line) noexcept
         Rend->VBlank();
 
         WC09::OnVBlank2D(*this);
+        WC09::OnVBlankBattle(*this);
 
         if (CaptureEnable)
         {

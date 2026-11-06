@@ -579,6 +579,13 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                 melonDS::WC09::SetHDCardsEnabled(on);
             });
 
+            actWC09HDText = menu->addAction("HD card text (Yu-Gi-Oh! WC2009)");
+            actWC09HDText->setCheckable(true);
+            connect(actWC09HDText, &QAction::triggered, this, [this](bool on) {
+                windowCfg.SetBool("WC09NoHDText", !on);
+                melonDS::WC09::SetHDTextEnabled(on);
+            });
+
             actWC09Smooth2D = menu->addAction("Smooth 2D graphics (OpenGL, 2x+)");
             actWC09Smooth2D->setCheckable(true);
             connect(actWC09Smooth2D, &QAction::triggered, this, [this](bool on) {
@@ -745,6 +752,8 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
         actScreenFiltering->setChecked(windowCfg.GetBool("ScreenFilter"));
         actWC09HDCards->setChecked(!windowCfg.GetBool("WC09NoHDCards"));
         melonDS::WC09::SetHDCardsEnabled(!windowCfg.GetBool("WC09NoHDCards"));
+        actWC09HDText->setChecked(!windowCfg.GetBool("WC09NoHDText"));
+        melonDS::WC09::SetHDTextEnabled(!windowCfg.GetBool("WC09NoHDText"));
         actWC09Smooth2D->setChecked(!windowCfg.GetBool("WC09NoSmooth2D"));
         melonDS::WC09::SetSmooth2D(!windowCfg.GetBool("WC09NoSmooth2D"));
         actShowOSD->setChecked(showOSD);

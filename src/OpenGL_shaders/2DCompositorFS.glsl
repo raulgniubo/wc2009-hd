@@ -60,6 +60,28 @@ int MosaicX = 0;
 // ---- WC09: xBR-lv2 style edge-directed upscaling (after Hyllian's xBR, MIT) ----
 uniform bool uSmooth2D;
 
+// WC09 HD background images (battle monsters): sampled instead of the original pixels
+uniform sampler2D HDTex[4];
+uniform bool uHDOn[4];
+uniform vec4 uHDRect[4];     // origin x, y and size w, h in BG pixels
+uniform bool uHDMirror[4];
+uniform bool uHDScreen[4];   // rect is in screen space (text panels)
+
+vec4 HDScreenFetch(int n, vec2 coord, int line, out bool hit)
+{
+    hit = false;
+    vec2 sp = vec2(coord.x, float(line) + coord.y);
+    vec2 uv = (sp - uHDRect[n].xy) / uHDRect[n].zw;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) return vec4(0.0);
+    hit = true;
+    vec4 h;
+    if (n == 0) h = texture(HDTex[0], uv);
+    else if (n == 1) h = texture(HDTex[1], uv);
+    else if (n == 2) h = texture(HDTex[2], uv);
+    else h = texture(HDTex[3], uv);
+    return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+}
+
 const vec3 kXbrY = vec3(0.2126, 0.7152, 0.0722) * 48.0;
 
 float XbrLum(vec4 c) { return dot(c.rgb, kXbrY) + c.a * 24.0; }   // alpha edges count as edges too
@@ -173,6 +195,17 @@ vec4 XbrFetch(sampler2D tex, ivec2 size, vec2 uv)
 
 vec4 BG0Fetch(vec2 coord)
 {
+    if (uHDOn[0] && !uHDScreen[0])
+    {
+        vec2 bgsize = vec2(uBGConfig[0].Size);
+        vec2 uv = mod(coord * bgsize - uHDRect[0].xy, bgsize) / uHDRect[0].zw;
+        if (uv.x < 1.0 && uv.y < 1.0)
+        {
+            if (uHDMirror[0]) uv.x = 1.0 - uv.x;
+            vec4 h = texture(HDTex[0], uv);
+            return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+        }
+    }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[0].Type < 7 && !uEnable3D)   // BG0 may be the hi-res 3D layer
         return XbrFetch(BGLayerTex[0], uBGConfig[0].Size, coord);
     return texture(BGLayerTex[0], coord);
@@ -180,6 +213,17 @@ vec4 BG0Fetch(vec2 coord)
 
 vec4 BG1Fetch(vec2 coord)
 {
+    if (uHDOn[1] && !uHDScreen[1])
+    {
+        vec2 bgsize = vec2(uBGConfig[1].Size);
+        vec2 uv = mod(coord * bgsize - uHDRect[1].xy, bgsize) / uHDRect[1].zw;
+        if (uv.x < 1.0 && uv.y < 1.0)
+        {
+            if (uHDMirror[1]) uv.x = 1.0 - uv.x;
+            vec4 h = texture(HDTex[1], uv);
+            return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+        }
+    }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[1].Type < 7)
         return XbrFetch(BGLayerTex[1], uBGConfig[1].Size, coord);
     return texture(BGLayerTex[1], coord);
@@ -187,6 +231,17 @@ vec4 BG1Fetch(vec2 coord)
 
 vec4 BG2Fetch(vec2 coord)
 {
+    if (uHDOn[2] && !uHDScreen[2])
+    {
+        vec2 bgsize = vec2(uBGConfig[2].Size);
+        vec2 uv = mod(coord * bgsize - uHDRect[2].xy, bgsize) / uHDRect[2].zw;
+        if (uv.x < 1.0 && uv.y < 1.0)
+        {
+            if (uHDMirror[2]) uv.x = 1.0 - uv.x;
+            vec4 h = texture(HDTex[2], uv);
+            return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+        }
+    }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[2].Type < 7)
         return XbrFetch(BGLayerTex[2], uBGConfig[2].Size, coord);
     return texture(BGLayerTex[2], coord);
@@ -194,6 +249,17 @@ vec4 BG2Fetch(vec2 coord)
 
 vec4 BG3Fetch(vec2 coord)
 {
+    if (uHDOn[3] && !uHDScreen[3])
+    {
+        vec2 bgsize = vec2(uBGConfig[3].Size);
+        vec2 uv = mod(coord * bgsize - uHDRect[3].xy, bgsize) / uHDRect[3].zw;
+        if (uv.x < 1.0 && uv.y < 1.0)
+        {
+            if (uHDMirror[3]) uv.x = 1.0 - uv.x;
+            vec4 h = texture(HDTex[3], uv);
+            return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+        }
+    }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[3].Type < 7)
         return XbrFetch(BGLayerTex[3], uBGConfig[3].Size, coord);
     return texture(BGLayerTex[3], coord);
@@ -201,6 +267,12 @@ vec4 BG3Fetch(vec2 coord)
 
 vec4 BG0CalcAndFetch(vec2 coord, int line)
 {
+    if (uHDOn[0] && uHDScreen[0])
+    {
+        bool hit;
+        vec4 h = HDScreenFetch(0, coord, line, hit);
+        if (hit) return h;
+    }
     ivec2 bgoffset = uScanline[line].BGOffset[0];
     vec2 bgpos = vec2(bgoffset.xy) + coord;
 
@@ -214,6 +286,12 @@ vec4 BG0CalcAndFetch(vec2 coord, int line)
 
 vec4 BG1CalcAndFetch(vec2 coord, int line)
 {
+    if (uHDOn[1] && uHDScreen[1])
+    {
+        bool hit;
+        vec4 h = HDScreenFetch(1, coord, line, hit);
+        if (hit) return h;
+    }
     ivec2 bgoffset = uScanline[line].BGOffset[1];
     vec2 bgpos = vec2(bgoffset.xy) + coord;
 
@@ -227,6 +305,12 @@ vec4 BG1CalcAndFetch(vec2 coord, int line)
 
 vec4 BG2CalcAndFetch(vec2 coord, int line)
 {
+    if (uHDOn[2] && uHDScreen[2])
+    {
+        bool hit;
+        vec4 h = HDScreenFetch(2, coord, line, hit);
+        if (hit) return h;
+    }
     ivec2 bgoffset = uScanline[line].BGOffset[2];
     vec2 bgpos;
     if (uBGConfig[2].Type >= 2)
@@ -273,6 +357,12 @@ vec4 BG2CalcAndFetch(vec2 coord, int line)
 
 vec4 BG3CalcAndFetch(vec2 coord, int line)
 {
+    if (uHDOn[3] && uHDScreen[3])
+    {
+        bool hit;
+        vec4 h = HDScreenFetch(3, coord, line, hit);
+        if (hit) return h;
+    }
     ivec2 bgoffset = uScanline[line].BGOffset[3];
     vec2 bgpos;
     if (uBGConfig[3].Type >= 2)

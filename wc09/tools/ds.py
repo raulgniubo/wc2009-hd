@@ -23,6 +23,7 @@ OPTS = {
     "melonds_sysfile_mode": "builtin",
     "melonds_render_mode": "software",
     "melonds_show_cursor": "disabled",
+    "melonds_touch_mode": "touch",
 }
 
 def parse_seq(seq):

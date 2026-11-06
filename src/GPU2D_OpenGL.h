@@ -17,6 +17,7 @@
 */
 
 #pragma once
+#include <vector>
 
 #include <memory>
 #include <optional>
@@ -77,6 +78,13 @@ private:
     GLuint CompositorConfigUBO {};
     GLint CompositorScaleULoc {};
     GLint CompositorSmoothULoc {-1};
+    GLint CompositorHDOnULoc[4] {-1, -1, -1, -1};
+    GLint CompositorHDRectULoc[4] {-1, -1, -1, -1};
+    GLint CompositorHDMirrorULoc[4] {-1, -1, -1, -1};
+    GLint CompositorHDScreenULoc[4] {-1, -1, -1, -1};
+    struct HDTexEntry { int Image; GLuint Tex; bool Valid; };
+    std::vector<HDTexEntry> HDTextures;     // small LRU of uploaded HD BG images
+    GLuint GetHDTexture(int image);
 
     // base index for a BG layer within the BG texture arrays
     // based on BG type and size

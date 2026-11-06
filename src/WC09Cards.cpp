@@ -1,5 +1,6 @@
 #include "WC09Cards.h"
 #include "WC09CardTable.h"
+#include "WC09Battle.h"
 #include "GPU.h"
 #include "GPU3D.h"
 
@@ -43,6 +44,9 @@ u32 FrameCounter = 0;
 
 std::atomic<bool> Smooth2D{true};
 std::atomic<bool> HDCards{true};
+std::atomic<bool> HDText{true};
+void SetHDTextEnabled(bool on) { HDText = on; }
+bool GetHDTextEnabled() { return HDText; }
 void SetHDCardsEnabled(bool on) { HDCards = on; }
 bool GetHDCardsEnabled() { return HDCards; }
 void SetSmooth2D(bool on) { Smooth2D = on; }
@@ -121,7 +125,10 @@ void OnFlush(bool screenSwap)
 FrameCards GetLatest()
 {
     std::lock_guard<std::mutex> lk(Lock);
-    FrameCards out = Latest;
+    FrameCards out;
+    out.On3DTop = Latest.On3DTop;
+    for (const CardQuad& q : Latest.Quads)
+        if (!BattleOnScreen(q.Screen)) out.Quads.push_back(q);
     out.Quads.insert(out.Quads.end(), Latest2D.begin(), Latest2D.end());
     return out;
 }
@@ -201,7 +208,7 @@ void OnVBlank2D(GPU& gpu)
 
                     CardQuad q{};
                     q.Card = hit->Card; q.Passcode = PasscodeOf(hit->Card);
-                    q.TexSize = 1; q.Screen = (u8)screen;
+                    q.TexSize = 1; q.Screen = (u8)screen; q.Engine = (s8)engine; q.BG = (s8)bg;
                     const int px[4] = {0, 0, CardTW * 8, CardTW * 8}, py[4] = {0, CardTH * 8, CardTH * 8, 0};
                     for (int k = 0; k < 4; k++)
                     {

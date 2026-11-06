@@ -235,6 +235,8 @@ private:
     GLint wc09SizeLoc = -1, wc09TransformLoc = -1, wc09ClipLoc = -1;
     QHash<int, GLuint> wc09Textures;
     QList<int> wc09TexOrder;
+    GLuint wc09PanelTex = 0;
+    qint64 wc09PanelKey = -1;
     GLuint screenTexture;
     GLuint screenShaderProgram;
     GLint screenShaderTransformULoc, screenShaderScreenSizeULoc;

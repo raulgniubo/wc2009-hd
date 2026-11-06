@@ -4,7 +4,7 @@
 Layout:
   name sectors (0x200 each): [u16 lo][u8 hi] table_off = lo + hi*0x200, then
       records [u8 len][u8 ?][name], terminated by 0; next name sector starts again with 3 header bytes.
-  table @ table_off: 8 header bytes, then N x (u32 start, u32 size), start relative to data base.
+  table @ table_off: 0x200-byte sectors, each = 8 header bytes + 63 x (u32 start, u32 size); start relative to data base.
   data base = align(table_off + 8 + 8N, 0x200)
 """
 import struct, sys, os
@@ -18,9 +18,12 @@ def parse(d):
             ln = d[p]; names.append(d[p+2:p+2+ln].decode('latin-1')); p += 2 + ln
         sec += 0x200
         if table_off < sec: break
-    t = table_off + 8
-    ents = [struct.unpack_from('<II', d, t + 8*i) for i in range(len(names))]
-    base = (t + 8*len(names) + 0x1FF) & ~0x1FF
+    # table sectors are 0x200 bytes: an 8-byte header then 63 entries each
+    ents = []; t = table_off
+    while len(ents) < len(names):
+        if (t - table_off) % 0x200 == 0: t += 8
+        ents.append(struct.unpack_from('<II', d, t)); t += 8
+    base = (t + 0x1FF) & ~0x1FF
     return [(n, base + s, z) for n, (s, z) in zip(names, ents)]
 
 if __name__ == '__main__':

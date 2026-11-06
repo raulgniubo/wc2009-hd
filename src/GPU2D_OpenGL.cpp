@@ -20,6 +20,8 @@
 #include "GPU_OpenGL.h"
 #include "GPU2D_OpenGL.h"
 #include "WC09Cards.h"
+#include "WC09Battle.h"
+#include <string>
 #include "GPU.h"
 #include "GPU3D.h"
 
@@ -157,6 +159,17 @@ bool GLRenderer2D::InitShaders()
 
     CompositorScaleULoc = glGetUniformLocation(CompositorShader, "uScaleFactor");
     CompositorSmoothULoc = glGetUniformLocation(CompositorShader, "uSmooth2D");
+    for (int i = 0; i < 4; i++)
+    {
+        std::string n = std::to_string(i);
+        CompositorHDOnULoc[i] = glGetUniformLocation(CompositorShader, ("uHDOn[" + n + "]").c_str());
+        CompositorHDRectULoc[i] = glGetUniformLocation(CompositorShader, ("uHDRect[" + n + "]").c_str());
+        CompositorHDMirrorULoc[i] = glGetUniformLocation(CompositorShader, ("uHDMirror[" + n + "]").c_str());
+        CompositorHDScreenULoc[i] = glGetUniformLocation(CompositorShader, ("uHDScreen[" + n + "]").c_str());
+        GLint t = glGetUniformLocation(CompositorShader, ("HDTex[" + n + "]").c_str());
+        glUseProgram(CompositorShader);
+        glUniform1i(t, 8 + i);
+    }
 
     // generate mosaic lookup texture
 
@@ -196,6 +209,13 @@ bool GLRenderer2D::InitShaders(GLRenderer2D& other)
     SpriteSmoothULoc = other.SpriteSmoothULoc;
     CompositorScaleULoc = other.CompositorScaleULoc;
     CompositorSmoothULoc = other.CompositorSmoothULoc;
+    for (int i = 0; i < 4; i++)
+    {
+        CompositorHDOnULoc[i] = other.CompositorHDOnULoc[i];
+        CompositorHDRectULoc[i] = other.CompositorHDRectULoc[i];
+        CompositorHDMirrorULoc[i] = other.CompositorHDMirrorULoc[i];
+        CompositorHDScreenULoc[i] = other.CompositorHDScreenULoc[i];
+    }
 
     MosaicTex = other.MosaicTex;
 
@@ -370,8 +390,43 @@ void GLRenderer2D::DeleteShaders()
     glDeleteTextures(1, &MosaicTex);
 }
 
+GLuint GLRenderer2D::GetHDTexture(int image)
+{
+    for (size_t i = 0; i < HDTextures.size(); i++)
+    {
+        if (HDTextures[i].Image != image) continue;
+        HDTexEntry e = HDTextures[i];
+        HDTextures.erase(HDTextures.begin() + i);
+        HDTextures.insert(HDTextures.begin(), e);      // most recently used first
+        return e.Valid ? e.Tex : 0;
+    }
+
+    HDTexEntry e {image, 0, false};
+    std::vector<u8> rgba; int w = 0, h = 0;
+    if (WC09::LoadHDImage(WC09::BattleImageName(image), rgba, w, h) && w > 0 && h > 0)
+    {
+        glGenTextures(1, &e.Tex);
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, e.Tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        e.Valid = true;
+    }
+    HDTextures.insert(HDTextures.begin(), e);
+    if (HDTextures.size() > 12)
+    {
+        if (HDTextures.back().Valid) glDeleteTextures(1, &HDTextures.back().Tex);
+        HDTextures.pop_back();
+    }
+    return e.Valid ? e.Tex : 0;
+}
+
 GLRenderer2D::~GLRenderer2D()
 {
+    for (auto& e : HDTextures) if (e.Valid) glDeleteTextures(1, &e.Tex);
     glDeleteBuffers(1, &SpritePreVtxBuffer);
     glDeleteVertexArrays(1, &SpritePreVtxArray);
 
@@ -1833,6 +1888,23 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
 
     glActiveTexture(GL_TEXTURE7);
     glBindTexture(GL_TEXTURE_2D, MosaicTex);
+
+    // WC09: HD replacements for background images (battle monsters)
+    for (int i = 0; i < 4; i++)
+    {
+        WC09::BGReplacement rep = WC09::GetBGReplacement(GPU2D.Num, i);
+        bool isPanel = rep.Image >= WC09::kTextPanelBase;
+        bool allowed = isPanel ? WC09::GetHDTextEnabled() : WC09::GetHDCardsEnabled();
+        GLuint tex = (rep.Image >= 0 && allowed) ? GetHDTexture(rep.Image) : 0;
+        if (tex && isPanel) WC09::NotePanelRendered();
+        glActiveTexture(GL_TEXTURE8 + i);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glUniform1i(CompositorHDOnULoc[i], tex ? 1 : 0);
+        glUniform4f(CompositorHDRectULoc[i], rep.OriginX, rep.OriginY, rep.Width, rep.Height);
+        glUniform1i(CompositorHDMirrorULoc[i], rep.Mirror ? 1 : 0);
+        glUniform1i(CompositorHDScreenULoc[i], rep.ScreenSpace ? 1 : 0);
+    }
+    glActiveTexture(GL_TEXTURE0);
 
     glBindBuffer(GL_ARRAY_BUFFER, Parent.RectVtxBuffer);
     glBindVertexArray(Parent.RectVtxArray);

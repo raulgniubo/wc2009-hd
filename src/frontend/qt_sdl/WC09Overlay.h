@@ -37,7 +37,19 @@ public:
     // undistorted on a tilted quad.
     static std::array<std::array<float, 3>, 4> projectiveUV(const melonDS::WC09::CardQuad& q);
 
+    // Duel card-detail text panel (top screen): name + full description in a real font.
+    // Region in DS pixels of the top screen; the image covers it (transparent outside panels).
+    // Height 124 keeps clear of the speech bubbles when we draw on top (software 2D);
+    // the OpenGL renderer swaps the text layer itself and uses the full height.
+    static constexpr int kPanelX = 40, kPanelY = 1, kPanelW = 213, kPanelH = 124;
+    // Card shown in the duel's card-detail view, or -1.
+    static int detailCard(const melonDS::WC09::FrameCards& fc);
+    // Panel image rendered at `scale` device pixels per DS pixel (cached).
+    const QImage* textPanel(int card, float scale);
+    static QImage renderTextPanel(int card, float scale, int heightDS);
+
 private:
+    int panelCard = -1; int panelScale = 0; QImage panelImg;
     bool active = false;
     QString folder;
     QString lastRom;
