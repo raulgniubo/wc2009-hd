@@ -88,6 +88,7 @@ private:
     GLint CompositorHDRectULoc[4] {-1, -1, -1, -1};
     GLint CompositorHDMirrorULoc[4] {-1, -1, -1, -1};
     GLint CompositorHDScreenULoc[4] {-1, -1, -1, -1};
+    GLint CompositorHDFallbackULoc[4] {-1, -1, -1, -1};
     struct HDTexEntry { int Image; GLuint Tex; bool Valid; };
     std::vector<HDTexEntry> HDTextures;     // small LRU of uploaded HD BG images
     std::unordered_map<int, u64> HDMissing; // image -> frame of the last failed lookup

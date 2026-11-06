@@ -188,7 +188,19 @@ vec4 GetSpritePixel(int sprite, vec2 coord)
                       ((hda.w & 2) != 0) ? float(hdb.y) - s.y : s.y);
         vec2 uv = (vec2(hda.yz) + c) / uSprHDSize[hda.x];
         vec4 h = SprHDSample(hda.x, uv);
-        return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+        if (h.a < 0.5) return vec4(0.0);
+        // only where the game actually shows pixels (within 1 px): parts of an image the game
+        // leaves blank or cuts off stay blank
+        ivec2 base = ivec2((sprite & 0xF) * 64, (sprite >> 4) * 64);
+        ivec2 ic = ivec2(coord), sz = uOAM[sprite].Size;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                ivec2 p = ic + ivec2(dx, dy);
+                if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, sz))) continue;
+                if (texelFetch(SpriteTex, base + p, 0).a > 0.0) return vec4(h.rgb, 1.0);
+            }
+        return vec4(0.0);
     }
 
     if (uSmoothScale > 1 && uOAM[sprite].OBJMode != 2)

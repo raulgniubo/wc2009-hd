@@ -7,7 +7,7 @@ the fork recognizes what the game draws and swaps in HD versions.
 ## What it does
 | Feature | How | Toggle (View menu) |
 | --- | --- | --- |
-| HD cards everywhere (deck editor, duel card view, hand, field) | Recognizes each card texture / tile set, draws your HD card image in its place | HD cards |
+| HD cards everywhere (deck editor, duel card view, hand, field, story intro) | Recognizes each card texture / tile set / bitmap, and the renderer itself samples your HD card image in its place, so dialogs, monsters and effects drawn over a card stay on top | HD cards |
 | HD battle images (big monster pictures during attacks) | Recognizes the battle image on its background layer, the 2D compositor samples an HD version | HD cards |
 | HD card text in the duel card view | Name + full description redrawn in a real font, whole text fits without scrolling | HD card text |
 | HD menus and screens (deck editor, main menu, shop, records, setup screens...) | Every 8-bit background image in the ROM is indexed at load; when one shows up, the 2D compositor samples an AI-upscaled version | HD cards |
@@ -27,7 +27,7 @@ Defaults are set for the best look: OpenGL renderer at 4x, OpenGL display, scree
    - Unzip the HD pack (battle images, menus, portraits, game-only cards) into the same folder.
 
 Layout of `HDCards/`:
-- `<passcode>.jpg` - card faces; `card_<index>.jpg` for game-only cards without a passcode.
+- `<passcode>.jpg` - card faces; `card_<index>.jpg` for game-only cards without a passcode; `cardback.png` for the card back.
 - `BattleMonsterR1/<id>_r.png`, `BattleMonsterR2/...`, `BattleMonsterL1/...`, `BattleMonsterL2/...` -
   battle images. Left-facing images that are just mirrors fall back to the right-facing file.
 - `tex3d/<hash>.png` for 3D textures (hash = XXH64 of the decoded texels; `WC09_DUMP3D=<dir>` dumps them).
@@ -51,7 +51,6 @@ Layout of `HDCards/`:
 - Text drawn by the game into tiles (dialog, menu labels) keeps the original font with smoothing.
 - 4-bit menu layers are only replaced when the visible layer exactly matches the stored image, so
   windows the game writes text into keep their original pixels.
-- The card in the story intro isn't one of the 2,934 card images.
 - HD battle images and HD text need the OpenGL renderer (the default). With the software renderer
   you still get HD cards and the text panel as an overlay.
 - US ROM only.

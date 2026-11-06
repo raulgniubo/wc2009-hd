@@ -24,6 +24,8 @@
 #include "NDS.h"
 #include "GPU.h"
 #include "WC09Battle.h"
+#include <algorithm>
+#include <cmath>
 #include "WC09Cards.h"
 #include <vector>
 #include <string>
@@ -101,6 +103,20 @@ void GLRenderer3D::UseRenderShader(bool wbuffer)
     HDModeULoc = glGetUniformLocation(RenderShader[flags], "uHDMode");
 }
 
+GLuint GLRenderer3D::UploadHD3D(const u8* rgba, int w, int h)
+{
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glActiveTexture(GL_TEXTURE0);
+    return tex;
+}
+
 GLuint GLRenderer3D::GetHD3D(u64 hash)
 {
     auto it = HD3D.find(hash);
@@ -110,19 +126,108 @@ GLuint GLRenderer3D::GetHD3D(u64 hash)
     std::vector<u8> rgba; int w = 0, h = 0;
     if (WC09::LoadHDImage(name, rgba, w, h) && w > 0 && h > 0)
     {
-        glGenTextures(1, &e.Tex);
-        glActiveTexture(GL_TEXTURE3);
-        glBindTexture(GL_TEXTURE_2D, e.Tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-        glGenerateMipmap(GL_TEXTURE_2D);
-        glActiveTexture(GL_TEXTURE0);
+        e.Tex = UploadHD3D(rgba.data(), w, h);
         e.Valid = true;
     }
     HD3D[hash] = e;
     static const bool debug = getenv("WC09_DEBUG") != nullptr;
     if (debug) { printf("WC09 tex3d %s %s\n", name, e.Valid ? "HD" : "-"); fflush(stdout); }
+    return e.Valid ? e.Tex : 0;
+}
+
+GLuint GLRenderer3D::GetHDCard(u64 hash, int card, u32 size, const u32* newPixels)
+{
+    // keep a copy of the decoded card texture: the HD version keeps its layout and its
+    // transparency, only the card face area gets the HD image
+    if (newPixels)
+    {
+        CardPx& c = CardPixels[hash];
+        c.Px.assign(newPixels, newPixels + size * size);
+        c.LastUse = HD3DFrame;
+        if (CardPixels.size() > 512)
+            for (auto it = CardPixels.begin(); it != CardPixels.end();)
+                it = (HD3DFrame - it->second.LastUse > 600 && it->first != hash) ? CardPixels.erase(it) : std::next(it);
+    }
+    auto it = HD3D.find(hash);
+    if (it != HD3D.end()) { it->second.LastUse = HD3DFrame; return it->second.Valid ? it->second.Tex : 0; }
+    auto px = CardPixels.find(hash);
+    if (px == CardPixels.end() || px->second.Px.size() != size * size) return 0;
+    px->second.LastUse = HD3DFrame;
+
+    HD3DEntry e {0, false, HD3DFrame};
+    std::vector<u8> src; int sw = 0, sh = 0;
+    if (WC09::LoadCardImage(card, src, sw, sh) && sw > 1 && sh > 1)
+    {
+        const u32* orig = px->second.Px.data();
+        const int S = size == 32 ? 8 : 512 / (int)size, W = (int)size * S;
+        std::vector<u8> out((size_t)W * W * 4);
+        auto origAt = [&](int x, int y) { return orig[(y / S) * size + (x / S)]; };
+        // the parts outside the face (frame bars of the hand-card textures...) keep the original
+        // pixels, upscaled smoothly between opaque neighbours; transparency stays as it was
+        auto chan = [&](int tx, int ty, int k) -> float {
+            tx = std::clamp(tx, 0, (int)size - 1); ty = std::clamp(ty, 0, (int)size - 1);
+            u32 c = orig[ty * size + tx];
+            return (float)((c >> (8 * k)) & 0x3F) * 255.f / 63.f;
+        };
+        auto opaque = [&](int tx, int ty) {
+            tx = std::clamp(tx, 0, (int)size - 1); ty = std::clamp(ty, 0, (int)size - 1);
+            return ((orig[ty * size + tx] >> 24) & 0x1F) != 0;
+        };
+        for (int y = 0; y < W; y++)
+            for (int x = 0; x < W; x++)
+            {
+                u32 c = origAt(x, y); u8* o = &out[((size_t)y * W + x) * 4];
+                o[3] = ((c >> 24) & 0x1F) * 255 / 31;
+                float fx = (x + 0.5f) / S - 0.5f, fy = (y + 0.5f) / S - 0.5f;
+                int x0 = (int)std::floor(fx), y0 = (int)std::floor(fy);
+                float tx = fx - x0, ty = fy - y0;
+                bool all = opaque(x0, y0) && opaque(x0 + 1, y0) && opaque(x0, y0 + 1) && opaque(x0 + 1, y0 + 1);
+                for (int k = 0; k < 3; k++)
+                {
+                    if (!all) { o[k] = (u8)(((c >> (8 * k)) & 0x3F) * 255 / 63); continue; }
+                    float a = chan(x0, y0, k) * (1 - tx) + chan(x0 + 1, y0, k) * tx;
+                    float b = chan(x0, y0 + 1, k) * (1 - tx) + chan(x0 + 1, y0 + 1, k) * tx;
+                    o[k] = (u8)(a * (1 - ty) + b * ty + 0.5f);
+                }
+            }
+        // face rectangle in texels, and the part of the HD face it shows. 128/64: the whole face
+        // at texels 20..108 (of 128) across, full height. 32: only the artwork, texels (1,4)-(31,26)
+        // showing face region (33,24)-(95,90) of the 128 layout (face starts at texel 20, 88 wide).
+        float dx0, dy0, dx1, dy1, u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+        if (size == 32)
+        {
+            dx0 = 1; dy0 = 4; dx1 = 31; dy1 = 26;
+            u0 = 13.f / 88.f; u1 = 75.f / 88.f; v0 = 24.f / 128.f; v1 = 90.f / 128.f;
+        }
+        else { dx0 = size * 20.f / 128.f; dx1 = size * 108.f / 128.f; dy0 = 0; dy1 = (float)size; }
+        int px0 = (int)(dx0 * S), px1 = (int)(dx1 * S), py0 = (int)(dy0 * S), py1 = (int)(dy1 * S);
+        for (int y = py0; y < py1; y++)
+        {
+            float v = v0 + (y + 0.5f - py0) / (py1 - py0) * (v1 - v0);
+            float fy = v * sh - 0.5f; int y0 = std::clamp((int)std::floor(fy), 0, sh - 1), y1 = std::min(y0 + 1, sh - 1);
+            float ty = std::clamp(fy - y0, 0.f, 1.f);
+            for (int x = px0; x < px1; x++)
+            {
+                float u = u0 + (x + 0.5f - px0) / (px1 - px0) * (u1 - u0);
+                float fx = u * sw - 0.5f; int x0 = std::clamp((int)std::floor(fx), 0, sw - 1), x1 = std::min(x0 + 1, sw - 1);
+                float tx = std::clamp(fx - x0, 0.f, 1.f);
+                u8* o = &out[((size_t)y * W + x) * 4];
+                for (int k = 0; k < 3; k++)
+                {
+                    float a = src[((size_t)y0 * sw + x0) * 4 + k] * (1 - tx) + src[((size_t)y0 * sw + x1) * 4 + k] * tx;
+                    float b = src[((size_t)y1 * sw + x0) * 4 + k] * (1 - tx) + src[((size_t)y1 * sw + x1) * 4 + k] * tx;
+                    o[k] = (u8)(a * (1 - ty) + b * ty + 0.5f);
+                }
+                // keep the original's transparency (rounded corners), opaque elsewhere in the face
+                if (((origAt(x, y) >> 24) & 0x1F) != 0) o[3] = 255;
+            }
+        }
+        e.Tex = UploadHD3D(out.data(), W, W);
+        e.Valid = true;
+    }
+    HD3D[hash] = e;
+    static const bool debug = getenv("WC09_DEBUG") != nullptr;
+    if (debug) { printf("WC09 card3d %d (%u px) %s\n", card, size, e.Valid ? "HD" : "-"); fflush(stdout); }
     return e.Valid ? e.Tex : 0;
 }
 
@@ -527,6 +632,7 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
     u32 curtexlayer = (u32)-1;
     GLuint curhd = 0; int curhdmode = 0;
     const bool hdon = WC09::IsActive() && WC09::GetHDCardsEnabled();
+    if (hdon) WC09::NoteCards3DRendered();
     // keep GPU memory in check: drop HD textures not used for a while (they reload when needed)
     if (++HD3DFrame % 60 == 0 && HD3D.size() > 128)
     {
@@ -609,8 +715,16 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
                     u32* halp;
                     Texcache.GetTexture(texparam, texpal, curtexid, curtexlayer, halp);
                     curtexlayer |= 0xFFFF0000;
-                    curhd = hdon ? GetHD3D(Texcache.LastContentHash) : 0;
-                    curhdmode = (textype == 1 || textype == 6) ? 2 : 1;
+                    if (hdon && Texcache.LastCard >= 0)
+                    {
+                        curhd = GetHDCard(Texcache.LastContentHash, Texcache.LastCard, texwidth, Texcache.LastNewPixels);
+                        curhdmode = 1;
+                    }
+                    else
+                    {
+                        curhd = hdon ? GetHD3D(Texcache.LastContentHash) : 0;
+                        curhdmode = (textype == 1 || textype == 6) ? 2 : 1;
+                    }
                 }
             }
             else

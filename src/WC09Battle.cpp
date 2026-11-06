@@ -253,8 +253,41 @@ void NotePanelRendered() { PanelStamp = VBlankCount.load(); }
 u64 FrameNum() { return VBlankCount.load(); }
 bool PanelRenderedRecently() { return VBlankCount.load() - PanelStamp.load() < 3; }
 
+namespace
+{
+struct CardSet { std::vector<CardSetItem> Items; int W, H; };
+std::mutex CardSetLock;
+std::map<u64, int> CardSetIds;
+std::map<int, CardSet> CardSets;
+int NextCardSet = kCardSetBase;
+}
+
+int RegisterCardSet(const std::vector<CardSetItem>& items, int w, int h)
+{
+    std::lock_guard<std::mutex> lk(CardSetLock);
+    u64 key = XXH64(items.data(), items.size() * sizeof(CardSetItem), ((u64)w << 32) | (u32)h);
+    auto it = CardSetIds.find(key);
+    if (it != CardSetIds.end()) return it->second;
+    if (CardSets.size() > 64) { CardSets.clear(); CardSetIds.clear(); }
+    int id = NextCardSet++;
+    CardSetIds[key] = id;
+    CardSets[id] = {items, w, h};
+    return id;
+}
+
+bool GetCardSet(int image, std::vector<CardSetItem>& items, int& w, int& h)
+{
+    std::lock_guard<std::mutex> lk(CardSetLock);
+    auto it = CardSets.find(image);
+    if (it == CardSets.end()) return false;
+    items = it->second.Items; w = it->second.W; h = it->second.H;
+    return true;
+}
+
 std::string BattleImageName(int image)
 {
+    if (IsCardSet(image)) return "cardset/" + std::to_string(image - kCardSetBase);
+    if (IsCardImage(image)) return "card/" + std::to_string(image - kCardImageBase);
     if (image >= kSpriteImageBase) return SpriteImageName(image);
     if (image >= kTextPanelBase)
         return "textpanel/" + std::to_string((image - kTextPanelBase) / 2) + (((image - kTextPanelBase) & 1) ? "s" : "");
@@ -280,6 +313,18 @@ BGReplacement GetBGReplacement(int engine, int bg)
 void OnVBlankBattle(GPU& gpu)
 {
     VBlankCount++;
+    if (getenv("WC09_REGS") && VBlankCount % 120 == 0)
+    {
+        for (int e = 0; e < 2; e++)
+        {
+            const GPU2D& u = e == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+            printf("WC09 regs %c: dispcnt %08x bgcnt %04x %04x %04x %04x swap %d blend %04x %d %d win %02x %02x %02x %02x w0 %d %d %d %d scroll %d,%d %d,%d %d,%d %d,%d\n", 'A' + e, u.DispCnt,
+                   u.BGCnt[0], u.BGCnt[1], u.BGCnt[2], u.BGCnt[3], gpu.ScreenSwap, u.BlendCnt, u.EVA, u.EVB,
+                   u.WinCnt[0], u.WinCnt[1], u.WinCnt[2], u.WinCnt[3], u.Win0Coords[0], u.Win0Coords[1], u.Win0Coords[2], u.Win0Coords[3],
+                   u.BGXPos[0], u.BGYPos[0], u.BGXPos[1], u.BGYPos[1], u.BGXPos[2], u.BGYPos[2], u.BGXPos[3], u.BGYPos[3]);
+        }
+        fflush(stdout);
+    }
     BGReplacement found[2][4];
     if (IsActive() && GetHDCardsEnabled())
     {
@@ -290,6 +335,7 @@ void OnVBlankBattle(GPU& gpu)
             BuildSpriteIndex(cart->GetROM(), cart->GetROMLength());
             LoadCardText(cart->GetROM(), cart->GetROMLength());
             IndexedROM = cart->GetROM();
+            SetCardROM(cart->GetROM(), cart->GetROMLength());
         }
 
         for (int engine = 0; engine < 2 && Indexed; engine++)
@@ -403,10 +449,49 @@ void OnVBlankBattle(GPU& gpu)
             }
         }
     }
+    // 2D cards (card detail view, deck editor, battle cut-ins...): the compositor samples the
+    // HD card face in place of the card's tiles. Several cards on one background become one
+    // composed image.
+    if (IsActive() && GetHDCardsEnabled())
+    {
+        std::vector<CardQuad> cards = GetLatest2D();
+        for (int e = 0; e < 2; e++)
+            for (int b = 0; b < 4; b++)
+            {
+                std::vector<size_t> here;
+                for (size_t i = 0; i < cards.size(); i++)
+                    if (cards[i].Engine == e && cards[i].BG == b) here.push_back(i);
+                BGReplacement& rep = found[e][b];
+                if (here.empty() || rep.Image >= 0) continue;
+                if (here.size() == 1)
+                {
+                    const CardQuad& q = cards[here[0]];
+                    rep.Image = kCardImageBase + q.Card;
+                    rep.OriginX = q.MapX; rep.OriginY = q.MapY;
+                    rep.Width = 88; rep.Height = 128;
+                }
+                else
+                {
+                    int x0 = 1 << 20, y0 = 1 << 20, x1 = -(1 << 20), y1 = -(1 << 20);
+                    for (size_t i : here)
+                    {
+                        x0 = std::min<int>(x0, cards[i].MapX); y0 = std::min<int>(y0, cards[i].MapY);
+                        x1 = std::max<int>(x1, cards[i].MapX + 88); y1 = std::max<int>(y1, cards[i].MapY + 128);
+                    }
+                    std::vector<CardSetItem> items;
+                    for (size_t i : here) items.push_back({cards[i].Card, cards[i].MapX - x0, cards[i].MapY - y0});
+                    rep.Image = RegisterCardSet(items, x1 - x0, y1 - y0);
+                    rep.OriginX = (float)x0; rep.OriginY = (float)y0;
+                    rep.Width = (float)(x1 - x0); rep.Height = (float)(y1 - y0);
+                    rep.Fallback = true;
+                }
+                for (size_t i : here) MarkHandled2D(i);
+            }
+    }
     // duel card detail: replace the description text background with a generated HD panel
     if (IsActive() && GetHDTextEnabled())
     {
-        FrameCards fc = GetLatest();
+        FrameCards fc = GetLatest(true);
         for (const CardQuad& q : fc.Quads)
         {
             if (q.TexSize != 1 || q.Screen != 0 || q.Engine < 0) continue;
@@ -459,7 +544,7 @@ void OnVBlankBattle(GPU& gpu)
     bool onScreen[2] = {false, false};
     for (int e = 0; e < 2; e++)
         for (int b = 0; b < 4; b++)
-            if (found[e][b].Image >= 0 && found[e][b].Image < kTextPanelBase) onScreen[(e == 0) == gpu.ScreenSwap ? 0 : 1] = true;
+            if (found[e][b].Image >= 0 && found[e][b].Image < kTextPanelBase && !IsCardImage(found[e][b].Image) && !IsCardSet(found[e][b].Image)) onScreen[(e == 0) == gpu.ScreenSwap ? 0 : 1] = true;
 
     std::lock_guard<std::mutex> lk(Lock);
     OnScreen[0] = onScreen[0]; OnScreen[1] = onScreen[1];

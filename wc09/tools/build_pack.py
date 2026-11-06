@@ -33,6 +33,9 @@ if os.path.isdir(d):
         img = Image.open(f'{d}/{f}').convert('RGB')
         b = io.BytesIO(); img.save(b, 'JPEG', quality=92); _w(f'HDCards/{f[:-4]}.jpg', b.getvalue()); n += 1
 import json
+if os.path.exists(f'{SRC}/cardback.png'):
+    add(Image.open(f'{SRC}/cardback.png'), 'HDCards/cardback.png', 1.0, False)
+import json
 # menus and sprites: HDCards/<set>/<name>.png, plus copies for names that share an image
 def add_tree(hd, dupfile, flat=None, scale=0.75):
     global n

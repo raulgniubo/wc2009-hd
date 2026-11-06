@@ -12,6 +12,7 @@
 
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash/xxhash.h"
+#include "WC09Cards.h"
 
 namespace melonDS
 {
@@ -190,6 +191,8 @@ public:
             layer = it->second.Texture.Layer;
             helper = &it->second.LastVariant;
             LastContentHash = it->second.ContentHash;
+            LastCard = it->second.Card;
+            LastNewPixels = nullptr;
             return;
         }
 
@@ -265,6 +268,16 @@ public:
         // WC09: hash of the decoded texels, independent of where the texture sits in VRAM
         entry.ContentHash = XXH64(DecodingBuffer, (size_t)width * height * 4, ((u64)width << 16) | height);
         LastContentHash = entry.ContentHash;
+        // WC09: card faces are identified by their raw tex4x4 texel words (see WC09Cards)
+        entry.Card = -1;
+        if (fmt == 5 && width == height && (width == 128 || width == 64 || width == 32))
+        {
+            u32 n = width * height / 4;
+            if (addr + n <= sizeof(GPU.VRAMFlat_Texture))
+                entry.Card = WC09::CardFromTexHash(XXH64(&GPU.VRAMFlat_Texture[addr], n, 0), width);
+        }
+        LastCard = entry.Card;
+        LastNewPixels = DecodingBuffer;
         for (int i = 0; i < 2; i++)
         {
             if (entry.TextureRAMSize[i])
@@ -351,8 +364,11 @@ private:
         u64 TextureHash[2] {};
         u64 TexPalHash {};
         u64 ContentHash {};
+        int Card = -1;
     };
 public:
+    int LastCard = -1;                // WC09 card index of that texture, -1 if not a card face
+    const u32* LastNewPixels = nullptr;   // decoded texels (RGB6A5) if that call created the entry
     u64 LastContentHash = 0;   // content hash of the texture returned by the last GetTexture
 private:
     std::unordered_map<u64, TexCacheEntry> Cache;

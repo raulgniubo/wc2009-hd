@@ -28,6 +28,8 @@ struct CardQuad
     u8 TexSize;        // 128, 64 (full card face), 32 (artwork only), 1 (2D BG card, 88x128)
     u8 Screen;         // 0 = top, 1 = bottom
     s8 Engine = -1, BG = -1;   // for 2D cards: which 2D engine / background shows it
+    s16 MapX = 0, MapY = 0;    // for 2D cards: top-left in BG pixel space
+    bool Handled = false;      // for 2D cards: the GL compositor swaps this one itself
 };
 
 struct FrameCards
@@ -51,7 +53,7 @@ void OnFlush(bool screenSwap);
 void OnVBlank2D(GPU& gpu);
 
 // Frontend: copy of the most recent completed 3D frame's card quads.
-FrameCards GetLatest();
+FrameCards GetLatest(bool all = false);   // all: include cards the GL renderers draw themselves
 
 // Master switch for drawing HD cards (the frontend checks it). On by default.
 void SetHDCardsEnabled(bool on);
@@ -67,6 +69,30 @@ bool GetSmooth2D();
 
 // Card index -> passcode (0 if none), or 0 when out of range.
 u32 PasscodeOf(u16 card);
+
+// Card shown by a tex4x4 texture whose texel words hash to `hash` (size 128/64/32, or 1 for the
+// 2D 88x128 tiles), or -1. Card 0 is the card back.
+int CardFromTexHash(u64 hash, u32 size);
+
+// HD face image of a card (HDCards/<passcode>, card_<index>, or cardback for card 0).
+// Straight RGBA8. Uses the frontend's image provider.
+bool LoadCardImage(int card, std::vector<u8>& rgba, int& w, int& h);
+
+// The OpenGL renderers draw HD cards themselves (inside the 3D scene / the 2D compositor),
+// so layering, transparency and effects stay correct. When they report it, GetLatest() leaves
+// those cards out and the frontend overlay only draws what nobody else handled.
+void NoteCards3DRendered();
+void NoteCards2DRendered();
+
+// Card shown by a 128x128 direct-color bitmap laid out like the 128px card texture (face at
+// x 20..108), as the story uses for big cards on screen; -1 if none matches. `px` has a
+// stride of 128 pixels. Matching is approximate (the game's own decoder differs slightly).
+int CardFromBitmap(const u16* px);
+void SetCardROM(const u8* rom, u32 len);
+
+// 2D cards found at the last VBlank, and marking one as swapped by the compositor.
+std::vector<CardQuad> GetLatest2D();
+void MarkHandled2D(size_t index);
 
 }
 }

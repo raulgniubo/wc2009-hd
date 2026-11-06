@@ -66,6 +66,7 @@ uniform bool uHDOn[4];
 uniform vec4 uHDRect[4];     // origin x, y and size w, h in BG pixels
 uniform bool uHDMirror[4];
 uniform bool uHDScreen[4];   // rect is in screen space (text panels)
+uniform bool uHDFallback[4]; // transparent HD pixels fall back to the original (card sets)
 
 vec4 HDScreenFetch(int n, vec2 coord, int line, out bool hit)
 {
@@ -203,7 +204,8 @@ vec4 BG0Fetch(vec2 coord)
         {
             if (uHDMirror[0]) uv.x = 1.0 - uv.x;
             vec4 h = texture(HDTex[0], uv);
-            return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+            if (h.a >= 0.5) return vec4(h.rgb, 1.0);
+            if (!uHDFallback[0]) return vec4(0.0);
         }
     }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[0].Type < 7 && !uEnable3D)   // BG0 may be the hi-res 3D layer
@@ -221,7 +223,8 @@ vec4 BG1Fetch(vec2 coord)
         {
             if (uHDMirror[1]) uv.x = 1.0 - uv.x;
             vec4 h = texture(HDTex[1], uv);
-            return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+            if (h.a >= 0.5) return vec4(h.rgb, 1.0);
+            if (!uHDFallback[1]) return vec4(0.0);
         }
     }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[1].Type < 7)
@@ -239,7 +242,8 @@ vec4 BG2Fetch(vec2 coord)
         {
             if (uHDMirror[2]) uv.x = 1.0 - uv.x;
             vec4 h = texture(HDTex[2], uv);
-            return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+            if (h.a >= 0.5) return vec4(h.rgb, 1.0);
+            if (!uHDFallback[2]) return vec4(0.0);
         }
     }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[2].Type < 7)
@@ -257,7 +261,8 @@ vec4 BG3Fetch(vec2 coord)
         {
             if (uHDMirror[3]) uv.x = 1.0 - uv.x;
             vec4 h = texture(HDTex[3], uv);
-            return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+            if (h.a >= 0.5) return vec4(h.rgb, 1.0);
+            if (!uHDFallback[3]) return vec4(0.0);
         }
     }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[3].Type < 7)

@@ -3,9 +3,15 @@
 #include "WC09Battle.h"
 #include "GPU.h"
 #include "GPU3D.h"
+#include "WC09Rom.h"
+#include <unordered_map>
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
+#include <string>
+#include <cstdlib>
+#include <cstring>
 
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash/xxhash.h"
@@ -56,6 +62,182 @@ void SetActive(bool active) { Active = active; }
 bool IsActive() { return Active; }
 
 u32 PasscodeOf(u16 card) { return card < NumCards ? Passcodes[card] : 0; }
+
+int CardFromTexHash(u64 hash, u32 size)
+{
+    const TexHashEntry* e = Find(hash, size);
+    return e ? e->Card : -1;
+}
+
+bool LoadCardImage(int card, std::vector<u8>& rgba, int& w, int& h)
+{
+    if (card < 0 || card >= (int)NumCards) return false;
+    if (card == 0) return LoadHDImage("cardback", rgba, w, h);
+    if (u32 pc = Passcodes[card])
+    {
+        char n[16];
+        snprintf(n, sizeof(n), "%u", pc);
+        if (LoadHDImage(n, rgba, w, h)) return true;
+        snprintf(n, sizeof(n), "%08u", pc);
+        if (LoadHDImage(n, rgba, w, h)) return true;
+    }
+    return LoadHDImage("card_" + std::to_string(card), rgba, w, h);
+}
+
+namespace { std::atomic<u64> Cards3DStamp{0}, Cards2DStamp{0}; }
+void NoteCards3DRendered() { Cards3DStamp = FrameNum() + 1; }
+void NoteCards2DRendered() { Cards2DStamp = FrameNum() + 1; }
+
+// ---- big cards drawn as direct-color bitmap sprites (story) -------------------------------
+namespace
+{
+const u8* CardROM = nullptr; u32 CardROMLen = 0;
+constexpr int FPW = 11, FPH = 16, FPN = FPW * FPH * 3;   // 8x8-pixel cell averages of the face
+std::vector<u8> Fingerprints;                             // NumCards * FPN, 5-bit channels
+bool FingerprintsBuilt = false;
+std::unordered_map<u64, int> BitmapCache;
+
+void Fingerprint(const u16* px, u8* out)   // px: 128x128, stride 128, bit 15 = opaque
+{
+    for (int cy = 0; cy < FPH; cy++)
+        for (int cx = 0; cx < FPW; cx++)
+        {
+            int sum[3] = {0, 0, 0};
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                {
+                    u16 c = px[(cy * 8 + y) * 128 + 20 + cx * 8 + x];
+                    sum[0] += c & 31; sum[1] += (c >> 5) & 31; sum[2] += (c >> 10) & 31;
+                }
+            for (int k = 0; k < 3; k++) out[(cy * FPW + cx) * 3 + k] = (u8)(sum[k] / 64);
+        }
+}
+
+bool DecodeCardTex128(const u8* data, u32 len, std::vector<u16>& px)
+{
+    std::vector<u8> buf;
+    if (len && data[0] == 0x10) { if (!LZ10(data, len, buf)) return false; data = buf.data(); len = (u32)buf.size(); }
+    std::vector<u16> pal; const u8* img = nullptr; u32 w = 0, h = 0;
+    for (u32 p = 16; p + 8 <= len;)
+    {
+        u32 cs = RD32(data + p + 4);
+        if (!memcmp(data + p, "PALT", 4) && p + 12 <= len)
+        {
+            u32 n = RD32(data + p + 8);
+            for (u32 k = 0; k < n && p + 12 + 2 * k + 2 <= len; k++) pal.push_back(RD16(data + p + 12 + 2 * k));
+        }
+        else if (!memcmp(data + p, "IMGE", 4) && p + 20 <= len)
+        {
+            w = RD16(data + p + 12); h = RD16(data + p + 14); img = data + p + 20;
+            if (p + 20 + w * h / 16 * 6 > len) img = nullptr;
+        }
+        if (cs < 8) break;
+        p += cs;
+    }
+    if (!img || w != 128 || h != 128 || pal.empty()) return false;
+    px.assign(128 * 128, 0);
+    const u8* tex = img; const u8* pidx = img + 32 * 32 * 4;
+    auto pc = [&](u32 i) -> u16 { return i < pal.size() ? pal[i] : 0; };
+    auto mix = [](u16 a, u16 b, int wa, int wb) {
+        u16 r = 0;
+        for (int s = 0; s < 15; s += 5) r |= (u16)(((((a >> s) & 31) * wa + ((b >> s) & 31) * wb) / (wa + wb)) << s);
+        return r;
+    };
+    for (int bi = 0; bi < 32 * 32; bi++)
+    {
+        u32 word = RD32(tex + bi * 4); u16 pv = RD16(pidx + bi * 2);
+        u32 base = (pv & 0x3FFF) * 2; int mode = pv >> 14;
+        u16 c0 = pc(base), c1 = pc(base + 1), cols[4]; bool t3 = false;
+        if (mode == 0) { cols[0] = c0; cols[1] = c1; cols[2] = pc(base + 2); t3 = true; }
+        else if (mode == 1) { cols[0] = c0; cols[1] = c1; cols[2] = mix(c0, c1, 1, 1); t3 = true; }
+        else if (mode == 2) { cols[0] = c0; cols[1] = c1; cols[2] = pc(base + 2); cols[3] = pc(base + 3); }
+        else { cols[0] = c0; cols[1] = c1; cols[2] = mix(c0, c1, 5, 3); cols[3] = mix(c0, c1, 3, 5); }
+        int bx = (bi % 32) * 4, by = (bi / 32) * 4;
+        for (int t = 0; t < 16; t++)
+        {
+            int ci = (word >> (2 * t)) & 3;
+            px[(by + t / 4) * 128 + bx + t % 4] = (ci == 3 && t3) ? 0 : ((cols[ci] & 0x7FFF) | 0x8000);
+        }
+    }
+    return true;
+}
+
+void BuildFingerprints()
+{
+    FingerprintsBuilt = true;
+    if (!CardROM) return;
+    FileRef f;
+    if (!FindFile(CardROM, CardROMLen, "Data_arc_pac/card.pac", f)) return;
+    const u8* pac = CardROM + f.Start;
+    const PacEntry *tx = nullptr, *idx = nullptr;
+    std::vector<PacEntry> ents = ParsePac(pac, f.Size);
+    for (const PacEntry& e : ents)
+    {
+        if (e.Name.find("tx128_idx") != std::string::npos) idx = &e;
+        else if (e.Name.find("tx128") != std::string::npos) tx = &e;
+    }
+    if (!tx || !idx) return;
+    Fingerprints.assign((size_t)NumCards * FPN, 255);
+    std::vector<u16> px;
+    for (u32 c = 0; c < NumCards && (c + 1) * 4 + 4 <= idx->Size; c++)
+    {
+        u32 a = RD32(pac + idx->Start + c * 4), b = RD32(pac + idx->Start + c * 4 + 4);
+        if (b <= a || b > tx->Size) continue;
+        if (DecodeCardTex128(pac + tx->Start + a, b - a, px)) Fingerprint(px.data(), &Fingerprints[(size_t)c * FPN]);
+    }
+}
+}
+
+void SetCardROM(const u8* rom, u32 len)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    if (rom == CardROM) return;
+    CardROM = rom; CardROMLen = len;
+    FingerprintsBuilt = false; Fingerprints.clear(); BitmapCache.clear();
+}
+
+int CardFromBitmap(const u16* px)
+{
+    // only card-shaped bitmaps: transparent margins, opaque face
+    if ((px[64 * 128 + 2] & 0x8000) || (px[64 * 128 + 125] & 0x8000) || !(px[64 * 128 + 64] & 0x8000)) return -1;
+    u64 key = XXH64(px, 128 * 128 * 2, 0);
+    std::lock_guard<std::mutex> lk(Lock);
+    auto it = BitmapCache.find(key);
+    if (it != BitmapCache.end()) return it->second;
+    if (!FingerprintsBuilt) BuildFingerprints();
+    int best = -1; u32 bestD = ~0u, secondD = ~0u;
+    if (!Fingerprints.empty())
+    {
+        u8 fp[FPN];
+        Fingerprint(px, fp);
+        for (u32 c = 1; c < NumCards; c++)
+        {
+            const u8* f = &Fingerprints[(size_t)c * FPN];
+            u32 d = 0;
+            for (int k = 0; k < FPN && d < secondD; k++) d += (u32)std::abs((int)f[k] - (int)fp[k]);
+            if (d < bestD) { secondD = bestD; bestD = d; best = (int)c; }
+            else if (d < secondD) secondD = d;
+        }
+        // average error under 1 (of 31) per channel, and clearly better than any other card
+        if (bestD > (u32)FPN || (secondD != ~0u && bestD * 3 > secondD)) best = -1;
+    }
+    if (getenv("WC09_DEBUG")) { printf("WC09 bitmap card -> %d (d %u, next %u)\n", best, bestD, secondD); fflush(stdout); }
+    if (BitmapCache.size() > 256) BitmapCache.clear();
+    BitmapCache[key] = best;
+    return best;
+}
+
+std::vector<CardQuad> GetLatest2D()
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    return Latest2D;
+}
+
+void MarkHandled2D(size_t index)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    if (index < Latest2D.size()) Latest2D[index].Handled = true;
+}
 
 void OnPolygon(GPU& gpu, u32 texParam, const Polygon* poly, int nverts)
 {
@@ -122,14 +304,23 @@ void OnFlush(bool screenSwap)
     Building.clear();
 }
 
-FrameCards GetLatest()
+FrameCards GetLatest(bool all)
 {
     std::lock_guard<std::mutex> lk(Lock);
     FrameCards out;
     out.On3DTop = Latest.On3DTop;
-    for (const CardQuad& q : Latest.Quads)
-        if (!BattleOnScreen(q.Screen)) out.Quads.push_back(q);
-    out.Quads.insert(out.Quads.end(), Latest2D.begin(), Latest2D.end());
+    // stamps are frame+1 so 0 means never; "recent" = within the last few VBlanks
+    u64 now = FrameNum();
+    bool gl3d = Cards3DStamp.load() && now + 1 - Cards3DStamp.load() < 4;
+    bool gl2d = Cards2DStamp.load() && now + 1 - Cards2DStamp.load() < 4;
+    if (all) gl3d = gl2d = false;
+    if (!gl3d)
+        for (const CardQuad& q : Latest.Quads)
+            if (!BattleOnScreen(q.Screen)) out.Quads.push_back(q);
+    {
+        for (const CardQuad& q : Latest2D)
+            if (!gl2d || !q.Handled) out.Quads.push_back(q);
+    }
     return out;
 }
 
@@ -216,6 +407,7 @@ void OnVBlank2D(GPU& gpu)
                         q.U[k] = px[k] ? 1.f : 0.f; q.V[k] = py[k] ? 1.f : 0.f;
                     }
                     q.ClipU0 = q.ClipV0 = 0.f; q.ClipU1 = q.ClipV1 = 1.f;
+                    q.MapX = (s16)(x * 8); q.MapY = (s16)(y * 8);
                     found.push_back(q);
                     x += CardTW - 1;
                 }

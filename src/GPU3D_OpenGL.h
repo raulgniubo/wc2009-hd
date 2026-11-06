@@ -109,6 +109,11 @@ private:
     u64 HD3DFrame = 0;
     std::unordered_map<u64, HD3DEntry> HD3D;
     GLuint GetHD3D(u64 hash);
+    // WC09: HD card face built into the card texture's own layout (keyed by content hash)
+    struct CardPx { std::vector<u32> Px; u64 LastUse; };
+    std::unordered_map<u64, CardPx> CardPixels;
+    GLuint GetHDCard(u64 hash, int card, u32 size, const u32* newPixels);
+    GLuint UploadHD3D(const u8* rgba, int w, int h);
     GLuint CurShaderID = -1;
 
     GLuint FinalPassEdgeShader {};

@@ -20,6 +20,7 @@
 #include "GPU_OpenGL.h"
 #include "GPU2D_OpenGL.h"
 #include "WC09Cards.h"
+#include <algorithm>
 #include "WC09Battle.h"
 #include "WC09Sprites.h"
 #include <cstring>
@@ -173,6 +174,7 @@ bool GLRenderer2D::InitShaders()
         CompositorHDRectULoc[i] = glGetUniformLocation(CompositorShader, ("uHDRect[" + n + "]").c_str());
         CompositorHDMirrorULoc[i] = glGetUniformLocation(CompositorShader, ("uHDMirror[" + n + "]").c_str());
         CompositorHDScreenULoc[i] = glGetUniformLocation(CompositorShader, ("uHDScreen[" + n + "]").c_str());
+        CompositorHDFallbackULoc[i] = glGetUniformLocation(CompositorShader, ("uHDFallback[" + n + "]").c_str());
         GLint t = glGetUniformLocation(CompositorShader, ("HDTex[" + n + "]").c_str());
         glUseProgram(CompositorShader);
         glUniform1i(t, 8 + i);
@@ -223,6 +225,7 @@ bool GLRenderer2D::InitShaders(GLRenderer2D& other)
         CompositorHDRectULoc[i] = other.CompositorHDRectULoc[i];
         CompositorHDMirrorULoc[i] = other.CompositorHDMirrorULoc[i];
         CompositorHDScreenULoc[i] = other.CompositorHDScreenULoc[i];
+        CompositorHDFallbackULoc[i] = other.CompositorHDFallbackULoc[i];
     }
 
     MosaicTex = other.MosaicTex;
@@ -416,7 +419,52 @@ GLuint GLRenderer2D::GetHDTexture(int image)
 
     HDTexEntry e {image, 0, false};
     std::vector<u8> rgba; int w = 0, h = 0;
-    if (WC09::LoadHDImage(WC09::BattleImageName(image), rgba, w, h) && w > 0 && h > 0)
+    bool loaded = false;
+    if (WC09::IsCardSet(image))
+    {
+        // several cards on one background: one image covering all of them, 4 px per BG pixel,
+        // transparent between the cards (the compositor shows the original pixels there)
+        std::vector<WC09::CardSetItem> items; int sw = 0, sh = 0;
+        if (WC09::GetCardSet(image, items, sw, sh) && sw > 0 && sh > 0 && sw <= 1024 && sh <= 1024)
+        {
+            const int K = 4;
+            w = sw * K; h = sh * K;
+            rgba.assign((size_t)w * h * 4, 0);
+            for (const WC09::CardSetItem& it : items)
+            {
+                std::vector<u8> src; int iw = 0, ih = 0;
+                if (!WC09::LoadCardImage(it.Card, src, iw, ih) || iw < 2 || ih < 2) continue;
+                loaded = true;
+                const int dw = 88 * K, dh = 128 * K;
+                for (int y = 0; y < dh; y++)
+                {
+                    int ty = it.Y * K + y; if (ty < 0 || ty >= h) continue;
+                    float fy = (y + 0.5f) * ih / dh - 0.5f; int y0 = std::max(0, (int)fy), y1 = std::min(ih - 1, y0 + 1);
+                    float wy = std::clamp(fy - y0, 0.f, 1.f);
+                    for (int x = 0; x < dw; x++)
+                    {
+                        int tx = it.X * K + x; if (tx < 0 || tx >= w) continue;
+                        float fx = (x + 0.5f) * iw / dw - 0.5f; int x0 = std::max(0, (int)fx), x1 = std::min(iw - 1, x0 + 1);
+                        float wx = std::clamp(fx - x0, 0.f, 1.f);
+                        u8* o = &rgba[((size_t)ty * w + tx) * 4];
+                        for (int k = 0; k < 3; k++)
+                        {
+                            float a = src[((size_t)y0 * iw + x0) * 4 + k] * (1 - wx) + src[((size_t)y0 * iw + x1) * 4 + k] * wx;
+                            float b = src[((size_t)y1 * iw + x0) * 4 + k] * (1 - wx) + src[((size_t)y1 * iw + x1) * 4 + k] * wx;
+                            o[k] = (u8)(a * (1 - wy) + b * wy + 0.5f);
+                        }
+                        o[3] = 255;
+                    }
+                }
+            }
+        }
+    }
+    else if (WC09::IsCardImage(image))
+        loaded = WC09::LoadCardImage(image - WC09::kCardImageBase, rgba, w, h);
+    else
+        loaded = WC09::LoadHDImage(WC09::BattleImageName(image), rgba, w, h);
+    if (getenv("WC09_DEBUG")) { printf("WC09 2D HD %d %s %dx%d\n", image, loaded ? "ok" : "missing", w, h); fflush(stdout); }
+    if (loaded && w > 0 && h > 0)
     {
         glGenTextures(1, &e.Tex);
         glActiveTexture(GL_TEXTURE8);
@@ -1551,6 +1599,39 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
 
             sprcfg.PalOffset = 1 + (attrib[2] >> 12); // alpha
             WC09Spr[NumSprites] = {};
+
+            // WC09: big story cards are 2x2 64x64 direct-color bitmap sprites holding a
+            // 128x128 card texture image (2D mapping, 128 px wide)
+            if (WC09::IsActive() && WC09::GetHDCardsEnabled() && width == 64 && height == 64 &&
+                !(GPU2D.DispCnt & (3<<5)) && sprcfg.TileStride == 128 * 2 &&
+                ((tilenum & 0xF) == 0 || (tilenum & 0xF) == 8))
+            {
+                auto& key = WC09SprCache[sprnum];
+                u64 frame = WC09::FrameNum();
+                if (key.A0 != attrib[0] || key.A1 != attrib[1] || key.A2 != attrib[2] || key.Frame != frame)
+                {
+                    WC09::SpriteHD hd;
+                    int q = (tilenum & 0xF) / 8, row = tilenum >> 4;
+                    static u16 bmp[128 * 128];
+                    for (int r = 0; r < 2 && hd.Image < 0; r++)
+                    {
+                        int orow = row - r * 8;
+                        if (orow < 0) continue;
+                        u32 base = (u32)orow * 8 * 256;
+                        for (int i = 0; i < 128 * 128; i++)
+                            bmp[i] = GPU2D.Num ? GPU.ReadVRAM_BOBJ<u16>((base + i * 2) & 0x1FFFF)
+                                               : GPU.ReadVRAM_AOBJ<u16>((base + i * 2) & 0x3FFFF);
+                        int card = WC09::CardFromBitmap(bmp);
+                        if (card <= 0) continue;
+                        hd.Image = WC09::kCardImageBase + card;
+                        hd.OX = (s16)(64 * q - 20); hd.OY = (s16)(64 * r);
+                        hd.OW = 64; hd.OH = 64; hd.IW = 88; hd.IH = 128;
+                    }
+                    WC09SprCached[sprnum] = hd;
+                    key = {attrib[0], attrib[1], attrib[2], sprcfg.TileOffset, frame};
+                }
+                WC09Spr[NumSprites] = WC09SprCached[sprnum];
+            }
         }
         else
         {
@@ -1973,6 +2054,7 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
     // Get (and upload) every texture first: uploading uses a texture unit itself.
     {
         WC09::BGReplacement reps[4]; GLuint texs[4];
+        WC09::NoteCards2DRendered();
         for (int i = 0; i < 4; i++)
         {
             reps[i] = WC09::GetBGReplacement(GPU2D.Num, i);
@@ -1989,6 +2071,7 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
             glUniform4f(CompositorHDRectULoc[i], reps[i].OriginX, reps[i].OriginY, reps[i].Width, reps[i].Height);
             glUniform1i(CompositorHDMirrorULoc[i], reps[i].Mirror ? 1 : 0);
             glUniform1i(CompositorHDScreenULoc[i], reps[i].ScreenSpace ? 1 : 0);
+            glUniform1i(CompositorHDFallbackULoc[i], reps[i].Fallback ? 1 : 0);
         }
     }
     glActiveTexture(GL_TEXTURE0);

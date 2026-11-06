@@ -30,6 +30,7 @@ struct BGReplacement
     float Width = 0, Height = 0;      // image size in BG pixels
     bool Mirror = false;              // drawn horizontally flipped
     bool ScreenSpace = false;         // rect is in screen pixels (fixed on screen, ignores BG scroll)
+    bool Fallback = false;            // transparent HD pixels show the original pixels (card sets)
 };
 
 // Duel card-detail text panel area on the top screen (DS pixels).
@@ -39,6 +40,16 @@ constexpr int kPanelX = 40, kPanelY = 1, kPanelW = 213, kPanelH = 137;
 // odd ids are the short version (when a speech bubble shares the text layer).
 constexpr int kTextPanelBase = 1000000;
 constexpr int kPanelShortH = 123;
+
+// Image ids at or above this are 2D card faces: id - kCardImageBase = card index.
+constexpr int kCardImageBase = 5000000;
+inline bool IsCardImage(int image) { return image >= kCardImageBase && image < 7000000; }
+
+// Image ids at or above this are several 2D cards on one background, composed into one image.
+constexpr int kCardSetBase = 7000000;
+inline bool IsCardSet(int image) { return image >= kCardSetBase; }
+struct CardSetItem { int Card; int X, Y; };   // position inside the set's rect, in BG pixels
+bool GetCardSet(int image, std::vector<CardSetItem>& items, int& w, int& h);
 
 // The renderer reports that it drew the text panel itself this frame (so the frontend
 // doesn't draw its own on top).
