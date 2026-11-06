@@ -21,6 +21,8 @@
 #include "GPU2D_OpenGL.h"
 #include "WC09Cards.h"
 #include "WC09Battle.h"
+#include "WC09Sprites.h"
+#include <cstring>
 #include <string>
 #include "GPU.h"
 #include "GPU3D.h"
@@ -129,6 +131,11 @@ bool GLRenderer2D::InitShaders()
 
     SpriteRenderTransULoc = glGetUniformLocation(SpriteShader, "uRenderTransparent");
     SpriteSmoothULoc = glGetUniformLocation(SpriteShader, "uSmoothScale");
+    SprHDAULoc = glGetUniformLocation(SpriteShader, "uSprHDA");
+    SprHDBULoc = glGetUniformLocation(SpriteShader, "uSprHDB");
+    SprHDSizeULoc = glGetUniformLocation(SpriteShader, "uSprHDSize");
+    for (int i = 0; i < 8; i++)
+        glUniform1i(glGetUniformLocation(SpriteShader, ("SprHDTex[" + std::to_string(i) + "]").c_str()), 8 + i);
 
 
     glUseProgram(CompositorShader);
@@ -207,6 +214,7 @@ bool GLRenderer2D::InitShaders(GLRenderer2D& other)
     LayerPreCurBGULoc = other.LayerPreCurBGULoc;
     SpriteRenderTransULoc = other.SpriteRenderTransULoc;
     SpriteSmoothULoc = other.SpriteSmoothULoc;
+    SprHDAULoc = other.SprHDAULoc; SprHDBULoc = other.SprHDBULoc; SprHDSizeULoc = other.SprHDSizeULoc;
     CompositorScaleULoc = other.CompositorScaleULoc;
     CompositorSmoothULoc = other.CompositorSmoothULoc;
     for (int i = 0; i < 4; i++)
@@ -401,6 +409,11 @@ GLuint GLRenderer2D::GetHDTexture(int image)
         return e.Valid ? e.Tex : 0;
     }
 
+    // remember misses for a while so missing files aren't looked up every frame
+    u64 now = WC09::FrameNum();
+    auto miss = HDMissing.find(image);
+    if (miss != HDMissing.end() && now - miss->second < 300) return 0;
+
     HDTexEntry e {image, 0, false};
     std::vector<u8> rgba; int w = 0, h = 0;
     if (WC09::LoadHDImage(WC09::BattleImageName(image), rgba, w, h) && w > 0 && h > 0)
@@ -414,9 +427,15 @@ GLuint GLRenderer2D::GetHDTexture(int image)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
         e.Valid = true;
+        HDMissing.erase(image);
+    }
+    else
+    {
+        HDMissing[image] = now;
+        return 0;
     }
     HDTextures.insert(HDTextures.begin(), e);
-    if (HDTextures.size() > 12)
+    if (HDTextures.size() > 32)
     {
         if (HDTextures.back().Valid) glDeleteTextures(1, &HDTextures.back().Tex);
         HDTextures.pop_back();
@@ -1531,6 +1550,7 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
             }
 
             sprcfg.PalOffset = 1 + (attrib[2] >> 12); // alpha
+            WC09Spr[NumSprites] = {};
         }
         else
         {
@@ -1547,6 +1567,30 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
                 // 2D mapping
                 sprcfg.TileOffset = tilenum << 5;
                 sprcfg.TileStride = 32 * 32;
+            }
+
+            WC09Spr[NumSprites] = {};
+            if ((GPU2D.DispCnt & (1<<4)) && WC09::IsActive() && WC09::GetHDCardsEnabled())
+            {
+                // identify once per frame per OAM entry (UpdateOAM runs for several line ranges)
+                auto& key = WC09SprCache[sprnum];
+                u64 frame = WC09::FrameNum();
+                if (key.A0 != attrib[0] || key.A1 != attrib[1] || key.A2 != attrib[2] ||
+                    key.TileOffset != sprcfg.TileOffset || key.Frame != frame)
+                {
+                    bool obj8 = attrib[0] & (1<<13);
+                    u32 num = GPU2D.Num;
+                    WC09SprCached[sprnum] = WC09::IdentifySprite(width, height, obj8, sprcfg.TileOffset,
+                        [this, num](u32 off, u32 bytes, u8* out) {
+                            for (u32 i = 0; i + 4 <= bytes; i += 4)
+                            {
+                                u32 v = num ? GPU.ReadVRAM_BOBJ<u32>(off + i) : GPU.ReadVRAM_AOBJ<u32>(off + i);
+                                memcpy(out + i, &v, 4);
+                            }
+                        });
+                    key = {attrib[0], attrib[1], attrib[2], sprcfg.TileOffset, frame};
+                }
+                WC09Spr[NumSprites] = WC09SprCached[sprnum];
             }
 
             if (attrib[0] & (1<<13))
@@ -1680,6 +1724,42 @@ void GLRenderer2D::DoRenderSprites(int line)
 
     glUseProgram(SpriteShader);
     glUniform1i(SpriteSmoothULoc, WC09::GetSmooth2D() ? ScaleFactor : 0);
+
+    // WC09: HD sprite images, up to 8 different images at once
+    {
+        static GLint hdA[128 * 4], hdB[128 * 4];
+        GLfloat hdSize[8 * 2] = {};
+        int slotImage[8]; GLuint slotTex[8] = {}; int numSlots = 0;
+        for (int i = 0; i < 128; i++)
+        {
+            hdA[i*4] = -1; hdA[i*4+1] = hdA[i*4+2] = hdA[i*4+3] = 0;
+            hdB[i*4] = hdB[i*4+1] = hdB[i*4+2] = hdB[i*4+3] = 0;
+            if (i >= NumSprites || WC09Spr[i].Image < 0) continue;
+            const WC09::SpriteHD& h = WC09Spr[i];
+            int slot = -1;
+            for (int k = 0; k < numSlots; k++) if (slotImage[k] == h.Image) slot = k;
+            if (slot < 0 && numSlots < 8)
+            {
+                GLuint tex = GetHDTexture(h.Image);
+                if (!tex) continue;
+                slot = numSlots++;
+                slotImage[slot] = h.Image; slotTex[slot] = tex;
+                hdSize[slot*2] = h.IW; hdSize[slot*2+1] = h.IH;
+            }
+            if (slot < 0) continue;
+            hdA[i*4] = slot; hdA[i*4+1] = h.OX; hdA[i*4+2] = h.OY; hdA[i*4+3] = (h.HF ? 1 : 0) | (h.VF ? 2 : 0);
+            hdB[i*4] = h.OW; hdB[i*4+1] = h.OH; hdB[i*4+2] = h.DX; hdB[i*4+3] = h.DY;
+        }
+        for (int k = 0; k < 8; k++)
+        {
+            glActiveTexture(GL_TEXTURE8 + k);
+            glBindTexture(GL_TEXTURE_2D, k < numSlots ? slotTex[k] : 0);
+        }
+        glActiveTexture(GL_TEXTURE0);
+        glUniform4iv(SprHDAULoc, 128, hdA);
+        glUniform4iv(SprHDBULoc, 128, hdB);
+        glUniform2fv(SprHDSizeULoc, 8, hdSize);
+    }
 
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_STENCIL_TEST);
@@ -1889,20 +1969,27 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
     glActiveTexture(GL_TEXTURE7);
     glBindTexture(GL_TEXTURE_2D, MosaicTex);
 
-    // WC09: HD replacements for background images (battle monsters)
-    for (int i = 0; i < 4; i++)
+    // WC09: HD replacements for background images (battle monsters, menus, text panel).
+    // Get (and upload) every texture first: uploading uses a texture unit itself.
     {
-        WC09::BGReplacement rep = WC09::GetBGReplacement(GPU2D.Num, i);
-        bool isPanel = rep.Image >= WC09::kTextPanelBase;
-        bool allowed = isPanel ? WC09::GetHDTextEnabled() : WC09::GetHDCardsEnabled();
-        GLuint tex = (rep.Image >= 0 && allowed) ? GetHDTexture(rep.Image) : 0;
-        if (tex && isPanel) WC09::NotePanelRendered();
-        glActiveTexture(GL_TEXTURE8 + i);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glUniform1i(CompositorHDOnULoc[i], tex ? 1 : 0);
-        glUniform4f(CompositorHDRectULoc[i], rep.OriginX, rep.OriginY, rep.Width, rep.Height);
-        glUniform1i(CompositorHDMirrorULoc[i], rep.Mirror ? 1 : 0);
-        glUniform1i(CompositorHDScreenULoc[i], rep.ScreenSpace ? 1 : 0);
+        WC09::BGReplacement reps[4]; GLuint texs[4];
+        for (int i = 0; i < 4; i++)
+        {
+            reps[i] = WC09::GetBGReplacement(GPU2D.Num, i);
+            bool isPanel = reps[i].Image >= WC09::kTextPanelBase && reps[i].Image < WC09::kSpriteImageBase;
+            bool allowed = isPanel ? WC09::GetHDTextEnabled() : WC09::GetHDCardsEnabled();
+            texs[i] = (reps[i].Image >= 0 && allowed) ? GetHDTexture(reps[i].Image) : 0;
+            if (texs[i] && isPanel) WC09::NotePanelRendered();
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            glActiveTexture(GL_TEXTURE8 + i);
+            glBindTexture(GL_TEXTURE_2D, texs[i]);
+            glUniform1i(CompositorHDOnULoc[i], texs[i] ? 1 : 0);
+            glUniform4f(CompositorHDRectULoc[i], reps[i].OriginX, reps[i].OriginY, reps[i].Width, reps[i].Height);
+            glUniform1i(CompositorHDMirrorULoc[i], reps[i].Mirror ? 1 : 0);
+            glUniform1i(CompositorHDScreenULoc[i], reps[i].ScreenSpace ? 1 : 0);
+        }
     }
     glActiveTexture(GL_TEXTURE0);
 

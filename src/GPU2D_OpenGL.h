@@ -18,11 +18,13 @@
 
 #pragma once
 #include <vector>
+#include <unordered_map>
 
 #include <memory>
 #include <optional>
 #include "OpenGLSupport.h"
 #include "GPU2D.h"
+#include "WC09Sprites.h"
 
 namespace melonDS
 {
@@ -70,6 +72,10 @@ private:
     GLuint SpriteShader {};
     GLint SpriteRenderTransULoc {};
     GLint SpriteSmoothULoc {-1};
+    GLint SprHDAULoc {-1}, SprHDBULoc {-1}, SprHDSizeULoc {-1};
+    WC09::SpriteHD WC09Spr[128];
+    struct WC09SprKey { u16 A0, A1, A2; u32 TileOffset; u64 Frame; } WC09SprCache[128] {};
+    WC09::SpriteHD WC09SprCached[128];
     GLuint SpriteVtxBuffer {};
     GLuint SpriteVtxArray {};
     u16* SpriteVtxData {};
@@ -84,6 +90,7 @@ private:
     GLint CompositorHDScreenULoc[4] {-1, -1, -1, -1};
     struct HDTexEntry { int Image; GLuint Tex; bool Valid; };
     std::vector<HDTexEntry> HDTextures;     // small LRU of uploaded HD BG images
+    std::unordered_map<int, u64> HDMissing; // image -> frame of the last failed lookup
     GLuint GetHDTexture(int image);
 
     // base index for a BG layer within the BG texture arrays

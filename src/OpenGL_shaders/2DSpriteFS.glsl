@@ -159,8 +159,38 @@ vec4 XbrFetchSprite(int sprite, vec2 coord)
     return r;
 }
 
+// ---- WC09: HD sprite images (portraits, character figures, menu objects) ----
+uniform ivec4 uSprHDA[128];     // slot (-1 = none), image x/y of the matched OAM, flags (1 = hflip, 2 = vflip)
+uniform ivec4 uSprHDB[128];     // matched OAM w/h, tile-space offset x/y
+uniform vec2 uSprHDSize[8];     // image size in original pixels
+uniform sampler2D SprHDTex[8];
+
+vec4 SprHDSample(int slot, vec2 uv)
+{
+    if (slot == 0) return texture(SprHDTex[0], uv);
+    if (slot == 1) return texture(SprHDTex[1], uv);
+    if (slot == 2) return texture(SprHDTex[2], uv);
+    if (slot == 3) return texture(SprHDTex[3], uv);
+    if (slot == 4) return texture(SprHDTex[4], uv);
+    if (slot == 5) return texture(SprHDTex[5], uv);
+    if (slot == 6) return texture(SprHDTex[6], uv);
+    return texture(SprHDTex[7], uv);
+}
+
 vec4 GetSpritePixel(int sprite, vec2 coord)
 {
+    ivec4 hda = uSprHDA[sprite];
+    if (hda.x >= 0)
+    {
+        ivec4 hdb = uSprHDB[sprite];
+        vec2 s = coord + vec2(hdb.zw);
+        vec2 c = vec2(((hda.w & 1) != 0) ? float(hdb.x) - s.x : s.x,
+                      ((hda.w & 2) != 0) ? float(hdb.y) - s.y : s.y);
+        vec2 uv = (vec2(hda.yz) + c) / uSprHDSize[hda.x];
+        vec4 h = SprHDSample(hda.x, uv);
+        return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
+    }
+
     if (uSmoothScale > 1 && uOAM[sprite].OBJMode != 2)
         return XbrFetchSprite(sprite, coord);
     ivec2 basecoord = ivec2((sprite & 0xF) * 64, (sprite >> 4) * 64);

@@ -1,4 +1,6 @@
 #include "WC09Battle.h"
+#include "WC09Rom.h"
+#include "WC09Sprites.h"
 #include "WC09Cards.h"
 #include "GPU.h"
 #include "NDS.h"
@@ -21,107 +23,6 @@ namespace melonDS::WC09
 namespace
 {
 
-// ---- ROM helpers (NitroFS, Konami .pac, LZ10, NTBG) --------------------------------------
-
-u32 RD32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((u32)p[3] << 24); }
-u16 RD16(const u8* p) { return p[0] | (p[1] << 8); }
-
-struct FileRef { u32 Start = 0, Size = 0; };
-
-bool FindFile(const u8* rom, u32 len, const std::string& path, FileRef& out)
-{
-    u32 fnt = RD32(rom + 0x40), fat = RD32(rom + 0x48);
-    if (fnt >= len || fat >= len) return false;
-    u32 dir = 0xF000;
-    size_t pos = 0;
-    while (true)
-    {
-        size_t slash = path.find('/', pos);
-        std::string part = path.substr(pos, slash == std::string::npos ? std::string::npos : slash - pos);
-        const u8* ent = rom + fnt + (dir & 0xFFF) * 8;
-        u32 p = fnt + RD32(ent);
-        u16 fid = RD16(ent + 4);
-        bool found = false;
-        while (p < len && rom[p])
-        {
-            u8 t = rom[p++]; u8 n = t & 0x7F;
-            std::string name((const char*)rom + p, n); p += n;
-            if (t & 0x80)
-            {
-                u16 sub = RD16(rom + p); p += 2;
-                if (slash != std::string::npos && name == part) { dir = sub; found = true; break; }
-            }
-            else
-            {
-                if (slash == std::string::npos && name == part)
-                {
-                    out.Start = RD32(rom + fat + fid * 8);
-                    out.Size = RD32(rom + fat + fid * 8 + 4) - out.Start;
-                    return out.Start + out.Size <= len;
-                }
-                fid++;
-            }
-        }
-        if (!found) return false;
-        pos = slash + 1;
-    }
-}
-
-struct PacEntry { std::string Name; u32 Start, Size; };
-
-std::vector<PacEntry> ParsePac(const u8* d, u32 len)
-{
-    std::vector<PacEntry> out;
-    if (len < 0x200) return out;
-    u32 tableOff = RD16(d) + d[2] * 0x200;
-    std::vector<std::string> names;
-    for (u32 sec = 0; sec < tableOff && sec < len; sec += 0x200)
-    {
-        u32 p = sec + 3;
-        while (p < len && d[p]) { u8 n = d[p]; names.emplace_back((const char*)d + p + 2, n); p += 2 + n; }
-    }
-    u32 t = tableOff;
-    std::vector<std::pair<u32, u32>> ents;
-    while (ents.size() < names.size() && t + 8 <= len)
-    {
-        if (((t - tableOff) & 0x1FF) == 0) t += 8;
-        ents.emplace_back(RD32(d + t), RD32(d + t + 4)); t += 8;
-    }
-    u32 base = (t + 0x1FF) & ~0x1FFu;
-    for (size_t i = 0; i < ents.size(); i++)
-        if (base + ents[i].first + ents[i].second <= len)
-            out.push_back({names[i], base + ents[i].first, ents[i].second});
-    return out;
-}
-
-bool LZ10(const u8* src, u32 len, std::vector<u8>& out)
-{
-    if (len < 4 || src[0] != 0x10) return false;
-    u32 size = src[1] | (src[2] << 8) | (src[3] << 16);
-    out.clear(); out.reserve(size);
-    u32 p = 4;
-    while (out.size() < size && p < len)
-    {
-        u8 flags = src[p++];
-        for (int b = 0; b < 8 && out.size() < size; b++)
-        {
-            if (flags & (0x80 >> b))
-            {
-                if (p + 1 >= len) return false;
-                u32 n = (src[p] >> 4) + 3, disp = (((src[p] & 0xF) << 8) | src[p + 1]) + 1; p += 2;
-                if (disp > out.size()) return false;
-                for (u32 k = 0; k < n; k++) out.push_back(out[out.size() - disp]);
-            }
-            else
-            {
-                if (p >= len) return false;
-                out.push_back(src[p++]);
-            }
-        }
-    }
-    return out.size() == size;
-}
-
 // ---- battle image index ------------------------------------------------------------------
 
 struct Image
@@ -132,9 +33,11 @@ struct Image
     std::vector<u16> Map;
 };
 
+struct TilePos { int Image; u8 X, Y; bool HF; };
 struct CharSet
 {
     std::vector<int> Images;
+    std::vector<std::vector<TilePos>> Pos;    // tile number -> where it's used (capped)
 };
 
 struct TileRef { int CharSet; u16 Tile; };
@@ -169,6 +72,9 @@ void LoadCardText(const u8* rom, u32 len)
         std::string utf8;
         for (unsigned char c : out)
         {
+            if (c == 0x9D) { utf8 += "\xE2\x97\x8F"; continue; }   // the game's bullet -> U+25CF
+            if (c == 0x8F) { utf8 += "\xE2\x98\x85"; continue; }   // star
+            if (c == '\r') continue;
             if (c < 0x80) utf8 += (char)c;
             else { utf8 += (char)(0xC0 | (c >> 6)); utf8 += (char)(0x80 | (c & 0x3F)); }
         }
@@ -194,17 +100,27 @@ void BuildIndex(const u8* rom, u32 len)
     std::unordered_map<u64, int> tileOwner;         // hash -> charset, -1 = ambiguous
     std::unordered_map<u64, u16> tileNum;
 
-    // every 256-color background image set we know how to replace
-    for (const char* f : {"BattleMonsterR1", "BattleMonsterL1", "BattleMonsterR2", "BattleMonsterL2",
-                          "chr", "chr_tag", "editface", "editface_tag", "field"})
+    // every 256-color background image set we know how to replace: battle images, the duel UI,
+    // menus and screens. Name = the .pac's file name without extension.
+    static const char* const kSets[] = {
+        "duel2d/BattleMonsterR1", "duel2d/BattleMonsterL1", "duel2d/BattleMonsterR2", "duel2d/BattleMonsterL2",
+        "duel2d/field", "duel2d", "CharaMake", "Closet", "DCustom", "D_race_result", "DataRoom", "Dsimulator",
+        "FreeDuel", "FriendMenu", "Getpack", "MainMenu", "Name", "Password", "Record", "Structure",
+        "TagSetting", "WiFi", "WiFiDownload", "WiFiRanking", "WordSelect", "janken", "logo", "trunk",
+        "Common", "cpuduel" };
+    for (const char* path : kSets)
     {
         FileRef ref;
-        if (!FindFile(rom, len, std::string("Data_arc_pac/duel2d/") + f + ".pac", ref)) continue;
+        if (!FindFile(rom, len, std::string("Data_arc_pac/") + path + ".pac", ref)) continue;
+        std::string sp(path);
+        std::string f = sp.substr(sp.rfind('/') == std::string::npos ? 0 : sp.rfind('/') + 1);
         for (const PacEntry& e : ParsePac(rom + ref.Start, ref.Size))
         {
             std::vector<u8> dec;
-            if (!LZ10(rom + ref.Start + e.Start, e.Size, dec) || dec.size() < 16) continue;
-            if (memcmp(dec.data(), "NTBG", 4) != 0) continue;
+            const u8* src = rom + ref.Start + e.Start;
+            if (e.Size >= 4 && src[0] == 0x10) { if (!LZ10(src, e.Size, dec)) continue; }
+            else dec.assign(src, src + e.Size);
+            if (dec.size() < 16 || memcmp(dec.data(), "NTBG", 4) != 0) continue;
             u32 p = 16;
             while (p + 8 <= dec.size())
             {
@@ -213,6 +129,7 @@ void BuildIndex(const u8* rom, u32 len)
                 if (memcmp(&dec[p], "BGDT", 4) == 0 && cs >= 28)
                 {
                     const u8* body = &dec[p + 8];
+                    if (body[0] != 1) break;          // 8bpp images only
                     u32 mapsz = RD32(body + 4); u16 tw = RD16(body + 8), th = RD16(body + 10);
                     u32 chrsz = RD32(body + 16);
                     if (20 + mapsz + chrsz > cs - 8 || mapsz < (u32)tw * th * 2) break;
@@ -235,7 +152,7 @@ void BuildIndex(const u8* rom, u32 len)
                     else csid = it->second;
 
                     Image img;
-                    img.Name = std::string(f) + "/" + e.Name.substr(0, e.Name.find('.'));
+                    img.Name = f + "/" + e.Name.substr(0, e.Name.find('.'));
                     img.CharSet = csid; img.TW = tw; img.TH = th;
                     img.Map.resize((size_t)tw * th);
                     for (size_t k = 0; k < img.Map.size(); k++) img.Map[k] = RD16(mp + k * 2);
@@ -249,6 +166,21 @@ void BuildIndex(const u8* rom, u32 len)
     }
     for (auto& [h, cs] : tileOwner)
         if (cs >= 0) TileIndex[h] = {cs, tileNum[h]};
+    for (CharSet& cs : CharSets)
+    {
+        cs.Pos.assign(1024, {});
+        for (int imgId : cs.Images)
+        {
+            const Image& img = Images[imgId];
+            for (int py = 0; py < img.TH; py++)
+                for (int px = 0; px < img.TW; px++)
+                {
+                    u16 me = img.Map[py * img.TW + px];
+                    auto& v = cs.Pos[me & 0x3FF];
+                    if (v.size() < 6) v.push_back({imgId, (u8)px, (u8)py, (bool)((me >> 10) & 1)});
+                }
+        }
+    }
     Indexed = true;
     if (getenv("WC09_DEBUG"))
     {
@@ -276,10 +208,12 @@ bool LoadHDImage(const std::string& name, std::vector<u8>& rgba, int& w, int& h)
 std::atomic<u64> PanelStamp{0};
 std::atomic<u64> VBlankCount{0};
 void NotePanelRendered() { PanelStamp = VBlankCount.load(); }
+u64 FrameNum() { return VBlankCount.load(); }
 bool PanelRenderedRecently() { return VBlankCount.load() - PanelStamp.load() < 3; }
 
 std::string BattleImageName(int image)
 {
+    if (image >= kSpriteImageBase) return SpriteImageName(image);
     if (image >= kTextPanelBase)
         return "textpanel/" + std::to_string((image - kTextPanelBase) / 2) + (((image - kTextPanelBase) & 1) ? "s" : "");
     if (image < 0 || image >= (int)Images.size()) return {};
@@ -311,6 +245,7 @@ void OnVBlankBattle(GPU& gpu)
         if (cart && cart->GetROM() != IndexedROM)
         {
             BuildIndex(cart->GetROM(), cart->GetROMLength());
+            BuildSpriteIndex(cart->GetROM(), cart->GetROMLength());
             LoadCardText(cart->GetROM(), cart->GetROMLength());
             IndexedROM = cart->GetROM();
         }
@@ -344,6 +279,8 @@ void OnVBlankBattle(GPU& gpu)
                 int sx0 = (u.BGXPos[bg] & 0x1FF) >> 3, sy0 = (u.BGYPos[bg] & 0x1FF) >> 3;
                 // votes: key = (image, originX, originY, mirror)
                 std::map<std::tuple<int, int, int, bool>, int> votes;
+                static u64 hashOf[1024]; static bool hashed[1024];
+                memset(hashed, 0, sizeof(hashed));
                 for (int cy = 0; cy < 25; cy++)
                 {
                     for (int cx = 0; cx < 33; cx++)
@@ -352,36 +289,36 @@ void OnVBlankBattle(GPU& gpu)
                         u16 e = entry(mx, my);
                         u16 t = e & 0x3FF;
                         if (t == 0) continue;
-                        u8 tile[64];
-                        for (int i = 0; i < 64; i += 2) *(u16*)&tile[i] = ReadBG(gpu, engine, charBase + t * 64 + i);
-                        auto hit = TileIndex.find(XXH64(tile, 64, 0));
+                        if (!hashed[t])
+                        {
+                            u8 tile[64];
+                            for (int i = 0; i < 64; i += 2) *(u16*)&tile[i] = ReadBG(gpu, engine, charBase + t * 64 + i);
+                            hashOf[t] = XXH64(tile, 64, 0); hashed[t] = true;
+                        }
+                        auto hit = TileIndex.find(hashOf[t]);
                         if (hit == TileIndex.end()) continue;
                         const TileRef& r = hit->second;
                         int tileBase = (int)t - (int)r.Tile;
                         bool ehf = (e >> 10) & 1;
-                        for (int imgId : CharSets[r.CharSet].Images)
+                        for (const TilePos& tp : CharSets[r.CharSet].Pos[r.Tile])
                         {
-                            const Image& img = Images[imgId];
-                            for (int py = 0; py < img.TH; py++)
-                                for (int px = 0; px < img.TW; px++)
-                                {
-                                    u16 me = img.Map[py * img.TW + px];
-                                    if ((me & 0x3FF) != r.Tile) continue;
-                                    // the game may mirror the whole image with tile flips
-                                    bool mirror = ((me >> 10) & 1) != ehf;
-                                    int ox = mirror ? mx - (img.TW - 1 - px) : mx - px;
-                                    int oy = my - py;
-                                    // confirm with a second cell
-                                    int qx = (px + img.TW / 2) % img.TW, qy = (py + img.TH / 2) % img.TH;
-                                    u16 qm = img.Map[qy * img.TW + qx];
-                                    u16 qv = entry(mirror ? ox + (img.TW - 1 - qx) : ox + qx, oy + qy);
-                                    if ((qm & 0x3FF) == 0) { if ((qv & 0x3FF) != 0 && (qv & 0x3FF) != (u16)tileBase) continue; }
-                                    else if ((qv & 0x3FF) != (u16)((qm & 0x3FF) + tileBase)) continue;
-                                    votes[{imgId, ox, oy, mirror}]++;
-                                }
+                            const Image& img = Images[tp.Image];
+                            int px = tp.X, py = tp.Y;
+                            // the game may mirror the whole image with tile flips
+                            bool mirror = tp.HF != ehf;
+                            int ox = mirror ? mx - (img.TW - 1 - px) : mx - px;
+                            int oy = my - py;
+                            // confirm with a second cell
+                            int qx = (px + img.TW / 2) % img.TW, qy = (py + img.TH / 2) % img.TH;
+                            u16 qm = img.Map[qy * img.TW + qx];
+                            u16 qv = entry(mirror ? ox + (img.TW - 1 - qx) : ox + qx, oy + qy);
+                            if ((qm & 0x3FF) == 0) { if ((qv & 0x3FF) != 0 && (qv & 0x3FF) != (u16)tileBase) continue; }
+                            else if ((qv & 0x3FF) != (u16)((qm & 0x3FF) + tileBase)) continue;
+                            if (++votes[{tp.Image, ox, oy, mirror}] >= 6) goto voted;
                         }
                     }
                 }
+            voted:
                 int best = 0;
                 for (auto& [k, v] : votes)
                 {

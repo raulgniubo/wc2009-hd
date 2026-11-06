@@ -43,6 +43,7 @@ constexpr int kPanelShortH = 123;
 // The renderer reports that it drew the text panel itself this frame (so the frontend
 // doesn't draw its own on top).
 void NotePanelRendered();
+u64 FrameNum();
 bool PanelRenderedRecently();
 
 // Called at VBlank (after OnVBlank2D). Builds the index on first use.
