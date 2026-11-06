@@ -1,45 +1,49 @@
 # wc2009-hd
 
-A personal melonDS fork that draws HD card images over the cards in
-**Yu-Gi-Oh! 5D's World Championship 2009: Stardust Accelerator** (US, game code `CY8E`).
+A personal melonDS fork that makes **Yu-Gi-Oh! 5D's World Championship 2009: Stardust Accelerator**
+(US, game code `CY8E`) look much better on Mac and Windows. The emulated DS runs unchanged;
+the fork recognizes what the game draws and swaps in HD versions.
 
-The emulated DS still renders normally. The fork only watches which card textures
-the game draws and where. The window then draws your HD image of that card on top,
-at full window resolution, with correct perspective.
+## What it does
+| Feature | How | Toggle (View menu) |
+| --- | --- | --- |
+| HD cards everywhere (deck editor, duel card view, hand, field) | Recognizes each card texture / tile set, draws your HD card image in its place | HD cards |
+| HD battle images (big monster pictures during attacks) | Recognizes the battle image on its background layer, the 2D compositor samples an HD version | HD cards |
+| HD card text in the duel card view | Name + full description redrawn in a real font, whole text fits without scrolling | HD card text |
+| Smooth 2D graphics (menus, portraits, UI) | xBR-style edge-directed upscaling of 2D layers and sprites | Smooth 2D graphics |
+| Sharp 3D | OpenGL renderer at 4x by default | Config > Video |
+
+Defaults are set for the best look: OpenGL renderer at 4x, OpenGL display, screens side by side.
 
 ## Use it
-1. Download the latest macOS build from **Actions → macOS (Apple Silicon) → latest run → Artifacts**.
-2. Unzip it. The first time, right-click `melonDS.app` → Open (the build is ad-hoc signed).
-3. Next to your ROM, create a folder named `HDCards` and put card images in it:
-   - `HDCards/<passcode>.jpg` (or .png/.webp). Example: `70902743.jpg` for Red Dragon Archfiend.
-   - Game-only cards without a passcode: `HDCards/card_<index>.png`.
-   - Each image is the **full card face**, portrait, any resolution (capped at 1024 px tall when loaded).
-4. For sharp 3D as well: Config → Video → OpenGL renderer, internal resolution 4x or higher.
+1. Download the latest macOS build: **Actions > macOS (Apple Silicon) > latest run > Artifacts**.
+2. Unzip, then right-click `melonDS.app` > Open the first time (ad-hoc signed).
+3. Put your ROM in a folder with an `HDCards` folder next to it:
+   - `bash get_hd_cards.sh` fills it with the full card images (by passcode, from YGOPRODeck).
+   - Unzip the HD pack (battle images + game-only cards) into the same folder.
 
-Cards without an image in `HDCards` show the original art.
+Layout of `HDCards/`:
+- `<passcode>.jpg` - card faces; `card_<index>.jpg` for game-only cards without a passcode.
+- `BattleMonsterR1/<id>_r.png`, `BattleMonsterR2/...`, `BattleMonsterL1/...`, `BattleMonsterL2/...` -
+  battle images. Left-facing images that are just mirrors fall back to the right-facing file.
+- Anything missing simply shows the original graphics.
 
-## Layout
-- `src/WC09Cards.*`: core hook. It identifies card textures with XXH64 over the texel data (table in `WC09CardTable.h`) and records each card's screen quad and texture coords per 3D frame.
-- `src/frontend/qt_sdl/WC09Overlay.*`: HD image loading/cache and projective UVs.
-- `src/frontend/qt_sdl/Screen.cpp`: draws the overlay in both the OpenGL and the software (QPainter) display paths.
-- `wc09/tools`: ROM research tools (pac/card.pac decoders, headless harness, table generator).
-- `wc09/research/FINDINGS.md`: what's verified about the game's card assets.
+## Layout of the code
+- `src/WC09Cards.*`: identifies card textures (XXH64 over texel data, table in `WC09CardTable.h`)
+  and 2D card faces; records each card's screen quad.
+- `src/WC09Battle.*`: indexes the ROM's background image sets at load, recognizes them per frame,
+  card text from the ROM's card database.
+- `src/GPU2D_OpenGL.cpp`, `OpenGL_shaders/2DCompositorFS.glsl`, `2DSpriteFS.glsl`: HD background
+  sampling, text panel, xBR smoothing.
+- `src/frontend/qt_sdl/WC09Overlay.*`, `Screen.cpp`: HD card overlay, text panel rendering, image loading.
+- `wc09/tools`: ROM research tools; `wc09/research/FINDINGS.md`: verified facts about the game's assets.
 
-## Status (v0.2)
-Working (tested live on the real build, both the OpenGL and the standard display):
-- Deck editor card view (3D, 128 px card texture).
-- Duels: the card detail on the top screen (2D background tiles), the raised card in your hand
-  (3D, 64 px), cards in your hand and on the field (3D, 32 px artwork, drawn in perspective).
-
-Not yet:
-- The card in the story intro (it is not one of the 2,934 card images).
-- Both screens showing 3D at once (display capture).
-- Sprites the game draws on top of the 2D card (stars, attribute icon) get covered by the HD card,
-  which has its own.
+## Known gaps
+- Duelist portraits and the large character figures are sprites; they get the smoothing filter,
+  not real HD replacements.
+- The card in the story intro isn't one of the 2,934 card images.
+- HD battle images and HD text need the OpenGL renderer (the default). With the software renderer
+  you still get HD cards and the text panel as an overlay.
 - US ROM only.
 
-## Getting HD images
-`wc09/get_hd_cards.sh` downloads every card with a passcode (2,796 cards) from YGOPRODeck
-into `HDCards/`, once. Run it next to your ROM: `bash get_hd_cards.sh`.
-
-No ROMs, game files or card artwork are included. Bring your own.
+No ROMs, game files or card artwork are included in this repository.
