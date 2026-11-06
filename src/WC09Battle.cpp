@@ -464,6 +464,8 @@ bool HideSprite(int engine, int x, int y, int w, int h)
 namespace
 {
 bool TextLayer[2][4];
+std::vector<u8> TextMask[2][4];      // 64x64 map tiles, 255 = text tile
+u32 TextMaskGen[2][4];
 struct TextCacheEntry { u64 Key = 0; bool Text = false; };
 TextCacheEntry TextCache[2][4];
 
@@ -482,42 +484,48 @@ bool DetectTextLayer(GPU& gpu, int engine, int bg)
     int sx0 = u.BGXPos[bg] & 0x1FF, sy0 = u.BGYPos[bg] & 0x1FF;
     const u8* pal = &gpu.Palette[engine * 0x400];
 
-    // visible map entries (and the palette) decide; cache on them
-    static u16 ents[33 * 25];
+    // visible map entries
+    static u16 ents[33 * 25]; static u16 pos[33 * 25];
     int ne = 0;
     for (int ty = 0; ty < 25; ty++)
         for (int tx = 0; tx < 33; tx++)
         {
             int mx = ((sx0 >> 3) + tx) & (mapW - 1), my = ((sy0 >> 3) + ty) & (mapH - 1);
             u32 block = (mx >> 5) + ((my >> 5) * (mapW >> 5));
+            pos[ne] = (u16)(my * 64 + mx);
             ents[ne++] = ReadBG(gpu, engine, scrBase + block * 0x800 + (((my & 31) * 32 + (mx & 31)) * 2));
         }
     // unique tiles and their pixels (the game writes text into the tile data, not the map)
     static u16 tiles[1024], banks[1024];
     static u8 data[1024 * 64];
+    static s16 tileOf[33 * 25];
     int nt = 0;
     u32 bytes = bpp8 ? 64 : 32;
     for (int i = 0; i < ne; i++)
     {
         u16 t = ents[i] & 0x3FF, bank = bpp8 ? 0 : (ents[i] >> 12);
-        bool dup = false;
-        for (int k = 0; k < nt && !dup; k++) dup = tiles[k] == t && banks[k] == bank;
-        if (dup) continue;
-        if (nt == 1024) return false;
-        tiles[nt] = t; banks[nt] = bank;
-        for (u32 b = 0; b < bytes; b += 2)
+        int found = -1;
+        for (int k = 0; k < nt && found < 0; k++) if (tiles[k] == t && banks[k] == bank) found = k;
+        if (found < 0)
         {
-            u16 two = ReadBG(gpu, engine, charBase + t * bytes + b);
-            data[nt * bytes + b] = two & 0xFF; data[nt * bytes + b + 1] = two >> 8;
+            if (nt == 1024) return false;
+            tiles[nt] = t; banks[nt] = bank;
+            for (u32 b = 0; b < bytes; b += 2)
+            {
+                u16 two = ReadBG(gpu, engine, charBase + t * bytes + b);
+                data[nt * bytes + b] = two & 0xFF; data[nt * bytes + b + 1] = two >> 8;
+            }
+            found = nt++;
         }
-        nt++;
+        tileOf[i] = (s16)found;
     }
-    u64 key = XXH64(data, nt * bytes, cnt) ^ (XXH64(tiles, nt * 2, 7) * 31) ^ (XXH64(banks, nt * 2, 9) * 17) ^ (XXH64(pal, 512, 1) * 131);
+    u64 key = XXH64(data, nt * bytes, cnt) ^ (XXH64(ents, ne * 2, 7) * 31) ^ (XXH64(pal, 512, 1) * 131) ^ ((u64)sx0 << 40) ^ ((u64)sy0 << 50);
     TextCacheEntry& c = TextCache[engine][bg];
     if (c.Key == key) return c.Text;
     c.Key = key; c.Text = false;
 
-    u32 used[16] = {};          // per group: bit k = index k used
+    // which 16-colour groups are text ramps (index 1 near black climbing to a bright 15)
+    u32 used[16] = {};
     for (int n = 0; n < nt; n++)
         for (u32 b = 0; b < bytes; b++)
         {
@@ -526,30 +534,58 @@ bool DetectTextLayer(GPU& gpu, int engine, int bg)
             {
                 u32 idx = bpp8 ? v : ((v >> (4 * k)) & 0xF);
                 if (!idx) continue;
-                u32 g = bpp8 ? idx >> 4 : banks[n];
-                if ((idx & 15) == 0) return false;
-                used[g] |= 1u << (idx & 15);
+                used[bpp8 ? idx >> 4 : banks[n]] |= 1u << (idx & 15);
             }
         }
-    int groups = 0, steps = 0;
+    u16 ramp = 0;
     for (int g = 0; g < 16; g++)
     {
-        if (!used[g]) continue;
-        if (++groups > 4) return false;
-        steps = std::max(steps, __builtin_popcount(used[g]));
-        int prev = -1, lo = 0, hi = 0;
-        for (int k = 1; k < 16; k++)
+        if (!used[g] || (used[g] & 1) || __builtin_popcount(used[g]) < 6) continue;
+        int prev = -1, lo = 0, hi = 0; bool ok = true;
+        for (int k = 1; k < 16 && ok; k++)
         {
             u16 col = pal[(g * 16 + k) * 2] | (pal[(g * 16 + k) * 2 + 1] << 8);
             int m = std::max({col & 31, (col >> 5) & 31, (col >> 10) & 31});
             if (k == 1) lo = m;
             if (k == 15) hi = m;
-            if (m + 2 < prev) return false;     // must climb (small wobble allowed)
+            if (m + 2 < prev) ok = false;
             prev = m;
         }
-        if (lo > 10 || hi < 24) return false;
+        if (ok && lo <= 10 && hi >= 24) ramp |= 1 << g;
     }
-    c.Text = groups > 0 && steps >= 6;
+    // per tile: text when every pixel it shows comes from a ramp group
+    std::vector<u8> mask(64 * 64, 0);
+    int textTiles = 0;
+    std::vector<s8> tileText(nt, -1);
+    for (int i = 0; i < ne; i++)
+    {
+        int n = tileOf[i];
+        if (tileText[n] < 0)
+        {
+            bool any = false, all = true;
+            for (u32 b = 0; b < bytes && all; b++)
+            {
+                u8 v = data[n * bytes + b];
+                for (int k = 0; k < (bpp8 ? 1 : 2); k++)
+                {
+                    u32 idx = bpp8 ? v : ((v >> (4 * k)) & 0xF);
+                    if (!idx) continue;
+                    any = true;
+                    if (!(ramp & (1 << (bpp8 ? idx >> 4 : banks[n])))) { all = false; break; }
+                }
+            }
+            tileText[n] = any && all;
+        }
+        if (tileText[n]) { mask[pos[i]] = 255; textTiles++; }
+    }
+    // a few tiles that match by chance are not text: need a real amount of it
+    c.Text = textTiles >= 4;
+    if (c.Text)
+    {
+        std::lock_guard<std::mutex> lk(Lock);
+        TextMask[engine][bg].swap(mask);
+        TextMaskGen[engine][bg]++;
+    }
     return c.Text;
 }
 }
@@ -558,6 +594,13 @@ bool IsTextLayer(int engine, int bg)
 {
     std::lock_guard<std::mutex> lk(Lock);
     return TextLayer[engine & 1][bg & 3];
+}
+
+u32 GetTextMask(int engine, int bg, std::vector<u8>& mask)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    mask = TextMask[engine & 1][bg & 3];
+    return TextMaskGen[engine & 1][bg & 3];
 }
 
 void OnVBlankBattle(GPU& gpu)
@@ -585,7 +628,7 @@ void OnVBlankBattle(GPU& gpu)
                 }
     }
     // debug: WC09_DUMP=<file> writes BG/OBJ VRAM, palettes, OAM and registers every 2 seconds
-    if (const char* dd = getenv("WC09_DUMP"); dd && *dd && VBlankCount % 120 == 0)
+    if (const char* dd = getenv("WC09_DUMP"); dd && *dd && VBlankCount % 15 == 0)
         if (FILE* f = fopen(dd, "wb"))
         {
             for (u32 a = 0; a < 0x80000; a += 2) { u16 v = gpu.ReadVRAM_ABG<u16>(a); fwrite(&v, 2, 1, f); }
@@ -890,8 +933,13 @@ void OnVBlankBattle(GPU& gpu)
         for (int b = 0; b < 4; b++)
             if (found[e][b].Image >= 0 && found[e][b].Image < kTextPanelBase && !IsCardImage(found[e][b].Image) && !IsCardSet(found[e][b].Image)) onScreen[(e == 0) == gpu.ScreenSwap ? 0 : 1] = true;
 
+    // text layers: one layer is re-examined per VBlank (round robin, 8 VBlanks for all), the
+    // others keep their last result; the scan reads the layer's tiles, too costly for every frame
+    static bool lastText[2][4] = {};
     bool textLayer[2][4] = {};
     if (IsActive() && GetHDTextEnabled())
+    {
+        int slot = (int)(VBlankCount.load() & 7);
         for (int e = 0; e < 2; e++)
         {
             const GPU2D& u = e == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
@@ -899,12 +947,18 @@ void OnVBlankBattle(GPU& gpu)
             u32 mode = u.DispCnt & 7;
             for (int b = 0; b < 4; b++)
             {
-                if (!(u.DispCnt & (1 << (8 + b))) || found[e][b].Image >= 0) continue;
+                // layers swapped for a screen-space HD image still show the game's own pixels
+                // outside it (e.g. the opponent's speech bubble under the card text panel)
+                if (!(u.DispCnt & (1 << (8 + b)))) continue;
+                if (found[e][b].Image >= 0 && !found[e][b].ScreenSpace) continue;
                 if (e == 0 && b == 0 && (u.DispCnt & (1 << 3))) continue;
                 bool text = b < 2 || (b == 2 && mode <= 1) || (b == 3 && mode == 0);
-                if (text) textLayer[e][b] = DetectTextLayer(gpu, e, b);
+                if (!text) continue;
+                textLayer[e][b] = (e * 4 + b == slot) ? DetectTextLayer(gpu, e, b) : lastText[e][b];
             }
         }
+    }
+    for (int e = 0; e < 2; e++) for (int b = 0; b < 4; b++) lastText[e][b] = textLayer[e][b];
 
     std::lock_guard<std::mutex> lk(Lock);
     OnScreen[0] = onScreen[0]; OnScreen[1] = onScreen[1];

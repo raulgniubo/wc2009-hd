@@ -26,6 +26,7 @@
 #include "WC09Battle.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include "WC09Cards.h"
 #include <vector>
 #include <string>
@@ -113,11 +114,25 @@ GLuint GLRenderer3D::UploadHD3D(const u8* rgba, int w, int h)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     glGenerateMipmap(GL_TEXTURE_2D);
+    // anisotropic filtering: roads and floors seen at a slant stay sharp without shimmering
+    static GLfloat maxAniso = -1.f;
+    if (maxAniso < 0.f)
+    {
+        maxAniso = 0.f;
+        GLint n = 0; glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+        for (GLint i = 0; i < n; i++)
+        {
+            const char* ext = (const char*)glGetStringi(GL_EXTENSIONS, i);
+            if (ext && (!strcmp(ext, "GL_EXT_texture_filter_anisotropic") || !strcmp(ext, "GL_ARB_texture_filter_anisotropic")))
+            { glGetFloatv(0x84FF /* MAX_TEXTURE_MAX_ANISOTROPY */, &maxAniso); break; }
+        }
+    }
+    if (maxAniso > 1.f) glTexParameterf(GL_TEXTURE_2D, 0x84FE /* TEXTURE_MAX_ANISOTROPY */, std::min(8.f, maxAniso));
     glActiveTexture(GL_TEXTURE0);
     return tex;
 }
 
-GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash)
+GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone)
 {
     auto it = HD3D.find(hash);
     if (it != HD3D.end()) { it->second.LastUse = HD3DFrame; return it->second.Valid ? it->second.Tex : 0; }
@@ -129,8 +144,23 @@ GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash)
     bool ok = false;
     if (alphaHash)
     {
-        char an[40]; snprintf(an, sizeof(an), "tex3d/s_%016llx", (unsigned long long)alphaHash);
-        ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
+        // colour states first: s_<hash>_<hue><brightness>, s_<hash>_<hue>, then any colour
+        char an[48];
+        if (tone)
+        {
+            snprintf(an, sizeof(an), "tex3d/s_%016llx_%c%c", (unsigned long long)alphaHash, tone >> 8, tone & 0xFF);
+            ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
+            if (!ok)
+            {
+                snprintf(an, sizeof(an), "tex3d/s_%016llx_%c", (unsigned long long)alphaHash, tone >> 8);
+                ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
+            }
+        }
+        if (!ok)
+        {
+            snprintf(an, sizeof(an), "tex3d/s_%016llx", (unsigned long long)alphaHash);
+            ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
+        }
     }
     if (!ok && halfHash)
     {
@@ -145,7 +175,7 @@ GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash)
     }
     HD3D[hash] = e;
     static const bool debug = getenv("WC09_DEBUG") != nullptr;
-    if (debug) { printf("WC09 tex3d %s %s\n", name, e.Valid ? "HD" : "-"); fflush(stdout); }
+    if (debug) { printf("WC09 tex3d %s s_%016llx_%c%c %s\n", name, (unsigned long long)alphaHash, tone ? tone >> 8 : '-', tone ? tone & 0xFF : '-', e.Valid ? "HD" : "-"); fflush(stdout); }
     return e.Valid ? e.Tex : 0;
 }
 
@@ -170,6 +200,8 @@ GLuint GLRenderer3D::GetHDCard(u64 hash, int card, u32 size, const u32* newPixel
 
     HD3DEntry e {0, false, HD3DFrame};
     std::vector<u8> src; int sw = 0, sh = 0;
+    const bool thumb = card & 0x10000;
+    card &= 0xFFFF;
     if (WC09::LoadCardImage(card, src, sw, sh) && sw > 1 && sh > 1)
     {
         const u32* orig = px->second.Px.data();
@@ -208,7 +240,8 @@ GLuint GLRenderer3D::GetHDCard(u64 hash, int card, u32 size, const u32* newPixel
         // height. 32 (hand, field, small cards): the game draws the whole texture as a little card
         // (art plus coloured bars); it gets the whole HD card instead.
         float dx0, dy0, dx1, dy1, u0 = 0, v0 = 0, u1 = 1, v1 = 1;
-        if (size == 32) { dx0 = 0; dy0 = 0; dx1 = 32; dy1 = 32; }
+        if (thumb) { dx0 = 6; dy0 = 3; dx1 = 26; dy1 = 29; }    // list thumbnails: the little card
+        else if (size == 32) { dx0 = 0; dy0 = 0; dx1 = 32; dy1 = 32; }
         else { dx0 = size * 20.f / 128.f; dx1 = size * 108.f / 128.f; dy0 = 0; dy1 = (float)size; }
         int px0 = (int)(dx0 * S), px1 = (int)(dx1 * S), py0 = (int)(dy0 * S), py1 = (int)(dy1 * S);
         for (int y = py0; y < py1; y++)
@@ -229,7 +262,7 @@ GLuint GLRenderer3D::GetHDCard(u64 hash, int card, u32 size, const u32* newPixel
                     o[k] = (u8)(a * (1 - ty) + b * ty + 0.5f);
                 }
                 // keep the original's transparency (rounded corners), opaque elsewhere in the face
-                if (size == 32 || ((origAt(x, y) >> 24) & 0x1F) != 0) o[3] = 255;
+                if ((size == 32 && !thumb) || ((origAt(x, y) >> 24) & 0x1F) != 0) o[3] = 255;
             }
         }
         e.Tex = UploadHD3D(out.data(), W, W);
@@ -731,7 +764,7 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
                     }
                     else
                     {
-                        curhd = hdon ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash) : 0;
+                        curhd = hdon ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash, Texcache.LastTone) : 0;
                         curhdmode = (textype == 1 || textype == 6) ? 2 : 1;
                     }
                 }

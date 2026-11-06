@@ -55,6 +55,9 @@ bool HideSprite(int engine, int x, int y, int w, int h);
 // Background layers holding anti-aliased game text (colour ramps from a dark outline to a bright
 // fill): the compositor redraws them as smooth shapes instead of upscaled pixels.
 bool IsTextLayer(int engine, int bg);
+// Per map tile (64x64 grid, BG tile units) 255 where the tile is text; returns a generation
+// number that changes whenever the mask does.
+u32 GetTextMask(int engine, int bg, std::vector<u8>& mask);
 
 // Deck editor / card lists: HD description (id = base + card*2) and name (+1) on the top screen.
 constexpr int kDeckTextBase = 1500000;

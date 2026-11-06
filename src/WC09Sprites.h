@@ -24,7 +24,13 @@ struct SpriteHD
     s16 DX = 0, DY = 0;      // runtime sprite tile-space offset into the matched OAM
     s16 IW = 0, IH = 0;      // full image size (pixels, original resolution)
     bool HF = false, VF = false;   // the matched OAM is drawn flipped inside the image
+    bool Text = false;       // not an HD image, but anti-aliased text: drawn with smooth edges
 };
+
+// True if a sprite's pixels look like anti-aliased text: the colours it uses form one
+// brightness ramp (monotone in palette order) with several steps. pal = 16 colours (4-bit) or
+// 256 colours (8-bit) of the sprite's palette, BGR555.
+bool IsTextSprite(int width, int height, bool bpp8, const u8* tiles, const u16* pal);
 
 constexpr int kSpriteImageBase = 2000000;
 // sprite image ids from here on are card thumbnails: the HD card face (id - base = card)
@@ -35,6 +41,9 @@ void BuildSpriteIndex(const u8* rom, u32 len);
 // Identify a tiled sprite. readTile(offset, bytes, out) copies OBJ VRAM bytes.
 SpriteHD IdentifySprite(int width, int height, bool bpp8, u32 tileOffset,
                         const std::function<void(u32, u32, u8*)>& readVRAM);
+
+// Card shown by a 32x32 8-bit 3D texture holding a card thumbnail (lists), -1 if none.
+int CardFromThumbTexture(u64 hash);
 
 // "<set>/<name>" for the HD loader (HDCards/<set>/<name>.png).
 std::string SpriteImageName(int image);

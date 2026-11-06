@@ -108,7 +108,7 @@ private:
     struct HD3DEntry { GLuint Tex; bool Valid; u64 LastUse; };
     u64 HD3DFrame = 0;
     std::unordered_map<u64, HD3DEntry> HD3D;
-    GLuint GetHD3D(u64 hash, u64 alphaHash = 0, u64 halfHash = 0);
+    GLuint GetHD3D(u64 hash, u64 alphaHash = 0, u64 halfHash = 0, u16 tone = 0);
     // WC09: HD card face built into the card texture's own layout (keyed by content hash)
     struct CardPx { std::vector<u32> Px; u64 LastUse; };
     std::unordered_map<u64, CardPx> CardPixels;

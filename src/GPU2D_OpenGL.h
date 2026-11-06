@@ -90,6 +90,7 @@ private:
     GLint CompositorHDScreenULoc[4] {-1, -1, -1, -1};
     GLint CompositorHDFallbackULoc[4] {-1, -1, -1, -1};
     GLint CompositorTextSmoothULoc[4] {-1, -1, -1, -1};
+    GLuint TextMaskTex[4] {}; u32 TextMaskGen[4] {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
     struct HDTexEntry { int Image; GLuint Tex; bool Valid; };
     std::vector<HDTexEntry> HDTextures;     // small LRU of uploaded HD BG images
     std::unordered_map<int, u64> HDMissing; // image -> frame of the last failed lookup

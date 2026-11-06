@@ -177,6 +177,40 @@ vec4 SprHDSample(int slot, vec2 uv)
     return texture(SprHDTex[7], uv);
 }
 
+
+// WC09: anti-aliased text sprites: colours interpolated with a cubic filter, coverage cut with a
+// soft threshold. Gives smooth curved letters instead of enlarged pixels.
+vec4 CatmullRomW(float t)
+{
+    float t2 = t * t, t3 = t2 * t;
+    return vec4(-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2);
+}
+
+vec4 TextFetchSprite(int sprite, vec2 coord)
+{
+    ivec2 base = ivec2((sprite & 0xF) * 64, (sprite >> 4) * 64);
+    ivec2 size = uOAM[sprite].Size;
+    vec2 pos = coord - 0.5;
+    ivec2 p = ivec2(floor(pos));
+    vec2 f = pos - vec2(p);
+    vec4 wx = CatmullRomW(f.x), wy = CatmullRomW(f.y);
+    vec4 acc = vec4(0.0);
+    float near = 0.0; vec3 nearc = vec3(0.0);
+    for (int j = 0; j < 4; j++)
+        for (int i = 0; i < 4; i++)
+        {
+            ivec2 q = clamp(p + ivec2(i - 1, j - 1), ivec2(0), size - 1);
+            vec4 c = texelFetch(SpriteTex, base + q, 0);
+            float w = wx[i] * wy[j];
+            acc += w * vec4(c.rgb * c.a, c.a);
+            if (i >= 1 && i <= 2 && j >= 1 && j <= 2 && c.a > near) { near = c.a; nearc = c.rgb; }
+        }
+    float a = smoothstep(0.35, 0.65, acc.a);
+    if (a < 0.5) return vec4(0.0);
+    vec3 col = acc.a > 0.01 ? clamp(acc.rgb / acc.a, 0.0, 1.0) : nearc;
+    return vec4(col, 1.0);
+}
+
 vec4 GetSpritePixel(int sprite, vec2 coord)
 {
     ivec4 hda = uSprHDA[sprite];
@@ -203,6 +237,8 @@ vec4 GetSpritePixel(int sprite, vec2 coord)
         return vec4(0.0);
     }
 
+    if (uSmoothScale > 1 && (hda.w & 4) != 0)
+        return TextFetchSprite(sprite, coord);
     if (uSmoothScale > 1 && uOAM[sprite].OBJMode != 2)
         return XbrFetchSprite(sprite, coord);
     ivec2 basecoord = ivec2((sprite & 0xF) * 64, (sprite >> 4) * 64);

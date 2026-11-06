@@ -9,10 +9,13 @@
 #include <vector>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
+#include <algorithm>
 
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash/xxhash.h"
 #include "WC09Cards.h"
+#include "WC09Sprites.h"
 
 namespace melonDS
 {
@@ -194,6 +197,7 @@ public:
             LastCard = it->second.Card;
             LastAlphaHash = it->second.AlphaHash;
             LastHalfHash = it->second.HalfHash;
+            LastTone = it->second.Tone;
             LastNewPixels = nullptr;
             return;
         }
@@ -286,10 +290,38 @@ public:
                 ids[i] = it->second;
             }
             entry.AlphaHash = XXH64(ids, n * 2, ((u64)width << 16) | height);
+            // tone: average colour of the opaque texels as hue class + brightness level, so a
+            // redesign can follow the game's colour states (inactive grey, active blue/red...)
+            u32 sr = 0, sg = 0, sb = 0, cnt = 0;
+            for (u32 i = 0; i < n; i++)
+            {
+                u32 c = DecodingBuffer[i];
+                if (!(c >> 24)) continue;
+                sr += c & 0x3F; sg += (c >> 8) & 0x3F; sb += (c >> 16) & 0x3F; cnt++;
+            }
+            entry.Tone = 0;
+            if (cnt)
+            {
+                float r = sr / (63.f * cnt), g = sg / (63.f * cnt), b = sb / (63.f * cnt);
+                float mx = std::max({r, g, b}), mn = std::min({r, g, b}), sat = mx > 0 ? (mx - mn) / mx : 0;
+                char hue = 'n';
+                if (sat > 0.25f)
+                {
+                    float hh;
+                    if (mx == r) hh = std::fmod((g - b) / (mx - mn), 6.f);
+                    else if (mx == g) hh = (b - r) / (mx - mn) + 2.f;
+                    else hh = (r - g) / (mx - mn) + 4.f;
+                    hh *= 60.f; if (hh < 0) hh += 360.f;
+                    hue = hh < 20 || hh >= 330 ? 'r' : hh < 70 ? 'y' : hh < 160 ? 'g' : hh < 200 ? 'c' : hh < 260 ? 'b' : 'm';
+                }
+                int bri = mx < 0.45f ? 0 : mx < 0.75f ? 1 : 2;
+                entry.Tone = (u16)((hue << 8) | ('0' + bri));
+            }
             // top half only: textures whose unused bottom rows hold leftovers from other data
             entry.HalfHash = XXH64(ids, n, ((u64)width << 16) | height | (1ull << 40));
         }
         LastHalfHash = entry.HalfHash;
+        LastTone = entry.Tone;
         LastAlphaHash = entry.AlphaHash;
         // WC09: card faces are identified by their raw tex4x4 texel words (see WC09Cards)
         entry.Card = -1;
@@ -298,6 +330,12 @@ public:
             u32 n = width * height / 4;
             if (addr + n <= sizeof(GPU.VRAMFlat_Texture))
                 entry.Card = WC09::CardFromTexHash(XXH64(&GPU.VRAMFlat_Texture[addr], n, 0), width);
+        }
+        if (fmt == 4 && width == 32 && height == 32 && addr + 1024 <= sizeof(GPU.VRAMFlat_Texture))
+        {
+            // card thumbnails in list windows (graveyard, extra deck...): bit 16 marks the layout
+            int c = WC09::CardFromThumbTexture(XXH64(&GPU.VRAMFlat_Texture[addr], 1024, 0));
+            if (c > 0) entry.Card = c | 0x10000;
         }
         LastCard = entry.Card;
         LastNewPixels = DecodingBuffer;
@@ -389,8 +427,10 @@ private:
         u64 ContentHash {};
         int Card = -1;
         u64 AlphaHash {}, HalfHash {};
+        u16 Tone {};
     };
 public:
+    u16 LastTone = 0;   // WC09: hue class (high byte, n/r/y/g/c/b/m) + brightness '0'..'2'
     u64 LastAlphaHash = 0, LastHalfHash = 0;   // WC09: structure hashes (whole / top half)
     int LastCard = -1;                // WC09 card index of that texture, -1 if not a card face
     const u32* LastNewPixels = nullptr;   // decoded texels (RGB6A5) if that call created the entry

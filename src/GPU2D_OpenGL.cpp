@@ -179,6 +179,7 @@ bool GLRenderer2D::InitShaders()
         GLint t = glGetUniformLocation(CompositorShader, ("HDTex[" + n + "]").c_str());
         glUseProgram(CompositorShader);
         glUniform1i(t, 8 + i);
+        glUniform1i(glGetUniformLocation(CompositorShader, ("TextMask[" + n + "]").c_str()), 12 + i);
     }
 
     // generate mosaic lookup texture
@@ -496,6 +497,7 @@ GLuint GLRenderer2D::GetHDTexture(int image)
 GLRenderer2D::~GLRenderer2D()
 {
     for (auto& e : HDTextures) if (e.Valid) glDeleteTextures(1, &e.Tex);
+    for (GLuint t : TextMaskTex) if (t) glDeleteTextures(1, &t);
     glDeleteBuffers(1, &SpritePreVtxBuffer);
     glDeleteVertexArrays(1, &SpritePreVtxArray);
 
@@ -1673,6 +1675,40 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
                                 memcpy(out + i, &v, 4);
                             }
                         });
+                    // not an HD image: maybe anti-aliased text (speech bubbles, labels...)
+                    if (WC09SprCached[sprnum].Image < 0 && WC09::GetHDTextEnabled())
+                    {
+                        static u8 tiles[64 * 64];
+                        u32 bytes = (u32)(width / 8) * (height / 8) * (obj8 ? 64 : 32);
+                        for (u32 i = 0; i + 4 <= bytes; i += 4)
+                        {
+                            u32 v = num ? GPU.ReadVRAM_BOBJ<u32>(sprcfg.TileOffset + i) : GPU.ReadVRAM_AOBJ<u32>(sprcfg.TileOffset + i);
+                            memcpy(tiles + i, &v, 4);
+                        }
+                        u16 pal[256];
+                        const u8* p = &GPU.Palette[num * 0x400 + 0x200];
+                        u32 bank = obj8 ? 0 : (attrib[2] >> 12) * 16;
+                        for (int k = 0; k < (obj8 ? 256 : 16); k++) pal[k] = p[(bank + k) * 2] | (p[(bank + k) * 2 + 1] << 8);
+                        bool extpal = obj8 && (GPU2D.DispCnt & (1u << 31));
+                        WC09SprCached[sprnum].Text = !extpal && WC09::IsTextSprite(width, height, obj8, tiles, pal);
+                    }
+                    // not an HD image: maybe anti-aliased text (speech bubbles, labels...)
+                    if (WC09SprCached[sprnum].Image < 0 && WC09::GetHDTextEnabled())
+                    {
+                        static u8 tiles[64 * 64];
+                        u32 bytes = (u32)(width / 8) * (height / 8) * (obj8 ? 64 : 32);
+                        for (u32 i = 0; i + 4 <= bytes; i += 4)
+                        {
+                            u32 v = num ? GPU.ReadVRAM_BOBJ<u32>(sprcfg.TileOffset + i) : GPU.ReadVRAM_AOBJ<u32>(sprcfg.TileOffset + i);
+                            memcpy(tiles + i, &v, 4);
+                        }
+                        u16 pal[256];
+                        const u8* p = &GPU.Palette[num * 0x400 + 0x200];
+                        u32 bank = obj8 ? 0 : (attrib[2] >> 12) * 16;
+                        for (int k = 0; k < (obj8 ? 256 : 16); k++) pal[k] = p[(bank + k) * 2] | (p[(bank + k) * 2 + 1] << 8);
+                        bool extpal = obj8 && (GPU2D.DispCnt & (1u << 31));
+                        WC09SprCached[sprnum].Text = !extpal && WC09::IsTextSprite(width, height, obj8, tiles, pal);
+                    }
                     key = {attrib[0], attrib[1], attrib[2], sprcfg.TileOffset, frame};
                 }
                 WC09Spr[NumSprites] = WC09SprCached[sprnum];
@@ -1819,6 +1855,7 @@ void GLRenderer2D::DoRenderSprites(int line)
         {
             hdA[i*4] = -1; hdA[i*4+1] = hdA[i*4+2] = hdA[i*4+3] = 0;
             hdB[i*4] = hdB[i*4+1] = hdB[i*4+2] = hdB[i*4+3] = 0;
+            if (i < NumSprites && WC09Spr[i].Image < 0 && WC09Spr[i].Text) hdA[i*4+3] = 4;
             if (i >= NumSprites || WC09Spr[i].Image < 0) continue;
             const WC09::SpriteHD& h = WC09Spr[i];
             int slot = -1;
@@ -2076,7 +2113,31 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
             glUniform1i(CompositorHDMirrorULoc[i], reps[i].Mirror ? 1 : 0);
             glUniform1i(CompositorHDScreenULoc[i], reps[i].ScreenSpace ? 1 : 0);
             glUniform1i(CompositorHDFallbackULoc[i], reps[i].Fallback ? 1 : 0);
-            glUniform1i(CompositorTextSmoothULoc[i], (!texs[i] && WC09::GetHDTextEnabled() && WC09::IsTextLayer(GPU2D.Num, i)) ? 1 : 0);
+            bool textOn = (!texs[i] || reps[i].ScreenSpace) && WC09::GetHDTextEnabled() && WC09::IsTextLayer(GPU2D.Num, i);
+            glUniform1i(CompositorTextSmoothULoc[i], textOn ? 1 : 0);
+            if (textOn)
+            {
+                // which map tiles hold text (64x64, BG tile units)
+                static std::vector<u8> mask;
+                u32 gen = WC09::GetTextMask(GPU2D.Num, i, mask);
+                glActiveTexture(GL_TEXTURE12 + i);
+                if (!TextMaskTex[i])
+                {
+                    glGenTextures(1, &TextMaskTex[i]);
+                    glBindTexture(GL_TEXTURE_2D, TextMaskTex[i]);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+                }
+                glBindTexture(GL_TEXTURE_2D, TextMaskTex[i]);
+                if (gen != TextMaskGen[i] && mask.size() == 64 * 64)
+                {
+                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 64, 64, 0, GL_RED, GL_UNSIGNED_BYTE, mask.data());
+                    TextMaskGen[i] = gen;
+                }
+            }
         }
     }
     glActiveTexture(GL_TEXTURE0);

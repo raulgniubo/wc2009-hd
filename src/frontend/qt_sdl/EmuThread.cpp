@@ -253,6 +253,7 @@ void EmuThread::run()
 
             // process input and hotkeys
             emuInstance->nds->SetKeyMask(emuInstance->inputMask);
+            if (getenv("WC09_KEYDBG")) { static u32 last = 0xFFF; if (emuInstance->inputMask != last) { last = emuInstance->inputMask; printf("inputmask %03x\n", last); fflush(stdout); } }
 
             if (emuInstance->isTouching)
                 emuInstance->nds->TouchScreen(emuInstance->touchX, emuInstance->touchY);

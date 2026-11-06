@@ -360,15 +360,15 @@ QImage WC09Overlay::renderStatPanel(const WC09::StatPanelInfo& info, float k)
     if (info.Level > 0)
     {
         // "★ 4" on a rounded plate, right edge where the game's badge ended
-        f.setPixelSize(std::max(1, (int)std::lround(9.5f * k)));
+        f.setPixelSize(std::max(1, (int)std::lround(8.5f * k)));
         QString num = QString::number(info.Level);
         float tw = QFontMetricsF(f).horizontalAdvance(num) / k;
-        const float h = 12.f, star = 8.5f, pad = 2.5f;
+        const float h = 10.f, star = 7.5f, pad = 2.f;
         // wide enough to cover the card's printed stars (about 6.6 px each at this size)
-        float w = std::max(pad + star + 1.5f + tw + pad + 0.5f, info.Level * 6.6f + 3.f);
+        float w = std::max(pad + star + 1.5f + tw + pad + 0.5f, info.Level * 6.4f + 2.f);
         float x1 = info.BadgeRight + 1.f, x0 = x1 - w;
-        float yc = info.BadgeMidY - WC09::kPanelY, y0 = yc - h / 2;
-        QPainterPath plate; plate.addRoundedRect(QRectF(x0, y0, w, h), 3.5, 3.5);
+        float yc = info.BadgeMidY + 0.5f - WC09::kPanelY, y0 = yc - h / 2;
+        QPainterPath plate; plate.addRoundedRect(QRectF(x0, y0, w, h), 3.f, 3.f);
         p.fillPath(plate, fill);
         p.setPen(QPen(edge, 0.7)); p.drawPath(plate);
         // five-pointed star

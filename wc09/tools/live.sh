@@ -6,12 +6,12 @@ start)
   pkill -f "Xvfb :99" ; pkill -f build/melonDS; sleep 1
   Xvfb :99 -screen 0 ${XS:-1280x1024}x24 >/tmp/xvfb.log 2>&1 &
   sleep 2
-  cd /home/claude/livetest && WC09_DEBUG=1 WC09_REGS=1 WC09_TXTDBG=1 WC09_DUMP=$DUMP WC09_DUMP3D=$DUMP3D WC09_TEXDBG=$TEXDBG WC09_HIDEBG=$HIDEBG stdbuf -oL /home/claude/melonDS-up/build/melonDS /home/claude/livetest/wc09.nds >/tmp/mds_live.log 2>&1 &
+  cd /home/claude/livetest && WC09_DEBUG=1 WC09_KEYDBG=1 WC09_TESTKEYS=1 WC09_REGS=1 WC09_TXTDBG=1 WC09_DUMP=$DUMP WC09_DUMP3D=$DUMP3D WC09_TEXDBG=$TEXDBG WC09_HIDEBG=$HIDEBG stdbuf -oL /home/claude/melonDS-up/build/melonDS /home/claude/livetest/wc09.nds >/tmp/mds_live.log 2>&1 &
   sleep 6; W=$(xdotool search --onlyvisible --name melonDS | head -1); xdotool windowsize $W ${WW:-600} ${WH:-960}; xdotool windowmove $W 0 0; echo $W ;;
 keys)
   W=$(xdotool search --onlyvisible --name melonDS | head -1); xdotool windowfocus $W 2>/dev/null
   for k in $2; do
-    case $k in w*) sleep ${k#w};; *) xdotool keydown $k; sleep ${HOLD:-0.12}; xdotool keyup $k; sleep 0.25;; esac
+    case $k in w*) sleep ${k#w};; *) xdotool keydown $k; sleep ${HOLD:-0.12}; xdotool keyup $k; sleep ${GAP:-0.25};; esac
   done ;;
 tap)
   # tap X Y in DS bottom-screen coords (vertical layout, window at 0,0)

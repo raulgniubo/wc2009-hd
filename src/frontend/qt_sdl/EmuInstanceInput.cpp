@@ -119,9 +119,13 @@ void EmuInstance::inputLoadConfig()
     Config::Table keycfg = localCfg.GetTable("Keyboard");
     Config::Table joycfg = localCfg.GetTable("Joystick");
 
+    // test harness: WC09_TESTKEYS=1 maps A=X B=Z X=S Y=A L=Q R=W Start=Enter Select=Backspace, arrows
+    static const int testKeys[12] = {Qt::Key_X, Qt::Key_Z, Qt::Key_Backspace, Qt::Key_Return, Qt::Key_Right, Qt::Key_Left,
+                                     Qt::Key_Up, Qt::Key_Down, Qt::Key_W, Qt::Key_Q, Qt::Key_S, Qt::Key_A};
+    const bool testkeys = getenv("WC09_TESTKEYS") != nullptr;
     for (int i = 0; i < 12; i++)
     {
-        keyMapping[i] = keycfg.GetInt(buttonNames[i]);
+        keyMapping[i] = testkeys ? testKeys[i] : keycfg.GetInt(buttonNames[i]);
         joyMapping[i] = joycfg.GetInt(buttonNames[i]);
     }
 

@@ -33,6 +33,7 @@ std::unordered_map<u64, std::vector<TileEntry>> Tiles;
 constexpr size_t kMaxPlaces = 48;
 std::unordered_map<u64, SpriteHD> Cache;
 std::unordered_map<u64, int> Thumbs;   // card thumbnail sprite chars (32x32, 8bpp) -> card
+std::unordered_map<u64, int> ThumbTex; // the same thumbnails as linear 32x32 8-bit textures -> card
 std::mutex Lock;
 
 bool Blank(const u8* t, u32 n) { for (u32 i = 0; i < n; i++) if (t[i]) return false; return true; }
@@ -171,7 +172,7 @@ void IndexCells(const std::string& base, const std::vector<u8>& ncgr, const std:
 void BuildSpriteIndex(const u8* rom, u32 len)
 {
     std::lock_guard<std::mutex> lk(Lock);
-    Images.clear(); Tiles.clear(); Cache.clear(); Thumbs.clear();
+    Images.clear(); Tiles.clear(); Cache.clear(); Thumbs.clear(); ThumbTex.clear();
 
     // card thumbnails (deck lists, graveyard...): card.pac bg26 = one 32x32 8bpp OBJD per card,
     // the little card at pixels (6,3)-(25,28)
@@ -193,14 +194,20 @@ void BuildSpriteIndex(const u8* rom, u32 len)
                 if (b <= a || b > data->Size) continue;
                 std::vector<u8> d = Unpack(pac + data->Start + a, b - a);
                 if (d.size() < 16 + 8 + 24 + 4 + 1024 || memcmp(d.data() + 16, "OBJD", 4)) continue;
-                Thumbs[XXH64(d.data() + 16 + 8 + 24 + 4, 1024, 0)] = (int)c;
+                const u8* ch = d.data() + 16 + 8 + 24 + 4;
+                Thumbs[XXH64(ch, 1024, 0)] = (int)c;
+                u8 lin[1024];
+                for (int t = 0; t < 16; t++)
+                    for (int i = 0; i < 64; i++)
+                        lin[((t / 4) * 8 + i / 8) * 32 + (t % 4) * 8 + i % 8] = ch[t * 64 + i];
+                ThumbTex[XXH64(lin, 1024, 0)] = (int)c;
             }
         }
     }
 
     // (the player's avatar parts - editface/editHair - are left out: the game recolors them
     // through palettes, which an HD image can't follow)
-    static const char* const kObjd[] = { "duel2d/chr", "duel2d/chr_tag", "duel2d/MOBJ", "pack" };
+    static const char* const kObjd[] = { "duel2d/chr", "duel2d/chr_tag", "duel2d/MOBJ", "pack", "duel2d" };
     for (const char* path : kObjd)
     {
         FileRef ref;
@@ -344,6 +351,13 @@ SpriteHD IdentifySprite(int width, int height, bool bpp8, u32 tileOffset,
     return out;
 }
 
+int CardFromThumbTexture(u64 hash)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    auto it = ThumbTex.find(hash);
+    return it == ThumbTex.end() ? -1 : it->second;
+}
+
 std::string SpriteImageName(int image)
 {
     std::lock_guard<std::mutex> lk(Lock);
@@ -351,4 +365,50 @@ std::string SpriteImageName(int image)
     return (i >= 0 && i < (int)Images.size()) ? Images[i].Name : std::string();
 }
 
+}
+
+namespace melonDS::WC09
+{
+bool IsTextSprite(int width, int height, bool bpp8, const u8* tiles, const u16* pal)
+{
+    u32 n = (u32)(width / 8) * (height / 8) * (bpp8 ? 64 : 32);
+    u32 used[16] = {};   // per 16-colour group, bit k = index k used
+    u32 count = 0;
+    for (u32 i = 0; i < n; i++)
+    {
+        u8 v = tiles[i];
+        for (int k = 0; k < (bpp8 ? 1 : 2); k++)
+        {
+            u32 idx = bpp8 ? v : ((v >> (4 * k)) & 0xF);
+            if (!idx) continue;
+            used[bpp8 ? idx >> 4 : 0] |= 1u << (idx & 15);
+            count++;
+        }
+    }
+    if (count < 12) return false;
+    int groups = 0;
+    for (int g = 0; g < 16; g++)
+    {
+        if (!used[g]) continue;
+        if (++groups > 2) return false;
+        if (__builtin_popcount(used[g]) < 4) return false;
+        // brightness must change monotonically with the index over the used entries
+        int prev = -1, dir = 0;
+        for (int k = 1; k < 16; k++)
+        {
+            if (!(used[g] & (1u << k))) continue;
+            u16 c = pal[(bpp8 ? g * 16 : 0) + k];
+            int l = (c & 31) * 2 + ((c >> 5) & 31) * 4 + ((c >> 10) & 31);   // rough luma
+            if (prev >= 0)
+            {
+                int d = l > prev + 3 ? 1 : l < prev - 3 ? -1 : 0;
+                if (d && dir && d != dir) return false;
+                if (d) dir = d;
+            }
+            prev = l;
+        }
+        if (!dir) return false;
+    }
+    return groups > 0;
+}
 }

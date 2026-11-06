@@ -68,6 +68,7 @@ uniform bool uHDMirror[4];
 uniform bool uHDScreen[4];   // rect is in screen space (text panels)
 uniform bool uHDFallback[4]; // transparent HD pixels fall back to the original (card sets)
 uniform bool uTextSmooth[4]; // layer holds anti-aliased game text: redraw it as smooth shapes
+uniform sampler2D TextMask[4]; // per map tile (64x64 grid): 1 = text tile
 
 vec4 HDScreenFetch(int n, vec2 coord, int line, out bool hit)
 {
@@ -179,6 +180,13 @@ vec4 XbrResolve(vec4 A1, vec4 B1, vec4 C1, vec4 A, vec4 B, vec4 C, vec4 D, vec4 
 // pixels it looks blocky; instead the coverage (opaque or not) and the brightness are
 // interpolated with a cubic filter and cut with smooth thresholds, which gives clean curved
 // letters at any resolution while keeping the game's exact text and colours.
+
+bool TextTile(sampler2D mask, ivec2 size, vec2 uv)
+{
+    ivec2 t = ivec2(floor(uv * vec2(size))) >> 3;
+    return texelFetch(mask, ivec2(t.x & 63, t.y & 63), 0).r > 0.5;
+}
+
 vec4 CatmullRom(float t)
 {
     float t2 = t * t, t3 = t2 * t;
@@ -245,7 +253,7 @@ vec4 BG0Fetch(vec2 coord)
             if (!uHDFallback[0]) return vec4(0.0);
         }
     }
-    if (uTextSmooth[0] && uScaleFactor > 1 && uBGConfig[0].Type < 7)
+    if (uTextSmooth[0] && uScaleFactor > 1 && uBGConfig[0].Type < 7 && TextTile(TextMask[0], uBGConfig[0].Size, coord))
         return TextFetch(BGLayerTex[0], uBGConfig[0].Size, coord);
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[0].Type < 7 && !uEnable3D)   // BG0 may be the hi-res 3D layer
         return XbrFetch(BGLayerTex[0], uBGConfig[0].Size, coord);
@@ -266,7 +274,7 @@ vec4 BG1Fetch(vec2 coord)
             if (!uHDFallback[1]) return vec4(0.0);
         }
     }
-    if (uTextSmooth[1] && uScaleFactor > 1 && uBGConfig[1].Type < 7)
+    if (uTextSmooth[1] && uScaleFactor > 1 && uBGConfig[1].Type < 7 && TextTile(TextMask[1], uBGConfig[1].Size, coord))
         return TextFetch(BGLayerTex[1], uBGConfig[1].Size, coord);
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[1].Type < 7)
         return XbrFetch(BGLayerTex[1], uBGConfig[1].Size, coord);
@@ -287,7 +295,7 @@ vec4 BG2Fetch(vec2 coord)
             if (!uHDFallback[2]) return vec4(0.0);
         }
     }
-    if (uTextSmooth[2] && uScaleFactor > 1 && uBGConfig[2].Type < 7)
+    if (uTextSmooth[2] && uScaleFactor > 1 && uBGConfig[2].Type < 7 && TextTile(TextMask[2], uBGConfig[2].Size, coord))
         return TextFetch(BGLayerTex[2], uBGConfig[2].Size, coord);
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[2].Type < 7)
         return XbrFetch(BGLayerTex[2], uBGConfig[2].Size, coord);
@@ -308,7 +316,7 @@ vec4 BG3Fetch(vec2 coord)
             if (!uHDFallback[3]) return vec4(0.0);
         }
     }
-    if (uTextSmooth[3] && uScaleFactor > 1 && uBGConfig[3].Type < 7)
+    if (uTextSmooth[3] && uScaleFactor > 1 && uBGConfig[3].Type < 7 && TextTile(TextMask[3], uBGConfig[3].Size, coord))
         return TextFetch(BGLayerTex[3], uBGConfig[3].Size, coord);
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[3].Type < 7)
         return XbrFetch(BGLayerTex[3], uBGConfig[3].Size, coord);
