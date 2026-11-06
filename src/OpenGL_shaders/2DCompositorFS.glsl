@@ -80,6 +80,7 @@ vec4 HDScreenFetch(int n, vec2 coord, int line, out bool hit)
     else if (n == 1) h = texture(HDTex[1], uv);
     else if (n == 2) h = texture(HDTex[2], uv);
     else h = texture(HDTex[3], uv);
+    if (h.a < 0.125 && uHDFallback[n]) hit = false;   // fully transparent: show the original layer
     return (h.a >= 0.5) ? vec4(h.rgb, 1.0) : vec4(0.0);
 }
 

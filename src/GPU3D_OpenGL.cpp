@@ -190,15 +190,11 @@ GLuint GLRenderer3D::GetHDCard(u64 hash, int card, u32 size, const u32* newPixel
                     o[k] = (u8)(a * (1 - ty) + b * ty + 0.5f);
                 }
             }
-        // face rectangle in texels, and the part of the HD face it shows. 128/64: the whole face
-        // at texels 20..108 (of 128) across, full height. 32: only the artwork, texels (1,4)-(31,26)
-        // showing face region (33,24)-(95,90) of the 128 layout (face starts at texel 20, 88 wide).
+        // face rectangle in texels. 128/64: the whole face at texels 20..108 (of 128) across, full
+        // height. 32 (hand, field, small cards): the game draws the whole texture as a little card
+        // (art plus coloured bars); it gets the whole HD card instead.
         float dx0, dy0, dx1, dy1, u0 = 0, v0 = 0, u1 = 1, v1 = 1;
-        if (size == 32)
-        {
-            dx0 = 1; dy0 = 4; dx1 = 31; dy1 = 26;
-            u0 = 13.f / 88.f; u1 = 75.f / 88.f; v0 = 24.f / 128.f; v1 = 90.f / 128.f;
-        }
+        if (size == 32) { dx0 = 0; dy0 = 0; dx1 = 32; dy1 = 32; }
         else { dx0 = size * 20.f / 128.f; dx1 = size * 108.f / 128.f; dy0 = 0; dy1 = (float)size; }
         int px0 = (int)(dx0 * S), px1 = (int)(dx1 * S), py0 = (int)(dy0 * S), py1 = (int)(dy1 * S);
         for (int y = py0; y < py1; y++)
@@ -219,7 +215,7 @@ GLuint GLRenderer3D::GetHDCard(u64 hash, int card, u32 size, const u32* newPixel
                     o[k] = (u8)(a * (1 - ty) + b * ty + 0.5f);
                 }
                 // keep the original's transparency (rounded corners), opaque elsewhere in the face
-                if (((origAt(x, y) >> 24) & 0x1F) != 0) o[3] = 255;
+                if (size == 32 || ((origAt(x, y) >> 24) & 0x1F) != 0) o[3] = 255;
             }
         }
         e.Tex = UploadHD3D(out.data(), W, W);
@@ -632,7 +628,6 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
     u32 curtexlayer = (u32)-1;
     GLuint curhd = 0; int curhdmode = 0;
     const bool hdon = WC09::IsActive() && WC09::GetHDCardsEnabled();
-    if (hdon) WC09::NoteCards3DRendered();
     // keep GPU memory in check: drop HD textures not used for a while (they reload when needed)
     if (++HD3DFrame % 60 == 0 && HD3D.size() > 128)
     {
@@ -1452,6 +1447,8 @@ void GLRenderer3D::RenderSceneChunk(int y, int h)
 
 void GLRenderer3D::RenderFrame()
 {
+    // WC09: this renderer draws HD cards itself, even on frames that reuse the last scene
+    if (WC09::IsActive() && WC09::GetHDCardsEnabled()) WC09::NoteCards3DRendered();
     u8 clrBitmapDirty;
     if (!Texcache.Update(clrBitmapDirty) && GPU3D.RenderFrameIdentical)
     {

@@ -41,6 +41,21 @@ constexpr int kPanelX = 40, kPanelY = 1, kPanelW = 213, kPanelH = 137;
 constexpr int kTextPanelBase = 1000000;
 constexpr int kPanelShortH = 123;
 
+// Duel card view with ATK/DEF redrawn: ids from here (see GetStatPanel). The numbers sit at
+// rows kStatsY..+kStatsH under the card.
+constexpr int kStatPanelBase = 1600000;
+constexpr int kStatsY = 137, kStatsH = 12;
+bool GetStatPanel(int image, int& card, int& atk, int& def, bool& bubble);
+
+// Sprites hidden because the HD card already shows them (the level badge on the card view).
+struct RectHide { bool On = false; int X0 = 0, Y0 = 0, X1 = 0, Y1 = 0; };
+bool HideSprite(int engine, int x, int y, int w, int h);
+
+// Deck editor / card lists: HD description (id = base + card*2) and name (+1) on the top screen.
+constexpr int kDeckTextBase = 1500000;
+constexpr int kDeckDescX = 101, kDeckDescY = 25, kDeckDescW = 151, kDeckDescH = 148;
+constexpr int kDeckNameX = 0, kDeckNameY = 1, kDeckNameW = 242, kDeckNameH = 21;
+
 // Image ids at or above this are 2D card faces: id - kCardImageBase = card index.
 constexpr int kCardImageBase = 5000000;
 inline bool IsCardImage(int image) { return image >= kCardImageBase && image < 7000000; }

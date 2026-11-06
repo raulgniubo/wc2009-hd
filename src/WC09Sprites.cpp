@@ -2,6 +2,7 @@
 #include "WC09Rom.h"
 
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <map>
 #include <mutex>
@@ -31,6 +32,7 @@ std::vector<ImageInfo> Images;
 std::unordered_map<u64, std::vector<TileEntry>> Tiles;
 constexpr size_t kMaxPlaces = 48;
 std::unordered_map<u64, SpriteHD> Cache;
+std::unordered_map<u64, int> Thumbs;   // card thumbnail sprite chars (32x32, 8bpp) -> card
 std::mutex Lock;
 
 bool Blank(const u8* t, u32 n) { for (u32 i = 0; i < n; i++) if (t[i]) return false; return true; }
@@ -169,7 +171,32 @@ void IndexCells(const std::string& base, const std::vector<u8>& ncgr, const std:
 void BuildSpriteIndex(const u8* rom, u32 len)
 {
     std::lock_guard<std::mutex> lk(Lock);
-    Images.clear(); Tiles.clear(); Cache.clear();
+    Images.clear(); Tiles.clear(); Cache.clear(); Thumbs.clear();
+
+    // card thumbnails (deck lists, graveyard...): card.pac bg26 = one 32x32 8bpp OBJD per card,
+    // the little card at pixels (6,3)-(25,28)
+    {
+        FileRef ref;
+        if (FindFile(rom, len, "Data_arc_pac/card.pac", ref))
+        {
+            const u8* pac = rom + ref.Start;
+            std::vector<PacEntry> ents = ParsePac(pac, ref.Size);
+            const PacEntry *data = nullptr, *idx = nullptr;
+            for (const PacEntry& e : ents)
+            {
+                if (e.Name.find("bg26_idx") != std::string::npos) idx = &e;
+                else if (e.Name.find("bg26") != std::string::npos) data = &e;
+            }
+            for (u32 c = 0; data && idx && c * 4 + 8 <= idx->Size; c++)
+            {
+                u32 a = RD32(pac + idx->Start + c * 4), b = RD32(pac + idx->Start + c * 4 + 4);
+                if (b <= a || b > data->Size) continue;
+                std::vector<u8> d = Unpack(pac + data->Start + a, b - a);
+                if (d.size() < 16 + 8 + 24 + 4 + 1024 || memcmp(d.data() + 16, "OBJD", 4)) continue;
+                Thumbs[XXH64(d.data() + 16 + 8 + 24 + 4, 1024, 0)] = (int)c;
+            }
+        }
+    }
 
     // (the player's avatar parts - editface/editHair - are left out: the game recolors them
     // through palettes, which an HD image can't follow)
@@ -247,6 +274,17 @@ SpriteHD IdentifySprite(int width, int height, bool bpp8, u32 tileOffset,
     readVRAM(tileOffset, n * tb, data);
 
     std::lock_guard<std::mutex> lk(Lock);
+    if (width == 32 && height == 32 && bpp8)
+    {
+        auto t = Thumbs.find(XXH64(data, 1024, 0));
+        if (t != Thumbs.end() && t->second > 0)
+        {
+            // the whole HD card over the little card's rectangle
+            out.Image = kCardThumbBase + t->second;
+            out.OX = -6; out.OY = -3; out.OW = 32; out.OH = 32; out.IW = 20; out.IH = 26;
+            return out;
+        }
+    }
     if (Tiles.empty()) return out;
     u64 key = XXH64(data, n * tb, ((u64)width << 40) | ((u64)height << 32) | tb);
     auto c = Cache.find(key);

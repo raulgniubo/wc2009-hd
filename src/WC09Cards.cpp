@@ -309,10 +309,12 @@ FrameCards GetLatest(bool all)
     std::lock_guard<std::mutex> lk(Lock);
     FrameCards out;
     out.On3DTop = Latest.On3DTop;
-    // stamps are frame+1 so 0 means never; "recent" = within the last few VBlanks
+    // stamps are frame+1 so 0 means never. Kept for 2 seconds: the GL renderers skip work on
+    // frames that repeat the last one, and the overlay must never come back in between
+    // (it would draw stale cards on top for a frame: the "blinking")
     u64 now = FrameNum();
-    bool gl3d = Cards3DStamp.load() && now + 1 - Cards3DStamp.load() < 4;
-    bool gl2d = Cards2DStamp.load() && now + 1 - Cards2DStamp.load() < 4;
+    bool gl3d = Cards3DStamp.load() && now + 1 - Cards3DStamp.load() < 120;
+    bool gl2d = Cards2DStamp.load() && now + 1 - Cards2DStamp.load() < 120;
     if (all) gl3d = gl2d = false;
     if (!gl3d)
         for (const CardQuad& q : Latest.Quads)

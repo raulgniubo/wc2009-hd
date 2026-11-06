@@ -377,6 +377,15 @@ int main(int argc, char** argv)
 
     {
         Config::Table cfg = Config::GetGlobalTable();
+        // WC09 fork: better sound once (cubic interpolation, 16-bit output); the user can still
+        // change it in Audio settings afterwards
+        if (!cfg.GetBool("WC09.AudioUpgraded"))
+        {
+            cfg.SetInt("Audio.Interpolation", 3);
+            cfg.SetInt("Audio.BitDepth", 2);
+            cfg.SetBool("WC09.AudioUpgraded", true);
+            Config::Save();
+        }
         QString uitheme = cfg.GetQString("UITheme");
         if (!uitheme.isEmpty())
         {

@@ -27,6 +27,8 @@ struct SpriteHD
 };
 
 constexpr int kSpriteImageBase = 2000000;
+// sprite image ids from here on are card thumbnails: the HD card face (id - base = card)
+constexpr int kCardThumbBase = 5000000;
 
 void BuildSpriteIndex(const u8* rom, u32 len);
 

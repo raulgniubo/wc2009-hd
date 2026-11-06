@@ -54,7 +54,15 @@ void WC09Overlay::update(NDS* nds, const QString& romPath)
             };
             QString n = QString::fromStdString(name);
             QImage img;
-            if (n.startsWith("textpanel/"))
+            if (n.startsWith("statpanel/"))
+            {
+                int card, atk, def; bool bubble;
+                if (WC09::GetStatPanel(n.mid(10).toInt(), card, atk, def, bubble))
+                    img = WC09Overlay::renderStatPanel(card, atk, def, bubble, 8.f);
+            }
+            else if (n.startsWith("decktext/") || n.startsWith("deckname/"))
+                img = WC09Overlay::renderDeckText(n.mid(9).toInt(), 8.f, n.startsWith("deckname/"));
+            else if (n.startsWith("textpanel/"))
             {
                 QString id = n.mid(10);
                 bool shortVer = id.endsWith('s');
@@ -223,6 +231,124 @@ QImage WC09Overlay::renderTextPanel(int card, float k, int heightDS)
     p.setFont(tf);
     p.setPen(QColor(0, 0, 0, 150)); p.drawText(textDev.translated(0.5 * k, 0.5 * k), flags, desc);
     p.setPen(QColor(240, 246, 255)); p.drawText(textDev, flags, desc);
+    p.end();
+    return img;
+}
+
+QImage WC09Overlay::renderDeckText(int card, float k, bool nameOnly)
+{
+    QString name = QString::fromStdString(WC09::CardNameEn(card));
+    QString desc = QString::fromStdString(WC09::CardDescEn(card));
+    if (name.isEmpty()) return QImage();
+    desc.replace("  ", " ");
+    const float W = nameOnly ? WC09::kDeckNameW : WC09::kDeckDescW;
+    const float H = nameOnly ? WC09::kDeckNameH : WC09::kDeckDescH;
+    QImage img((int)std::ceil(W * k), (int)std::ceil(H * k), QImage::Format_RGBA8888_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+
+    // white text with a solid dark outline: the compositor keeps only opaque pixels, and the
+    // game's own panel shows through everywhere else
+    auto drawOutlined = [&](const QRectF& r, int flags, const QString& text, const QFont& f) {
+        QPainterPath path;
+        QFontMetricsF fm(f);
+        // lay out line by line with word wrap (QPainterPath::addText has no wrapping)
+        QStringList paragraphs = text.split('\n');
+        float y = r.y() + fm.ascent();
+        for (const QString& para : paragraphs)
+        {
+            QStringList words = para.split(' ', Qt::SkipEmptyParts);
+            QString line;
+            auto flush = [&]() {
+                float x = r.x();
+                if (flags & Qt::AlignHCenter) x = r.x() + (r.width() - fm.horizontalAdvance(line)) / 2;
+                path.addText(QPointF(x, y), f, line);
+                y += fm.lineSpacing(); line.clear();
+            };
+            if (words.isEmpty()) { y += fm.lineSpacing(); continue; }
+            for (const QString& w : words)
+            {
+                QString t = line.isEmpty() ? w : line + ' ' + w;
+                if (!line.isEmpty() && fm.horizontalAdvance(t) > r.width()) { flush(); line = w; }
+                else line = t;
+            }
+            if (!line.isEmpty()) flush();
+        }
+        if (flags & Qt::AlignVCenter)
+        {
+            float used = y - fm.lineSpacing() + fm.descent() - r.y();
+            path.translate(0, (r.height() - used) / 2);
+        }
+        p.setPen(QPen(QColor(16, 20, 40), 0.22f * f.pixelSize(), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(path);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255));
+        p.drawPath(path);
+    };
+    auto fits = [&](const QRectF& r, const QString& text, const QFont& f) {
+        QFontMetricsF fm(f);
+        return fm.boundingRect(r, Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, text).height() <= r.height();
+    };
+
+    QFont base = QFontDatabase::systemFont(QFontDatabase::GeneralFont);
+    if (nameOnly)
+    {
+        QFont f = base; f.setBold(true);
+        QRectF r(4 * k, 0, (W - 8) * k, H * k);
+        for (float ts = 12.f; ts > 6.f; ts -= 0.25f)
+        {
+            f.setPixelSize(std::max(1, (int)std::lround(ts * k)));
+            if (QFontMetricsF(f).horizontalAdvance(name) <= r.width()) break;
+        }
+        drawOutlined(r, Qt::AlignHCenter | Qt::AlignVCenter, name, f);
+    }
+    else
+    {
+        QFont f = base;
+        QRectF r(2 * k, 2 * k, (W - 5) * k, (H - 4) * k);
+        for (float ts = 11.f; ts >= 4.f; ts -= 0.25f)
+        {
+            f.setPixelSize(std::max(1, (int)std::lround(ts * k)));
+            if (fits(r, desc, f)) break;
+        }
+        drawOutlined(r, Qt::AlignLeft, desc, f);
+    }
+    p.end();
+    return img;
+}
+
+QImage WC09Overlay::renderStatPanel(int card, int atk, int def, bool bubble, float k)
+{
+    // the usual text panel at x = kPanelX, plus ATK/DEF on a small plate under the card
+    QImage panel = renderTextPanel(card, k, bubble ? WC09::kPanelShortH : WC09::kPanelH);
+    if (panel.isNull()) return panel;
+    const int W = WC09::kPanelX + WC09::kPanelW, H = WC09::kStatsY + WC09::kStatsH - WC09::kPanelY;
+    QImage img((int)std::ceil(W * k), (int)std::ceil(H * k), QImage::Format_RGBA8888_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+    // alpha 0 = show the game's layer (left of the panel, the ATK/DEF row), faint alpha =
+    // hide it (the panel area, as before: the game's own text and icons stay hidden there)
+    p.fillRect(QRectF(WC09::kPanelX * k, 0, WC09::kPanelW * k, panel.height()), QColor(0, 0, 0, 77));
+    p.drawImage(QPointF(WC09::kPanelX * k, 0), panel);
+    p.scale(k, k);
+    const float y0 = WC09::kStatsY - WC09::kPanelY;
+    QPainterPath plate; plate.addRoundedRect(QRectF(13, y0 - 0.5, 84, WC09::kStatsH + 1), 3, 3);
+    p.fillPath(plate, QColor(14, 26, 56));
+    p.setPen(QPen(QColor(140, 190, 255, 230), 0.7)); p.drawPath(plate);
+    p.resetTransform();
+    QFont f = QFontDatabase::systemFont(QFontDatabase::GeneralFont); f.setBold(true);
+    f.setPixelSize(std::max(1, (int)std::lround(10.5f * k)));
+    p.setFont(f);
+    QRectF ra(14 * k, (y0 - 0.5f) * k, 31 * k, (WC09::kStatsH + 1) * k);
+    QRectF rd(64 * k, (y0 - 0.5f) * k, 31 * k, (WC09::kStatsH + 1) * k);
+    p.setPen(QColor(255, 255, 255));
+    p.drawText(ra, Qt::AlignRight | Qt::AlignVCenter, QString::number(atk));
+    p.drawText(rd, Qt::AlignLeft | Qt::AlignVCenter, QString::number(def));
     p.end();
     return img;
 }

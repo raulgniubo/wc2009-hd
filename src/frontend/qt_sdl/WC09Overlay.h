@@ -47,6 +47,10 @@ public:
     // Panel image rendered at `scale` device pixels per DS pixel (cached).
     const QImage* textPanel(int card, float scale);
     static QImage renderTextPanel(int card, float scale, int heightDS);
+    // deck editor detail view: description (or the name) as outlined text on transparent
+    static QImage renderDeckText(int card, float scale, bool nameOnly);
+    // duel card view panel plus the ATK/DEF row under the card
+    static QImage renderStatPanel(int card, int atk, int def, bool bubble, float scale);
 
 private:
     int panelCard = -1; int panelScale = 0; QImage panelImg;

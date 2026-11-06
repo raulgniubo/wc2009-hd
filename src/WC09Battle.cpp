@@ -6,11 +6,13 @@
 #include "NDS.h"
 #include "NDSCart.h"
 
+#include <algorithm>
 #include <cstring>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <tuple>
 #include <mutex>
 #include <unordered_map>
 
@@ -49,10 +51,11 @@ bool Indexed = false;
 const u8* IndexedROM = nullptr;
 
 std::vector<std::string> CardNames, CardDescs;
+std::vector<int> CardAtk, CardDef;   // printed values, -1 if none
 
 void LoadCardText(const u8* rom, u32 len)
 {
-    CardNames.clear(); CardDescs.clear();
+    CardNames.clear(); CardDescs.clear(); CardAtk.clear(); CardDef.clear();
     FileRef ref;
     if (!FindFile(rom, len, "Data_arc_pac/bin2.pac", ref)) return;
     const u8* pac = rom + ref.Start;
@@ -63,6 +66,12 @@ void LoadCardText(const u8* rom, u32 len)
         if (e.Name == "card_indx_e.bin") indx = &e;
         else if (e.Name == "card_name_e.bin") names = &e;
         else if (e.Name == "card_desc_e.bin") descs = &e;
+        else if (e.Name == "card_prop.bin")
+            for (u32 i = 0; (i + 1) * 8 <= e.Size; i++)
+            {
+                u32 p0 = RD32(pac + e.Start + i * 8);
+                CardAtk.push_back(((p0 >> 14) & 0x1FF) * 10); CardDef.push_back(((p0 >> 23) & 0x1FF) * 10);
+            }
     }
     if (!indx || !names || !descs) return;
     auto str = [&](const PacEntry* e, u32 off) {
@@ -288,6 +297,9 @@ std::string BattleImageName(int image)
 {
     if (IsCardSet(image)) return "cardset/" + std::to_string(image - kCardSetBase);
     if (IsCardImage(image)) return "card/" + std::to_string(image - kCardImageBase);
+    if (image >= kStatPanelBase && image < kStatPanelBase + 400000) return "statpanel/" + std::to_string(image);
+    if (image >= kDeckTextBase && image < kSpriteImageBase)
+        return std::string(((image - kDeckTextBase) & 1) ? "deckname/" : "decktext/") + std::to_string((image - kDeckTextBase) / 2);
     if (image >= kSpriteImageBase) return SpriteImageName(image);
     if (image >= kTextPanelBase)
         return "textpanel/" + std::to_string((image - kTextPanelBase) / 2) + (((image - kTextPanelBase) & 1) ? "s" : "");
@@ -310,6 +322,127 @@ BGReplacement GetBGReplacement(int engine, int bg)
     return Current[engine & 1][bg & 3];
 }
 
+namespace
+{
+// The duel card view prints ATK/DEF with the game's pixel font on the text layer, over the card.
+// Glyph shapes are learned from cards whose shown values equal the printed ones, then any
+// value can be read back and drawn in HD.
+std::unordered_map<u64, int> GlyphDigit;   // glyph hash -> digit, -2 = conflicting
+struct StatPanel { int Card, Atk, Def; bool Bubble; };
+std::map<int, StatPanel> StatPanels;
+std::map<std::tuple<int, int, int, bool>, int> StatPanelIds;
+int NextStatPanel = kStatPanelBase;
+
+// Reads the two numbers at screen rows y0..y0+h, x0..x1 of a 4-bit text layer.
+bool ReadStats(GPU& gpu, int engine, int bg, int card, int x0, int x1, int y0, int h, int& atk, int& def)
+{
+    const GPU2D& u = engine == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+    u16 cnt = u.BGCnt[bg];
+    if (cnt & 0x80) return false;
+    u32 charBase = ((cnt >> 2) & 0xF) * 0x4000, scrBase = ((cnt >> 8) & 0x1F) * 0x800;
+    if (engine == 0) { charBase += ((u.DispCnt >> 24) & 7) * 0x10000; scrBase += ((u.DispCnt >> 27) & 7) * 0x10000; }
+    int mapW = (cnt >> 14) & 1 ? 64 : 32, mapH = (cnt >> 14) & 2 ? 64 : 32;
+    int sx0 = u.BGXPos[bg] & 0x1FF, sy0 = u.BGYPos[bg] & 0x1FF;
+    std::vector<u32> cols;   // per screen column: bit mask of set pixels over the rows
+    for (int x = x0; x < x1; x++)
+    {
+        u32 m = 0;
+        for (int y = 0; y < h; y++)
+        {
+            int px = (x + sx0) & (mapW * 8 - 1), py = (y0 + y + sy0) & (mapH * 8 - 1);
+            u32 block = (px >> 8) + ((py >> 8) * (mapW >> 5));
+            u16 e = ReadBG(gpu, engine, scrBase + block * 0x800 + ((((py >> 3) & 31) * 32 + ((px >> 3) & 31)) * 2));
+            int tx = px & 7, ty = py & 7;
+            if (e & 0x400) tx = 7 - tx;
+            if (e & 0x800) ty = 7 - ty;
+            u16 two = ReadBG(gpu, engine, charBase + (e & 0x3FF) * 32 + ty * 4 + (tx >> 1 & ~1));
+            u8 b = (u8)(two >> ((tx & 2) ? 8 : 0));
+            if ((tx & 1) ? (b >> 4) : (b & 15)) m |= 1u << y;
+        }
+        cols.push_back(m);
+    }
+    // numbers = runs of columns split by gaps of 5+ empty columns. The outlined digits touch
+    // each other, so each number is cut into 8-column cells from its right end (the font's pitch)
+    std::vector<std::vector<u64>> nums;
+    for (int i = 0; i < (int)cols.size();)
+    {
+        if (!cols[i]) { i++; continue; }
+        int j = i, last = i;
+        while (j < (int)cols.size() && j - last < 5) { if (cols[j]) last = j; j++; }
+        int width = last - i + 1, n = (width + 4) / 8;
+        if (n < 1 || n > 5) return false;
+        std::vector<u64> digits(n);
+        for (int k = 0; k < n; k++)
+        {
+            u32 cell[8];
+            for (int c = 0; c < 8; c++) { int x = last - 8 * k - 7 + c; cell[c] = (x >= i && x <= last) ? cols[x] : 0; }
+            digits[n - 1 - k] = XXH64(cell, sizeof(cell), 8);
+        }
+        nums.push_back(digits);
+        i = last + 1;
+    }
+    if (getenv("WC09_STATDBG"))
+    {
+        printf("stats card %d:", card);
+        for (auto& n : nums) printf(" [%zu]", n.size());
+        printf(" cols:");
+        for (u32 c : cols) printf(" %x", c);
+        printf("\n"); fflush(stdout);
+    }
+    if (nums.size() != 2 || nums[0].size() > 5 || nums[1].size() > 5) return false;
+    // learn from the printed values (most cards show them unchanged)
+    if (card >= 0 && card < (int)CardAtk.size())
+    {
+        std::string a = std::to_string(CardAtk[card]), d = std::to_string(CardDef[card]);
+        if (a.size() == nums[0].size() && d.size() == nums[1].size())
+        {
+            auto learn = [&](u64 hsh, int digit) {
+                auto it = GlyphDigit.find(hsh);
+                if (it == GlyphDigit.end()) GlyphDigit[hsh] = digit;
+                else if (it->second != digit) it->second = -2;
+            };
+            for (size_t i = 0; i < a.size(); i++) learn(nums[0][i], a[i] - '0');
+            for (size_t i = 0; i < d.size(); i++) learn(nums[1][i], d[i] - '0');
+        }
+    }
+    int v[2];
+    for (int n = 0; n < 2; n++)
+    {
+        v[n] = 0;
+        for (u64 hsh : nums[n])
+        {
+            auto it = GlyphDigit.find(hsh);
+            if (it == GlyphDigit.end() || it->second < 0) return false;
+            v[n] = v[n] * 10 + it->second;
+        }
+    }
+    atk = v[0]; def = v[1];
+    return true;
+}
+}
+
+bool GetStatPanel(int image, int& card, int& atk, int& def, bool& bubble)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    auto it = StatPanels.find(image);
+    if (it == StatPanels.end()) return false;
+    card = it->second.Card; atk = it->second.Atk; def = it->second.Def; bubble = it->second.Bubble;
+    return true;
+}
+
+namespace
+{
+RectHide DetailBadge[2];
+}
+
+bool HideSprite(int engine, int x, int y, int w, int h)
+{
+    const RectHide& r = DetailBadge[engine & 1];
+    if (!r.On || w > 16 || h > 16) return false;
+    // the level badge the game puts on the card's top-right corner (the HD card shows its stars)
+    return x >= r.X0 + 50 && x + w <= r.X1 + 6 && y >= r.Y0 + 4 && y + h <= r.Y0 + 34;
+}
+
 void OnVBlankBattle(GPU& gpu)
 {
     VBlankCount++;
@@ -324,6 +457,15 @@ void OnVBlankBattle(GPU& gpu)
                    u.BGXPos[0], u.BGYPos[0], u.BGXPos[1], u.BGYPos[1], u.BGXPos[2], u.BGYPos[2], u.BGXPos[3], u.BGYPos[3]);
         }
         fflush(stdout);
+        if (getenv("WC09_OAMDBG"))
+            for (int e = 0; e < 2; e++)
+                for (int k = 0; k < 128; k++)
+                {
+                    const u16* a = (const u16*)&gpu.OAM[e * 0x400 + k * 8];
+                    if ((a[0] & 0x300) == 0x200) continue;
+                    int y = a[0] & 0xFF, x = a[1] & 0x1FF; if (x >= 256) x -= 512;
+                    printf("OAM %c%d x %d y %d a0 %04x a1 %04x a2 %04x\n", 'A' + e, k, x, y, a[0], a[1], a[2]);
+                }
     }
     BGReplacement found[2][4];
     if (IsActive() && GetHDCardsEnabled())
@@ -488,7 +630,37 @@ void OnVBlankBattle(GPU& gpu)
                 for (size_t i : here) MarkHandled2D(i);
             }
     }
+    // deck editor / card list detail view: a big 3D card at the left of the top screen, the
+    // description on BG3 and the name on BG2 (4-bit text layers): swap both for HD text
+    if (IsActive() && GetHDTextEnabled())
+    {
+        FrameCards fc = GetLatest(true);
+        for (const CardQuad& q : fc.Quads)
+        {
+            if (q.TexSize != 128 || q.Screen != 0 || q.Card == 0) continue;
+            int x0 = std::min({q.X[0], q.X[1], q.X[2], q.X[3]}), x1 = std::max({q.X[0], q.X[1], q.X[2], q.X[3]});
+            int y0 = std::min({q.Y[0], q.Y[1], q.Y[2], q.Y[3]}), y1 = std::max({q.Y[0], q.Y[1], q.Y[2], q.Y[3]});
+            if (x0 < -4 || x0 > 20 || y0 < 16 || y0 > 40 || x1 - x0 < 70 || x1 - x0 > 110 || y1 - y0 < 110) continue;
+            int e = gpu.ScreenSwap ? 0 : 1;   // engine on the top screen
+            const GPU2D& u = e == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+            auto textLayer = [&](int bg) { return (u.DispCnt & (1 << (8 + bg))) && !(u.BGCnt[bg] & 0x80) && found[e][bg].Image < 0; };
+            if (textLayer(3))
+            {
+                BGReplacement& r = found[e][3];
+                r.Image = kDeckTextBase + q.Card * 2; r.ScreenSpace = true;
+                r.OriginX = kDeckDescX; r.OriginY = kDeckDescY; r.Width = kDeckDescW; r.Height = kDeckDescH;
+            }
+            if (textLayer(2))
+            {
+                BGReplacement& r = found[e][2];
+                r.Image = kDeckTextBase + q.Card * 2 + 1; r.ScreenSpace = true;
+                r.OriginX = kDeckNameX; r.OriginY = kDeckNameY; r.Width = kDeckNameW; r.Height = kDeckNameH;
+            }
+            break;
+        }
+    }
     // duel card detail: replace the description text background with a generated HD panel
+    RectHide detailBadge[2];
     if (IsActive() && GetHDTextEnabled())
     {
         FrameCards fc = GetLatest(true);
@@ -537,6 +709,32 @@ void OnVBlankBattle(GPU& gpu)
             rep.ScreenSpace = true;
             rep.OriginX = kPanelX; rep.OriginY = kPanelY; rep.Width = kPanelW;
             rep.Height = bubble ? kPanelShortH : kPanelH;
+
+            // ATK/DEF under the card: read them back and draw them in HD too (bigger panel
+            // that also covers that row; transparent parts show the original layer)
+            int atk, def;
+            if (ReadStats(gpu, q.Engine, textBG, q.Card, 4, 96, kStatsY, kStatsH, atk, def))
+            {
+                std::lock_guard<std::mutex> lk2(Lock);
+                auto key = std::make_tuple(q.Card, atk, def, bubble);
+                auto it = StatPanelIds.find(key);
+                int id;
+                if (it != StatPanelIds.end()) id = it->second;
+                else
+                {
+                    if (StatPanels.size() > 256) { StatPanels.clear(); StatPanelIds.clear(); }
+                    id = NextStatPanel++;
+                    if (NextStatPanel >= kStatPanelBase + 400000) NextStatPanel = kStatPanelBase;
+                    StatPanels[id] = {q.Card, atk, def, bubble};
+                    StatPanelIds[key] = id;
+                }
+                rep.Image = id;
+                rep.OriginX = 0; rep.OriginY = kPanelY; rep.Width = kPanelX + kPanelW;
+                rep.Height = kStatsY + kStatsH - kPanelY;
+                rep.Fallback = true;
+            }
+            // the level badge over the card's corner: hidden while the HD card is shown
+            detailBadge[q.Engine] = {true, q.X[0], q.Y[0], q.X[0] + 88, q.Y[0] + 128};
             break;
         }
     }
@@ -548,6 +746,7 @@ void OnVBlankBattle(GPU& gpu)
 
     std::lock_guard<std::mutex> lk(Lock);
     OnScreen[0] = onScreen[0]; OnScreen[1] = onScreen[1];
+    DetailBadge[0] = detailBadge[0]; DetailBadge[1] = detailBadge[1];
     static const bool debug = getenv("WC09_DEBUG") != nullptr;
     for (int e = 0; e < 2; e++) for (int b = 0; b < 4; b++)
     {

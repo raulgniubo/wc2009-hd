@@ -58,6 +58,8 @@ DefaultList<int> DefaultInts =
     {"3D.Renderer", renderer3D_Software},
 #endif
     {"3D.GL.ScaleFactor", 4},
+    {"Audio.Interpolation", 3},
+    {"Audio.BitDepth", 2},
     // side by side fits widescreen Mac/PC displays best
     {"Instance*.Window*.ScreenLayout", 2},
     {"Instance*.Window*.Width", 1024},

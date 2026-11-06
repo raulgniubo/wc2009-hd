@@ -463,7 +463,7 @@ GLuint GLRenderer2D::GetHDTexture(int image)
         loaded = WC09::LoadCardImage(image - WC09::kCardImageBase, rgba, w, h);
     else
         loaded = WC09::LoadHDImage(WC09::BattleImageName(image), rgba, w, h);
-    if (getenv("WC09_DEBUG")) { printf("WC09 2D HD %d %s %dx%d\n", image, loaded ? "ok" : "missing", w, h); fflush(stdout); }
+    if (getenv("WC09_DEBUG")) { printf("WC09 2D HD %d %s %s %dx%d\n", image, WC09::BattleImageName(image).c_str(), loaded ? "ok" : "missing", w, h); fflush(stdout); }
     if (loaded && w > 0 && h > 0)
     {
         glGenTextures(1, &e.Tex);
@@ -1478,6 +1478,8 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
         }
 
         if (xpos <= -boundwidth)
+            continue;
+        if (WC09::IsActive() && WC09::GetHDCardsEnabled() && WC09::HideSprite(GPU2D.Num, xpos, ypos & 0xFF, width, height))
             continue;
 
         bool yc0 = ((ypos + boundheight) > ystart) && (ypos < yend);
