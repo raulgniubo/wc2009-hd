@@ -281,3 +281,8 @@ if (ENABLE_OGLRENDERER)
     target_compile_definitions(melonDS PUBLIC MELONDS_GL_HEADER=${MELONDS_GL_HEADER})
     target_compile_definitions(core PUBLIC MELONDS_GL_HEADER=${MELONDS_GL_HEADER})
 endif()
+
+# WC09 fork: HD card images are JPEGs; make sure a static Qt links its JPEG plugin
+if (TARGET Qt6::QJpegPlugin)
+    qt_import_plugins(melonDS INCLUDE Qt6::QJpegPlugin)
+endif()

@@ -56,6 +56,10 @@ jobs:
           configurePreset: release-mac-${{ matrix.arch }}
           buildPreset: release-mac-${{ matrix.arch }}
           configurePresetAdditionalArgs: "['-DMELONDS_EMBED_BUILD_INFO=ON']"
+      - name: Check JPEG support is linked
+        shell: bash
+        run: |
+          strings build/release-mac-${{ matrix.arch }}/melonDS.app/Contents/MacOS/melonDS | grep -m1 -i "jpeg" || (echo "JPEG support missing" && exit 1)
       - name: Compress app bundle
         shell: bash
         run: |
