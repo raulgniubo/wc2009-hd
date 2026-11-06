@@ -108,6 +108,37 @@ void BuildIndex(const u8* rom, u32 len)
         "FreeDuel", "FriendMenu", "Getpack", "MainMenu", "Name", "Password", "Record", "Structure",
         "TagSetting", "WiFi", "WiFiDownload", "WiFiRanking", "WordSelect", "janken", "logo", "trunk",
         "Common", "cpuduel" };
+    // one image: its tiles (4bpp or 8bpp), its map
+    auto addImage = [&](const std::string& name, bool b8, const u8* ch, u32 chrsz, const u8* mp, u16 tw, u16 th)
+    {
+        const u32 tb = b8 ? 64 : 32;
+        const u64 seed = b8 ? 0 : 4;      // keep 4bpp and 8bpp tile hashes apart
+        u64 chash = XXH64(ch, chrsz, seed);
+        int csid;
+        auto it = charsetByHash.find(chash);
+        if (it == charsetByHash.end())
+        {
+            csid = (int)CharSets.size(); CharSets.emplace_back(); charsetByHash[chash] = csid;
+            u32 ntiles = chrsz / tb;
+            for (u32 k = 1; k < ntiles; k++)
+            {
+                u64 th64 = XXH64(ch + k * tb, tb, seed);
+                auto o = tileOwner.find(th64);
+                if (o == tileOwner.end()) { tileOwner[th64] = csid; tileNum[th64] = (u16)k; }
+                else if (o->second != csid) o->second = -1;
+            }
+        }
+        else csid = it->second;
+
+        Image img;
+        img.Name = name;
+        img.CharSet = csid; img.TW = tw; img.TH = th;
+        img.Map.resize((size_t)tw * th);
+        for (size_t k = 0; k < img.Map.size(); k++) img.Map[k] = RD16(mp + k * 2);
+        CharSets[csid].Images.push_back((int)Images.size());
+        Images.push_back(std::move(img));
+    };
+
     for (const char* path : kSets)
     {
         FileRef ref;
@@ -129,39 +160,50 @@ void BuildIndex(const u8* rom, u32 len)
                 if (memcmp(&dec[p], "BGDT", 4) == 0 && cs >= 28)
                 {
                     const u8* body = &dec[p + 8];
-                    if (body[0] != 1) break;          // 8bpp images only
+                    if (body[0] > 1) break;           // 0 = 4bpp, 1 = 8bpp
                     u32 mapsz = RD32(body + 4); u16 tw = RD16(body + 8), th = RD16(body + 10);
                     u32 chrsz = RD32(body + 16);
                     if (20 + mapsz + chrsz > cs - 8 || mapsz < (u32)tw * th * 2) break;
-                    const u8* mp = body + 20; const u8* ch = body + 20 + mapsz;
-                    u64 chash = XXH64(ch, chrsz, 0);
-                    int csid;
-                    auto it = charsetByHash.find(chash);
-                    if (it == charsetByHash.end())
-                    {
-                        csid = (int)CharSets.size(); CharSets.emplace_back(); charsetByHash[chash] = csid;
-                        u32 ntiles = chrsz / 64;
-                        for (u32 k = 1; k < ntiles; k++)
-                        {
-                            u64 th64 = XXH64(ch + k * 64, 64, 0);
-                            auto o = tileOwner.find(th64);
-                            if (o == tileOwner.end()) { tileOwner[th64] = csid; tileNum[th64] = (u16)k; }
-                            else if (o->second != csid) o->second = -1;
-                        }
-                    }
-                    else csid = it->second;
-
-                    Image img;
-                    img.Name = f + "/" + e.Name.substr(0, e.Name.find('.'));
-                    img.CharSet = csid; img.TW = tw; img.TH = th;
-                    img.Map.resize((size_t)tw * th);
-                    for (size_t k = 0; k < img.Map.size(); k++) img.Map[k] = RD16(mp + k * 2);
-                    CharSets[csid].Images.push_back((int)Images.size());
-                    Images.push_back(std::move(img));
+                    addImage(f + "/" + e.Name.substr(0, e.Name.find('.')), body[0] == 1,
+                             body + 20 + mapsz, chrsz, body + 20, tw, th);
                     break;
                 }
                 p += cs;
             }
+        }
+    }
+
+    // Nitro backgrounds (NCGR tiles + NSCR map with the same name): the overworld map screens
+    for (const char* path : {"RPG2D_2", "RACE"})
+    {
+        FileRef ref;
+        if (!FindFile(rom, len, std::string("Data_arc_pac/") + path + ".pac", ref)) continue;
+        std::map<std::string, std::vector<u8>> cgr, scr;
+        for (const PacEntry& e : ParsePac(rom + ref.Start, ref.Size))
+        {
+            bool isC = e.Name.find(".lzncgr") != std::string::npos, isS = e.Name.find(".lznscr") != std::string::npos;
+            if (!isC && !isS) continue;
+            std::vector<u8> dec;
+            const u8* src = rom + ref.Start + e.Start;
+            if (e.Size >= 4 && src[0] == 0x10) { if (!LZ10(src, e.Size, dec)) continue; }
+            else dec.assign(src, src + e.Size);
+            (isC ? cgr : scr)[e.Name.substr(0, e.Name.find('.'))] = std::move(dec);
+        }
+        for (auto& [stem, s] : scr)
+        {
+            auto c = cgr.find(stem);
+            if (c == cgr.end()) continue;
+            const std::vector<u8>& g = c->second;
+            if (s.size() < 0x24 || g.size() < 0x30 || memcmp(s.data(), "RCSN", 4) || memcmp(g.data(), "RGCN", 4)) continue;
+            // NCGR: RAHC block at 0x10; NSCR: NRCS block at 0x10
+            const u8* gb = g.data() + 0x18; const u8* sb = s.data() + 0x18;
+            bool b8 = RD32(gb + 4) == 4;
+            u32 gsize = RD32(gb + 16), goff = RD32(gb + 20);
+            if (0x18 + goff + gsize > g.size()) continue;
+            u16 wpx = RD16(sb + 0), hpx = RD16(sb + 2); u32 msize = RD32(sb + 8);
+            u16 tw = wpx / 8, th = hpx / 8;
+            if (!tw || !th || msize < (u32)tw * th * 2 || 0x18 + 12 + msize > s.size()) continue;
+            addImage(std::string(path) + "/" + stem, b8, g.data() + 0x18 + goff, gsize, sb + 12, tw, th);
         }
     }
     for (auto& [h, cs] : tileOwner)
@@ -263,7 +305,9 @@ void OnVBlankBattle(GPU& gpu)
                 bool text = bg < 2 || (bg == 2 && bgmode <= 1) || (bg == 3 && bgmode == 0);
                 if (!text) continue;
                 u16 cnt = u.BGCnt[bg];
-                if (!(cnt & (1 << 7))) continue;
+                const bool b8 = cnt & (1 << 7);
+                const u32 tb = b8 ? 64 : 32;
+                const u64 seed = b8 ? 0 : 4;
 
                 u32 charBase = ((cnt >> 2) & 0xF) * 0x4000;
                 u32 scrBase = ((cnt >> 8) & 0x1F) * 0x800;
@@ -278,7 +322,7 @@ void OnVBlankBattle(GPU& gpu)
 
                 int sx0 = (u.BGXPos[bg] & 0x1FF) >> 3, sy0 = (u.BGYPos[bg] & 0x1FF) >> 3;
                 // votes: key = (image, originX, originY, mirror)
-                std::map<std::tuple<int, int, int, bool>, int> votes;
+                std::map<std::tuple<int, int, int, bool, int>, int> votes;
                 static u64 hashOf[1024]; static bool hashed[1024];
                 memset(hashed, 0, sizeof(hashed));
                 for (int cy = 0; cy < 25; cy++)
@@ -292,8 +336,8 @@ void OnVBlankBattle(GPU& gpu)
                         if (!hashed[t])
                         {
                             u8 tile[64];
-                            for (int i = 0; i < 64; i += 2) *(u16*)&tile[i] = ReadBG(gpu, engine, charBase + t * 64 + i);
-                            hashOf[t] = XXH64(tile, 64, 0); hashed[t] = true;
+                            for (u32 i = 0; i < tb; i += 2) *(u16*)&tile[i] = ReadBG(gpu, engine, charBase + t * tb + i);
+                            hashOf[t] = XXH64(tile, tb, seed); hashed[t] = true;
                         }
                         auto hit = TileIndex.find(hashOf[t]);
                         if (hit == TileIndex.end()) continue;
@@ -314,17 +358,18 @@ void OnVBlankBattle(GPU& gpu)
                             u16 qv = entry(mirror ? ox + (img.TW - 1 - qx) : ox + qx, oy + qy);
                             if ((qm & 0x3FF) == 0) { if ((qv & 0x3FF) != 0 && (qv & 0x3FF) != (u16)tileBase) continue; }
                             else if ((qv & 0x3FF) != (u16)((qm & 0x3FF) + tileBase)) continue;
-                            if (++votes[{tp.Image, ox, oy, mirror}] >= 6) goto voted;
+                            if (++votes[{tp.Image, ox, oy, mirror, tileBase}] >= 6) goto voted;
                         }
                     }
                 }
             voted:
-                int best = 0;
+                int best = 0; int bestBase = 0, bestOX = 0, bestOY = 0;
                 for (auto& [k, v] : votes)
                 {
                     if (v <= best) continue;
                     best = v;
-                    auto [imgId, ox, oy, mirror] = k;
+                    auto [imgId, ox, oy, mirror, base] = k;
+                    bestBase = base; bestOX = ox; bestOY = oy;
                     BGReplacement& rep = found[engine][bg];
                     rep.Image = imgId;
                     rep.OriginX = (float)(((ox % mapW) + mapW) % mapW) * 8.f;
@@ -333,6 +378,28 @@ void OnVBlankBattle(GPU& gpu)
                     rep.Mirror = mirror;
                 }
                 if (best < 2) found[engine][bg] = BGReplacement{};
+                // 4bpp layers often hold windows the game writes text into: only replace when the
+                // visible part of the layer is exactly the stored image
+                if (!b8 && found[engine][bg].Image >= 0)
+                {
+                    const Image& img = Images[found[engine][bg].Image];
+                    bool mir = found[engine][bg].Mirror;
+                    int good = 0, bad = 0;
+                    for (int cy = 0; cy < 24; cy++)
+                        for (int cx = 0; cx < 32; cx++)
+                        {
+                            int mx = sx0 + cx, my = sy0 + cy;
+                            int ix = (((mx - bestOX) % mapW) + mapW) % mapW, iy = (((my - bestOY) % mapH) + mapH) % mapH;
+                            if (ix >= img.TW || iy >= img.TH) continue;
+                            if (mir) ix = img.TW - 1 - ix;
+                            u16 want = img.Map[iy * img.TW + ix] & 0x3FF;
+                            u16 have = entry(mx, my) & 0x3FF;
+                            if (want == 0) { if (have == 0 || have == (u16)bestBase) continue; bad++; }
+                            else if (have == (u16)(want + bestBase)) good++;
+                            else bad++;
+                        }
+                    if (good < 8 || bad > good / 50) found[engine][bg] = BGReplacement{};
+                }
             }
         }
     }

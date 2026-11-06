@@ -12,6 +12,8 @@ the fork recognizes what the game draws and swaps in HD versions.
 | HD card text in the duel card view | Name + full description redrawn in a real font, whole text fits without scrolling | HD card text |
 | HD menus and screens (deck editor, main menu, shop, records, setup screens...) | Every 8-bit background image in the ROM is indexed at load; when one shows up, the 2D compositor samples an AI-upscaled version | HD cards |
 | HD duelist portraits, big character figures, booster packs | Sprite tiles are indexed at load (Konami OBJD and Nitro cell sets); the sprite shader samples the upscaled image | HD cards |
+| HD 3D textures (duel field, buttons, mini monsters on the field, overworld models, effects) | Each texture the game uploads is hashed by its decoded pixels; if `HDCards/tex3d/<hash>.png` exists, the 3D renderer samples it instead | HD cards |
+| HD overworld backgrounds and map | The overworld's Nitro background screens (RPG2D_2) are indexed like the menus | HD cards |
 | Smooth 2D graphics (everything else 2D) | xBR-style edge-directed upscaling of 2D layers and sprites | Smooth 2D graphics |
 | Sharp 3D | OpenGL renderer at 4x by default | Config > Video |
 
@@ -28,6 +30,7 @@ Layout of `HDCards/`:
 - `<passcode>.jpg` - card faces; `card_<index>.jpg` for game-only cards without a passcode.
 - `BattleMonsterR1/<id>_r.png`, `BattleMonsterR2/...`, `BattleMonsterL1/...`, `BattleMonsterL2/...` -
   battle images. Left-facing images that are just mirrors fall back to the right-facing file.
+- `tex3d/<hash>.png` for 3D textures (hash = XXH64 of the decoded texels; `WC09_DUMP3D=<dir>` dumps them).
 - `<set>/<name>.png` for menus and sprites, e.g. `DCustom/dcus_menu_bg01.png`, `BustupR/bu001_r_c0.png`.
 - Anything missing simply shows the original graphics.
 
@@ -45,7 +48,9 @@ Layout of `HDCards/`:
 ## Known gaps
 - The player's own avatar (face/hair parts) is recolored at runtime, so it keeps the original pixels
   with smoothing.
-- The overworld (3D city and 2D map) and menus built from 4-bit tiles get smoothing only.
+- Text drawn by the game into tiles (dialog, menu labels) keeps the original font with smoothing.
+- 4-bit menu layers are only replaced when the visible layer exactly matches the stored image, so
+  windows the game writes text into keep their original pixels.
 - The card in the story intro isn't one of the 2,934 card images.
 - HD battle images and HD text need the OpenGL renderer (the default). With the software renderer
   you still get HD cards and the text panel as an overlay.

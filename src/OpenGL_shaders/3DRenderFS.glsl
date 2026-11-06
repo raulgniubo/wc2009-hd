@@ -3,6 +3,8 @@
 uniform usampler2DArray CurTexture;
 uniform sampler2DArray Capture128Texture;
 uniform sampler2DArray Capture256Texture;
+uniform sampler2D HDTexture;
+uniform int uHDMode; // WC09: 0 off, 1 HD with binary alpha, 2 HD keeping alpha
 
 layout(std140) uniform uConfig
 {
@@ -59,7 +61,12 @@ vec4 FinalColor()
     {
         vec3 texcoord = vec3(fTexcoord, fPolygonAttr.y);
         vec4 tcol;
-        if (fPolygonAttr.z == 0)
+        if (fPolygonAttr.z == 0 && uHDMode != 0)
+        {
+            tcol = texture(HDTexture, fTexcoord);
+            if (uHDMode == 1) tcol.a = (tcol.a >= 0.5) ? 1.0 : 0.0;
+        }
+        else if (fPolygonAttr.z == 0)
             tcol = vec4(texture(CurTexture, texcoord)) / vec4(63,63,63,31);
         else if (fPolygonAttr.z == 1)
             tcol = texture(Capture128Texture, texcoord);

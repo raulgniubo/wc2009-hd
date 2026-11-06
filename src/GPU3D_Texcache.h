@@ -7,6 +7,8 @@
 #include <assert.h>
 #include <unordered_map>
 #include <vector>
+#include <cstdio>
+#include <cstdlib>
 
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash/xxhash.h"
@@ -187,6 +189,7 @@ public:
             textureHandle = it->second.Texture.TextureID;
             layer = it->second.Texture.Layer;
             helper = &it->second.LastVariant;
+            LastContentHash = it->second.ContentHash;
             return;
         }
 
@@ -259,6 +262,9 @@ public:
             }
         }
 
+        // WC09: hash of the decoded texels, independent of where the texture sits in VRAM
+        entry.ContentHash = XXH64(DecodingBuffer, (size_t)width * height * 4, ((u64)width << 16) | height);
+        LastContentHash = entry.ContentHash;
         for (int i = 0; i < 2; i++)
         {
             if (entry.TextureRAMSize[i])
@@ -268,6 +274,13 @@ public:
         if (entry.TexPalSize)
             entry.TexPalHash = MaskedHash(GPU.VRAMFlat_TexPal, sizeof(GPU.VRAMFlat_TexPal),
                 entry.TexPalStart, entry.TexPalSize);
+        if (const char* dump = getenv("WC09_DUMP3D"))
+        {
+            char fn[512]; snprintf(fn, sizeof(fn), "%s/%016llx_%dx%d_f%d_%016llx.rgb6a5", dump, (unsigned long long)entry.ContentHash,
+                                   width, height, fmt, (unsigned long long)entry.TextureHash[0]);
+            if (FILE* f = fopen(fn, "rb")) fclose(f);
+            else if (FILE* f = fopen(fn, "wb")) { fwrite(DecodingBuffer, 4, (size_t)width * height, f); fclose(f); }
+        }
 
         auto& texArrays = TexArrays[widthLog2][heightLog2];
         auto& freeTextures = FreeTextures[widthLog2][heightLog2];
@@ -337,7 +350,11 @@ private:
 
         u64 TextureHash[2] {};
         u64 TexPalHash {};
+        u64 ContentHash {};
     };
+public:
+    u64 LastContentHash = 0;   // content hash of the texture returned by the last GetTexture
+private:
     std::unordered_map<u64, TexCacheEntry> Cache;
 
     TexLoaderT TexLoader;

@@ -17,6 +17,7 @@
 */
 
 #pragma once
+#include <unordered_map>
 
 #ifdef OGLRENDERER_ENABLED
 #include "GPU3D.h"
@@ -67,6 +68,8 @@ private:
 
         GLuint TexID {};
         u32 TexRepeat {};
+        GLuint HDTex {};      // WC09: HD replacement texture (0 = none)
+        int HDMode {};        // 1 = binary alpha, 2 = keep alpha
     };
 
     //GLCompositor CurGLCompositor;
@@ -100,6 +103,11 @@ private:
 
     GLuint RenderShader[2] {};
     GLint RenderModeULoc = 0;
+    GLint HDModeULoc = -1;
+    // WC09: HD 3D textures by content hash
+    struct HD3DEntry { GLuint Tex; bool Valid; };
+    std::unordered_map<u64, HD3DEntry> HD3D;
+    GLuint GetHD3D(u64 hash);
     GLuint CurShaderID = -1;
 
     GLuint FinalPassEdgeShader {};

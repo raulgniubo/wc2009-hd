@@ -30,6 +30,7 @@ if os.path.isdir(d):
 import json
 # menus and sprites: HDCards/<set>/<name>.png, plus copies for names that share an image
 def add_tree(hd, dupfile):
+    global n
     if not os.path.isdir(hd): return
     done = {}
     for st in sorted(os.listdir(hd)):
@@ -44,5 +45,8 @@ def add_tree(hd, dupfile):
                 z.writestr(f'HDCards/{name}.png', done[canon]); done[name] = done[canon]; n += 1
 add_tree(f'{SRC}/menu_hd', f'{SRC}/menu_dups.json')
 add_tree(f'{SRC}/spr_hd', f'{SRC}/spr_dups.json')
+add_tree(f'{SRC}/menu4_hd', f'{SRC}/menu4_png_dups.json')
+add_tree(f'{SRC}/tex3d_hd', '')
+add_tree(f'{SRC}/nbg_hd', '')
 z.close()
 print(n, 'files', os.path.getsize(OUT) // (1 << 20), 'MB')

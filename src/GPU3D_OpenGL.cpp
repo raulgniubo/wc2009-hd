@@ -23,6 +23,10 @@
 #include <string.h>
 #include "NDS.h"
 #include "GPU.h"
+#include "WC09Battle.h"
+#include "WC09Cards.h"
+#include <vector>
+#include <string>
 
 namespace melonDS
 {
@@ -78,6 +82,8 @@ bool GLRenderer3D::BuildRenderShader(bool wbuffer)
     glUniform1i(uni_id, 1);
     uni_id = glGetUniformLocation(prog, "Capture256Texture");
     glUniform1i(uni_id, 2);
+    uni_id = glGetUniformLocation(prog, "HDTexture");
+    glUniform1i(uni_id, 3);
 
     RenderShader[(int)wbuffer] = prog;
 
@@ -92,6 +98,32 @@ void GLRenderer3D::UseRenderShader(bool wbuffer)
     CurShaderID = flags;
 
     RenderModeULoc = glGetUniformLocation(RenderShader[flags], "uRenderMode");
+    HDModeULoc = glGetUniformLocation(RenderShader[flags], "uHDMode");
+}
+
+GLuint GLRenderer3D::GetHD3D(u64 hash)
+{
+    auto it = HD3D.find(hash);
+    if (it != HD3D.end()) return it->second.Valid ? it->second.Tex : 0;
+    HD3DEntry e {0, false};
+    char name[40]; snprintf(name, sizeof(name), "tex3d/%016llx", (unsigned long long)hash);
+    std::vector<u8> rgba; int w = 0, h = 0;
+    if (WC09::LoadHDImage(name, rgba, w, h) && w > 0 && h > 0)
+    {
+        glGenTextures(1, &e.Tex);
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, e.Tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glActiveTexture(GL_TEXTURE0);
+        e.Valid = true;
+    }
+    HD3D[hash] = e;
+    static const bool debug = getenv("WC09_DEBUG") != nullptr;
+    if (debug) { printf("WC09 tex3d %s %s\n", name, e.Valid ? "HD" : "-"); fflush(stdout); }
+    return e.Valid ? e.Tex : 0;
 }
 
 void SetupDefaultTexParams(GLuint tex)
@@ -493,6 +525,8 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
     u32 curtexpal = 0;
     GLuint curtexid = 0;
     u32 curtexlayer = (u32)-1;
+    GLuint curhd = 0; int curhdmode = 0;
+    const bool hdon = WC09::IsActive() && WC09::GetHDCardsEnabled();
 
     for (int i = 0; i < npolys; i++)
     {
@@ -562,6 +596,8 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
                     u32* halp;
                     Texcache.GetTexture(texparam, texpal, curtexid, curtexlayer, halp);
                     curtexlayer |= 0xFFFF0000;
+                    curhd = hdon ? GetHD3D(Texcache.LastContentHash) : 0;
+                    curhdmode = (textype == 1 || textype == 6) ? 2 : 1;
                 }
             }
             else
@@ -576,6 +612,8 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
         }
 
         rp->TexID = curtexid;
+        rp->HDTex = (curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF) ? curhd : 0;
+        rp->HDMode = curhdmode;
         rp->TexRepeat = (poly->TexParam >> 16) & 0xF;
 
         // assemble vertices
@@ -805,6 +843,18 @@ void GLRenderer3D::SetupPolygonTexture(const RendererPolygon* poly) const
 
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, repeatS);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, repeatT);
+
+    // WC09: HD texture replacement
+    GLuint hd = iscap ? 0 : poly->HDTex;
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, hd);
+    if (hd)
+    {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, repeatS);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, repeatT);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    if (HDModeULoc >= 0) glUniform1i(HDModeULoc, hd ? poly->HDMode : 0);
 }
 
 int GLRenderer3D::RenderSinglePolygon(int i) const
@@ -834,6 +884,7 @@ int GLRenderer3D::RenderPolygonBatch(int i) const
         if (cur_rp->RenderKey != renderkey) break;
         if (cur_rp->TexID != texid) break;
         if (cur_rp->TexRepeat != texrepeat) break;
+        if (cur_rp->HDTex != rp->HDTex) break;
 
         numpolys++;
         numindices += cur_rp->NumIndices;
@@ -859,6 +910,7 @@ int GLRenderer3D::RenderPolygonEdgeBatch(int i) const
         if (cur_rp->RenderKey != renderkey) break;
         if (cur_rp->TexID != texid) break;
         if (cur_rp->TexRepeat != texrepeat) break;
+        if (cur_rp->HDTex != rp->HDTex) break;
 
         numpolys++;
         numindices += cur_rp->NumEdgeIndices;
