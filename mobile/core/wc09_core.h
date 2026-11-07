@@ -59,6 +59,9 @@ enum
 };
 void wc09_set_option(int option, int value);
 int wc09_is_hd_game(void);
+// what the renderer is (OpenGL, or the software fallback when OpenGL couldn't start) and the
+// errors logged while starting; *software = 1 for the fallback
+const char* wc09_renderer_report(int* software);
 // 4-letter game code from a ROM header into code[5] (e.g. "CY8E"); 0 on success
 int wc09_rom_code(const char* path, char* code);   // the loaded game is Yu-Gi-Oh! 5D's WC2009 (the HD options apply)
 

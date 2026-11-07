@@ -18,7 +18,7 @@
 #endif
 
 namespace wc09m { void OnNDSSave(const melonDS::u8* data, melonDS::u32 len, melonDS::u32 off, melonDS::u32 wlen);
-                  std::string LocalDir(); }
+                  std::string LocalDir(); void NoteLog(bool error, const char* text); }
 
 namespace melonDS::Platform
 {
@@ -97,6 +97,13 @@ u64 FileLength(FileHandle* file)
 void Log(LogLevel level, const char* fmt, ...)
 {
     if (level == LogLevel::Debug) return;
+    {
+        char buf[2048];
+        va_list a2; va_start(a2, fmt);
+        vsnprintf(buf, sizeof(buf), fmt, a2);
+        va_end(a2);
+        wc09m::NoteLog(level == LogLevel::Error || level == LogLevel::Warn, buf);
+    }
     va_list args; va_start(args, fmt);
 #ifdef __ANDROID__
     __android_log_vprint(level == LogLevel::Error ? ANDROID_LOG_ERROR : ANDROID_LOG_INFO, "WC09", fmt, args);

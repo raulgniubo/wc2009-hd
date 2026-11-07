@@ -1179,6 +1179,20 @@ static std::atomic<bool> gMuted{false};
         return;
     }
     _started = YES;
+    {
+        int soft = 0;
+        const char* rep = wc09_renderer_report(&soft);
+        NSString* report = [NSString stringWithUTF8String:rep ? rep : ""];
+        NSLog(@"Dual HD renderer report:\n%@", report);
+        if (soft)
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIAlertController* a = [UIAlertController alertControllerWithTitle:@"HD graphics couldn't start"
+                    message:@"The game runs in basic mode for now. Tap Copy Report and paste it in the chat so it can be fixed." preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"Copy Report" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { UIPasteboard.generalPasteboard.string = report; }]];
+                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+                [self presentViewController:a animated:YES completion:nil];
+            });
+    }
     if (!_fresh && [Prefs() boolForKey:@"resume"] && wc09_state_exists(kAutoSlot) && wc09_load_state(kAutoSlot) == 0)
         dispatch_async(dispatch_get_main_queue(), ^{ [self toast:@"Resumed where you left off"]; });
     _base = 0;

@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -69,6 +70,20 @@ void PushAudio()
 
 std::string LocalDir() { return DataDir; }
 
+// the last errors/warnings, for the "graphics problem" report
+std::mutex LogLock;
+std::string LogTail;
+void NoteLog(bool error, const char* text)
+{
+    if (!error) return;
+    std::lock_guard<std::mutex> lk(LogLock);
+    if (LogTail.size() < 6000) LogTail += text;   // the first ones are the ones that matter
+}
+std::string Report;
+
+// software renderer fallback: the RAM framebuffers go into this texture
+GLuint SoftTex = 0;
+
 std::string SavesDir() { return GameDir + "/Saves"; }
 
 void OnNDSSave(const u8* data, u32 len, u32 off, u32 wlen)
@@ -124,14 +139,14 @@ void ApplyHdOptions()
     WC09::SetHDTextEnabled(all && OptHdText);
     WC09::SetSmooth2D(all && OptSmooth2D);
 }
-GLint LocLayer = -1;
+GLint LocLayer = -1, LocSwap = -1;
 const char* kVS = R"(#version 300 es
 in vec2 vPos; in vec2 vUV; out vec2 fUV;
 void main() { gl_Position = vec4(vPos, 0.0, 1.0); fUV = vUV; })";
 const char* kFS = R"(#version 300 es
 precision highp float; precision highp sampler2DArray;
-uniform sampler2DArray Tex; uniform float uLayer; in vec2 fUV; out vec4 oColor;
-void main() { oColor = vec4(texture(Tex, vec3(fUV, uLayer)).rgb, 1.0); })";
+uniform sampler2DArray Tex; uniform float uLayer; uniform int uSwap; in vec2 fUV; out vec4 oColor;
+void main() { vec3 c = texture(Tex, vec3(fUV, uLayer)).rgb; oColor = vec4(uSwap != 0 ? c.bgr : c, 1.0); })";
 
 GLuint CompileOne(GLenum type, const char* src)
 {
@@ -155,6 +170,7 @@ void InitScreenProgram()
     glUseProgram(Prog);
     glUniform1i(glGetUniformLocation(Prog, "Tex"), 0);
     LocLayer = glGetUniformLocation(Prog, "uLayer");
+    LocSwap = glGetUniformLocation(Prog, "uSwap");
     glGenVertexArrays(1, &Vao); glGenBuffers(1, &Vbo);
     glBindVertexArray(Vao);
     glBindBuffer(GL_ARRAY_BUFFER, Vbo);
@@ -244,8 +260,24 @@ int wc09_load_rom(const char* path, int scale, int jit)
         Nds = std::make_unique<NDS>(std::move(args), nullptr);
     }
     NDS::Current = Nds.get();
-    Nds->SetRenderer(std::make_unique<GLRenderer>(*Nds, false));
+    { std::lock_guard<std::mutex> lk(LogLock); LogTail.clear(); }
+    if (getenv("WC09_FORCE_SOFT")) Nds->SetRenderer(nullptr);   // testing the fallback
+    else Nds->SetRenderer(std::make_unique<GLRenderer>(*Nds, false));
     ApplyRenderSettings();
+    {
+        void* t = nullptr; void* b = nullptr;
+        bool soft = Nds->GPU.GetFramebuffers(&t, &b);
+        GLint units = 0, ublock = 0, fvec = 0;
+        glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &units);
+        glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &ublock);
+        glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS, &fvec);
+        std::lock_guard<std::mutex> lk(LogLock);
+        Report = std::string(soft ? "renderer: SOFTWARE (OpenGL failed)\n" : "renderer: OpenGL\n")
+            + "GL: " + (const char*)glGetString(GL_VERSION) + " / " + (const char*)glGetString(GL_RENDERER) + "\n"
+            + "units " + std::to_string(units) + ", ublock " + std::to_string(ublock) + ", fvec " + std::to_string(fvec) + "\n"
+            + LogTail;
+        Platform::Log(Platform::LogLevel::Info, "%s\n", Report.c_str());
+    }
 
     NDSCart::NDSCartArgs cartargs;
     if (!savdata.empty())
@@ -304,8 +336,29 @@ void wc09_draw_screen(int screen, int x, int y, int w, int h, int fbWidth, int f
 {
     if (!Nds || !Prog) return;
     void* top = nullptr; void* bottom = nullptr;
-    if (Nds->GPU.GetFramebuffers(&top, &bottom) || !top) return;
-    GLuint tex = *(GLuint*)top;
+    bool soft = Nds->GPU.GetFramebuffers(&top, &bottom);
+    if (!top) return;
+    GLuint tex;
+    if (soft)
+    {
+        // the OpenGL renderer couldn't start: show the software renderer's picture
+        if (!SoftTex)
+        {
+            glGenTextures(1, &SoftTex);
+            glBindTexture(GL_TEXTURE_2D_ARRAY, SoftTex);
+            glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, 256, 192, 2);
+        }
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, SoftTex);
+        if (screen == 0)
+        {
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, 256, 192, 1, GL_RGBA, GL_UNSIGNED_BYTE, top);
+            glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 1, 256, 192, 1, GL_RGBA, GL_UNSIGNED_BYTE, bottom);
+        }
+        tex = SoftTex;
+    }
+    else tex = *(GLuint*)top;
     float x0 = 2.f * x / fbWidth - 1, x1 = 2.f * (x + w) / fbWidth - 1;
     float y0 = 1 - 2.f * y / fbHeight, y1 = 1 - 2.f * (y + h) / fbHeight;
     float v[16] = {x0, y0, 0, 0,  x1, y0, 1, 0,  x0, y1, 0, 1,  x1, y1, 1, 1};
@@ -314,6 +367,7 @@ void wc09_draw_screen(int screen, int x, int y, int w, int h, int fbWidth, int f
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glUseProgram(Prog);
     glUniform1f(LocLayer, (float)(screen ? 1 : 0));
+    glUniform1i(LocSwap, soft ? 1 : 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, LinearFilter ? GL_LINEAR : GL_NEAREST);
@@ -329,7 +383,7 @@ void wc09_gl_reset(void)
 {
     // the old context is gone with every GL object in it: start over (the old renderer is
     // destroyed before the new one creates anything, so it can't delete the new objects)
-    Prog = 0; Vao = 0; Vbo = 0;
+    Prog = 0; Vao = 0; Vbo = 0; SoftTex = 0;
 #ifdef MELONDS_GLES_30
     melonDS::GLES30::S() = melonDS::GLES30::State();
 #endif
@@ -412,7 +466,8 @@ void wc09_shutdown(void)
         NDS::Current = nullptr;
     }
     if (Prog) { glDeleteProgram(Prog); glDeleteVertexArrays(1, &Vao); glDeleteBuffers(1, &Vbo); }
-    Prog = 0; Vao = 0; Vbo = 0;
+    if (SoftTex) glDeleteTextures(1, &SoftTex);
+    Prog = 0; Vao = 0; Vbo = 0; SoftTex = 0;
 #ifdef MELONDS_GLES_30
     melonDS::GLES30::S() = melonDS::GLES30::State();
 #endif
@@ -431,6 +486,13 @@ void wc09_set_option(int option, int value)
     case WC09_OPT_LINEAR_FILTER: LinearFilter = value != 0; break;
     }
     ApplyHdOptions();
+}
+
+const char* wc09_renderer_report(int* software)
+{
+    void* t = nullptr; void* b = nullptr;
+    if (software) *software = Nds && Nds->GPU.GetFramebuffers(&t, &b) ? 1 : 0;
+    return Report.c_str();
 }
 
 int wc09_rom_code(const char* path, char* code)

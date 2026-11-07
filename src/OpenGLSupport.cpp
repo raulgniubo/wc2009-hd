@@ -320,8 +320,10 @@ error:
 // WC09 fork: the renderer's GLSL 1.40 shaders, adapted to GLSL ES 3.00 (version line, default
 // precisions, explicit output locations instead of glBindFragDataLocation)
 #ifdef MELONDS_GLES_30
+static bool FetchDisabled = false;   // set when a shader using framebuffer fetch didn't compile
 static bool HasFramebufferFetch()
 {
+    if (FetchDisabled) return false;
     static int has = -1;
     if (has < 0)
     {
@@ -404,7 +406,32 @@ static std::string ToES(const std::string& src, bool fragment, const std::initia
 }
 #endif
 
+static bool CompileVertexFragmentProgramOnce(GLuint& result,
+    const std::string& vs_, const std::string& fs_,
+    const std::string& name,
+    const std::initializer_list<AttributeTarget>& vertexInAttrs,
+    const std::initializer_list<AttributeTarget>& fragmentOutAttrs);
+
 bool CompileVertexFragmentProgram(GLuint& result,
+    const std::string& vs_, const std::string& fs_,
+    const std::string& name,
+    const std::initializer_list<AttributeTarget>& vertexInAttrs,
+    const std::initializer_list<AttributeTarget>& fragmentOutAttrs)
+{
+    if (CompileVertexFragmentProgramOnce(result, vs_, fs_, name, vertexInAttrs, fragmentOutAttrs)) return true;
+#ifdef MELONDS_GLES_30
+    if (!FetchDisabled)
+    {
+        // retry without framebuffer fetch (attachment 1 is then written whole)
+        Log(LogLevel::Warn, "%s: retrying without framebuffer fetch\n", name.c_str());
+        FetchDisabled = true;
+        return CompileVertexFragmentProgramOnce(result, vs_, fs_, name, vertexInAttrs, fragmentOutAttrs);
+    }
+#endif
+    return false;
+}
+
+static bool CompileVertexFragmentProgramOnce(GLuint& result,
     const std::string& vs_, const std::string& fs_,
     const std::string& name,
     const std::initializer_list<AttributeTarget>& vertexInAttrs,
@@ -412,6 +439,12 @@ bool CompileVertexFragmentProgram(GLuint& result,
 {
 #ifdef MELONDS_GLES
     const std::string vs = ToES(vs_, false, fragmentOutAttrs), fs = ToES(fs_, true, fragmentOutAttrs);
+    if (const char* dump = getenv("WC09_DUMP_SHADERS"))   // for checking the ES sources offline
+    {
+        for (int k = 0; k < 2; k++)
+            if (FILE* f = fopen((std::string(dump) + "/" + name + (k ? ".frag" : ".vert")).c_str(), "wb"))
+            { const std::string& src = k ? fs : vs; fwrite(src.data(), 1, src.size(), f); fclose(f); }
+    }
 #else
     const std::string& vs = vs_; const std::string& fs = fs_;
 #endif

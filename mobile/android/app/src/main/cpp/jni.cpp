@@ -139,3 +139,9 @@ FN(jstring, romCode)(JNIEnv* env, jclass, jstring path)
     wc09_rom_code(JStr(env, path).c_str(), code);
     return env->NewStringUTF(code);
 }
+FN(jstring, rendererReport)(JNIEnv* env, jclass)
+{
+    int soft = 0;
+    const char* r = wc09_renderer_report(&soft);
+    return env->NewStringUTF(r ? r : "");
+}

@@ -146,6 +146,24 @@ public final class MainActivity extends Activity
     // ================================================================ routing
 
     private String gameDir() { return prefs.getString("gameDir", ""); }
+    private boolean addingFolder;   // the folder picker adds an extra folder instead of replacing
+
+    private java.util.List<String> extraDirs() {
+        java.util.List<String> l = new java.util.ArrayList<>();
+        for (String x : prefs.getString("extraDirs", "").split("\n")) if (!x.isEmpty()) l.add(x);
+        return l;
+    }
+
+    @Override
+    public void addFolder() { addingFolder = true; pickFolder(); }
+
+    @Override
+    public void removeFolder(String dir) {
+        java.util.List<String> l = extraDirs();
+        l.remove(dir);
+        prefs.edit().putString("extraDirs", String.join("\n", l)).apply();
+        if (settings != null) { int idx = root.indexOfChild(settings); root.removeView(settings); settings = new SettingsView(this, prefs, this, gameDir()); root.addView(settings, idx, new FrameLayout.LayoutParams(-1, -1)); }
+    }
 
     private boolean hasFileAccess() {
         if (Build.VERSION.SDK_INT >= 30) return Environment.isExternalStorageManager();
@@ -267,6 +285,16 @@ public final class MainActivity extends Activity
             toast("That folder can't be used. Pick one in the phone's storage or on the SD card.");
             return;
         }
+        if (addingFolder && !gameDir().isEmpty()) {
+            addingFolder = false;
+            java.util.List<String> l = extraDirs();
+            if (!l.contains(path) && !path.equals(gameDir())) l.add(path);
+            prefs.edit().putString("extraDirs", String.join("\n", l)).apply();
+            if (settings != null) { int idx = root.indexOfChild(settings); root.removeView(settings); settings = new SettingsView(this, prefs, this, gameDir()); root.addView(settings, idx, new FrameLayout.LayoutParams(-1, -1)); }
+            else showLibrary();
+            return;
+        }
+        addingFolder = false;
         prefs.edit().putString("gameDir", path).apply();
         showLibrary();
     }
@@ -321,7 +349,7 @@ public final class MainActivity extends Activity
         items.add("Move later"); acts.add(() -> move(g, 1));
         if (g.resume) {
             items.add("Remove resume point");
-            acts.add(() -> { new File(gameDir() + "/Saves/" + g.base + ".ml0").delete(); library.load(gameDir()); });
+            acts.add(() -> { new File(g.rom.getParent() + "/Saves/" + g.base + ".ml0").delete(); library.load(gameDir()); });
         }
         items.add("Delete game…"); acts.add(() -> confirmDelete(g));
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -417,7 +445,7 @@ public final class MainActivity extends Activity
     }
 
     private void removeCovers(LibraryView.Game g) {
-        for (String d : new String[] {gameDir() + "/Covers", gameDir()})
+        for (String d : new String[] {g.rom.getParent() + "/Covers", g.rom.getParent()})
             for (String ext : new String[] {".png", ".jpg", ".jpeg", ".webp"})
                 new File(d, g.base + ext).delete();
     }
@@ -429,7 +457,7 @@ public final class MainActivity extends Activity
             float k = 1024f / Math.max(bm.getWidth(), bm.getHeight());
             if (k < 1) bm = android.graphics.Bitmap.createScaledBitmap(bm, Math.round(bm.getWidth() * k), Math.round(bm.getHeight() * k), true);
             removeCovers(g);
-            File dir = new File(gameDir(), "Covers");
+            File dir = new File(g.rom.getParent(), "Covers");
             dir.mkdirs();
             try (OutputStream os = new FileOutputStream(new File(dir, g.base + ".jpg"))) {
                 bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, os);
@@ -590,11 +618,22 @@ public final class MainActivity extends Activity
             runOnUiThread(() -> toast("The last session crashed, so Fast CPU mode was turned off. You can turn it back on in Settings."));
         }
         prefs.edit().putBoolean("running", true).commit();
-        Native.init(gameDir(), getFilesDir().getAbsolutePath() + "/data", getFilesDir().getAbsolutePath() + "/fonts");
+        Native.init(rom.getParent(), getFilesDir().getAbsolutePath() + "/data", getFilesDir().getAbsolutePath() + "/fonts");
         applyOptions();
         int r = Native.loadRom(rom.getAbsolutePath(), SettingsView.scale(prefs), jit);
         if (r != 0) return "Couldn't load " + rom.getName() + " (error " + r + ").";
         Native.everLoaded = true;
+        String report = Native.rendererReport();
+        android.util.Log.i("WC09", report);
+        if (report.startsWith("renderer: SOFTWARE"))
+            runOnUiThread(() -> new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("HD graphics couldn't start")
+                    .setMessage("The game runs in basic mode for now. Tap Copy report and paste it in the chat so it can be fixed.")
+                    .setPositiveButton("Copy report", (d, w) -> {
+                        android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("Dual HD report", report));
+                    })
+                    .setNegativeButton("OK", null).show());
         if (!freshStart && SettingsView.on(prefs, "resume") && Native.stateExists(AUTO_SLOT) && Native.loadState(AUTO_SLOT) == 0)
             runOnUiThread(() -> toast("Resumed where you left off"));
         return null;

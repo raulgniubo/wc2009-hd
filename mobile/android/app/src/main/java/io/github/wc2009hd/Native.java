@@ -35,6 +35,8 @@ final class Native {
 
     static final int OPT_HD_CARDS = 0, OPT_HD_TEXT = 1, OPT_SMOOTH_2D = 2, OPT_LINEAR_FILTER = 3, OPT_HD_ALL = 4;
     static native boolean isHdGame();
+    /** "renderer: OpenGL" / "renderer: SOFTWARE (OpenGL failed)" + GL info and startup errors */
+    static native String rendererReport();
     /** 4-letter game code from the ROM header ("" if unreadable) */
     static native String romCode(String path);
 

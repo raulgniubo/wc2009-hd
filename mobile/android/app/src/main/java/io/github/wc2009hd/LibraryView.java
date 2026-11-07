@@ -239,6 +239,16 @@ final class LibraryView extends LinearLayout {
         }).start();
     }
 
+    private void sortGames(List<Game> out) {
+        String sort = prefs.getString("sort", "recent");
+        java.util.List<String> order = java.util.Arrays.asList(prefs.getString("order", "").split("\n"));
+        Collections.sort(out, (a, b) -> a.favorite != b.favorite ? (a.favorite ? -1 : 1)
+                : sort.equals("name") ? a.title.compareToIgnoreCase(b.title)
+                : sort.equals("custom") ? (rank(order, a) != rank(order, b) ? Integer.compare(rank(order, a), rank(order, b)) : a.title.compareToIgnoreCase(b.title))
+                : a.lastPlayed != b.lastPlayed ? Long.compare(b.lastPlayed, a.lastPlayed)
+                : a.title.compareToIgnoreCase(b.title));
+    }
+
     private static int rank(java.util.List<String> order, Game g) {
         int i = order.indexOf(g.rom.getName());
         return i < 0 ? Integer.MAX_VALUE : i;
@@ -300,7 +310,13 @@ final class LibraryView extends LinearLayout {
         dir = folder;
         final Handler ui = new Handler(Looper.getMainLooper());
         new Thread(() -> {
-            List<Game> found = scan(folder);
+            // the main games folder, plus any extra folders added in Settings
+            List<Game> found = new ArrayList<>();
+            java.util.LinkedHashSet<String> dirs = new java.util.LinkedHashSet<>();
+            dirs.add(folder);
+            for (String x : prefs.getString("extraDirs", "").split("\n")) if (!x.isEmpty()) dirs.add(x);
+            for (String d : dirs) found.addAll(scan(d));
+            sortGames(found);
             ui.post(() -> {
                 games.clear(); games.addAll(found);
                 adapter.notifyDataSetChanged();
@@ -355,13 +371,6 @@ final class LibraryView extends LinearLayout {
             g.lastPlayed = prefs.getLong("played:" + n, 0);
             out.add(g);
         }
-        String sort = prefs.getString("sort", "recent");
-        java.util.List<String> order = java.util.Arrays.asList(prefs.getString("order", "").split("\n"));
-        Collections.sort(out, (a, b) -> a.favorite != b.favorite ? (a.favorite ? -1 : 1)
-                : sort.equals("name") ? a.title.compareToIgnoreCase(b.title)
-                : sort.equals("custom") ? (rank(order, a) != rank(order, b) ? Integer.compare(rank(order, a), rank(order, b)) : a.title.compareToIgnoreCase(b.title))
-                : a.lastPlayed != b.lastPlayed ? Long.compare(b.lastPlayed, a.lastPlayed)
-                : a.title.compareToIgnoreCase(b.title));
         return out;
     }
 

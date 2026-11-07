@@ -16,6 +16,8 @@ final class SettingsView extends LinearLayout {
         void closeSettings();
         void changeFolder();
         void openEnhancements(Packs.Pack pack);
+        void addFolder();
+        void removeFolder(String dir);
     }
 
     // keys and defaults
@@ -141,17 +143,39 @@ final class SettingsView extends LinearLayout {
         LinearLayout st = section("Library");
         st.addView(toggle("boxart", "Download box art", "Shows each game's real box art, downloaded once from GameTDB. Your own covers always come first."));
         st.addView(Ui.divider(c));
-        TextView path = Ui.text(c, folder, 14, Ui.TEXT_DIM, false);
-        path.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 6));
-        st.addView(path);
-        TextView change = Ui.text(c, "Change folder", 15, Ui.ACCENT, true);
-        change.setPadding(Ui.dp(c, 16), Ui.dp(c, 8), Ui.dp(c, 16), Ui.dp(c, 14));
-        change.setOnClickListener(v -> listener.changeFolder());
-        st.addView(change);
-        TextView note = Ui.text(c, "Saves and save states are kept in the Saves folder inside it, in the same format as the computer version.\n\n"
+        st.addView(folderRow("Main games folder", folder, "Change", v -> listener.changeFolder()));
+        for (String x : prefs.getString("extraDirs", "").split("\n")) {
+            if (x.isEmpty()) continue;
+            st.addView(Ui.divider(c));
+            st.addView(folderRow("Games folder", x, "Remove", v -> listener.removeFolder(x)));
+        }
+        st.addView(Ui.divider(c));
+        TextView addF = Ui.text(c, "+  Add another folder", 15, Ui.ACCENT, true);
+        addF.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
+        addF.setOnClickListener(v -> listener.addFolder());
+        st.addView(addF);
+        TextView note = Ui.text(c, "Games from every folder show up together in your library. Saves and save states are kept in a Saves folder next to each game, in the same format as the computer version.\n\n"
                 + "Custom cover art: put a .png or .jpg with the same name as the game next to it (or in a Covers folder).", 13, Ui.TEXT_DIM, false);
         note.setPadding(Ui.dp(c, 6), Ui.dp(c, 10), Ui.dp(c, 6), 0);
         list.addView(note);
+    }
+
+    private View folderRow(String label, String path, String action, View.OnClickListener cb) {
+        LinearLayout row = new LinearLayout(c);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(Ui.dp(c, 16), Ui.dp(c, 12), Ui.dp(c, 12), Ui.dp(c, 12));
+        LinearLayout t = new LinearLayout(c);
+        t.setOrientation(VERTICAL);
+        t.addView(Ui.text(c, label, 15, Ui.TEXT, false));
+        TextView p = Ui.text(c, path, 13, Ui.TEXT_DIM, false);
+        p.setPadding(0, Ui.dp(c, 2), 0, 0);
+        t.addView(p);
+        row.addView(t, new LayoutParams(0, -2, 1));
+        TextView a = Ui.text(c, action, 15, action.equals("Remove") ? 0xFFF87171 : Ui.ACCENT, true);
+        a.setPadding(Ui.dp(c, 12), Ui.dp(c, 8), Ui.dp(c, 8), Ui.dp(c, 8));
+        a.setOnClickListener(cb);
+        row.addView(a);
+        return row;
     }
 
     private LinearLayout section(String name) {
