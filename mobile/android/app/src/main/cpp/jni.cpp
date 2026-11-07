@@ -145,5 +145,7 @@ FN(jstring, rendererReport)(JNIEnv* env, jclass)
     const char* r = wc09_renderer_report(&soft);
     return env->NewStringUTF(r ? r : "");
 }
+FN(jstring, debugReport)(JNIEnv* env, jclass) { return env->NewStringUTF(wc09_debug_report()); }
+FN(void, setHostInfo)(JNIEnv*, jclass, jint t, jint lp, jfloat d, jint hz) { wc09_set_host_info(t, lp, d, hz); }
 FN(jint, fps)(JNIEnv*, jclass) { return wc09_fps(); }
 FN(jstring, perfText)(JNIEnv* env, jclass) { return env->NewStringUTF(wc09_perf_text()); }

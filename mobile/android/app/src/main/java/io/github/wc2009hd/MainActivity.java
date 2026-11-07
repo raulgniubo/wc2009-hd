@@ -59,6 +59,10 @@ public final class MainActivity extends Activity
     private final Runnable perfTick = new Runnable() {
         @Override public void run() {
             if (game == null || perfView == null) return;
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            int thermal = android.os.Build.VERSION.SDK_INT >= 29 ? pm.getCurrentThermalStatus() : 0;
+            float hz = getWindowManager().getDefaultDisplay().getRefreshRate();
+            Native.setHostInfo(thermal, pm.isPowerSaveMode() ? 1 : 0, 0, Math.round(hz));
             if (perfView.getVisibility() == View.VISIBLE)
                 perfView.setText(SettingsView.on(prefs, "perfDetail") ? Native.perfText() : String.valueOf(Native.fps()));
             perfHandler.postDelayed(this, 500);

@@ -39,6 +39,8 @@ final class Native {
     static native String rendererReport();
     static native String perfText();
     static native int fps();
+    static native String debugReport();
+    static native void setHostInfo(int thermal, int lowPower, float drawMs, int displayHz);
     /** 4-letter game code from the ROM header ("" if unreadable) */
     static native String romCode(String path);
 

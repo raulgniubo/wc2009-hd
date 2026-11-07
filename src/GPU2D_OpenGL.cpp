@@ -16,6 +16,7 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#include "WC09Perf.h"
 #include <assert.h>
 #include "GPU_OpenGL.h"
 #include "GPU2D_OpenGL.h"
@@ -550,6 +551,7 @@ GLuint GLRenderer2D::GetHDTexture(int image)
     if (getenv("WC09_DEBUG")) { printf("WC09 2D HD %d %s %s %dx%d\n", image, WC09::BattleImageName(image).c_str(), loaded ? "ok" : "missing", w, h); fflush(stdout); }
     if (loaded && w > 0 && h > 0)
     {
+        WC09Perf::HdUploads++;
         glGenTextures(1, &e.Tex);
         glActiveTexture(GL_TEXTURE8);
         glBindTexture(GL_TEXTURE_2D, e.Tex);
@@ -1016,11 +1018,14 @@ void GLRenderer2D::UpdateAndRender(int line)
 
 void GLRenderer2D::DrawScanline(u32 line)
 {
+    WC09Perf::Scope perf;
     UpdateAndRender(line);
 }
 
 void GLRenderer2D::VBlank()
 {
+    WC09Perf::Scope perf;
+    WC09Perf::Hd2DCount = (int)HDTextures.size();
     DoRenderSprites(192);
     RenderScreen(LastLine, 192);
 
@@ -2295,6 +2300,7 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
 
 void GLRenderer2D::DrawSprites(u32 line)
 {
+    WC09Perf::Scope perf;
     u32 oammask = 1 << GPU2D.Num;
     bool dirty = false;
     bool screenon = IsScreenOn();

@@ -16,6 +16,7 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#include "WC09Perf.h"
 #include "GPU_OpenGL.h"
 
 #include <assert.h>
@@ -138,6 +139,7 @@ GLuint GLRenderer3D::GetHDNamed(const char* name)
 
 GLuint GLRenderer3D::UploadHD3D(const u8* rgba, int w, int h)
 {
+    WC09Perf::HdUploads++;
     GLuint tex;
     glGenTextures(1, &tex);
     glActiveTexture(GL_TEXTURE3);
@@ -1652,6 +1654,8 @@ void GLRenderer3D::RenderSceneChunk(int y, int h)
 
 void GLRenderer3D::RenderFrame()
 {
+    WC09Perf::Scope perf(&WC09Perf::Render3DUs);
+    WC09Perf::Hd3DCount = (int)HD3D.size();
     // WC09: this renderer draws HD cards itself, even on frames that reuse the last scene
     if (WC09::IsActive() && WC09::GetHDCardsEnabled()) WC09::NoteCards3DRendered();
     u8 clrBitmapDirty;

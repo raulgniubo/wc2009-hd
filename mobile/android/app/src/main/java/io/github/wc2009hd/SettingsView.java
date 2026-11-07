@@ -162,6 +162,24 @@ final class SettingsView extends LinearLayout {
                 + "Custom cover art: put a .png or .jpg with the same name as the game next to it (or in a Covers folder).", 13, Ui.TEXT_DIM, false);
         note.setPadding(Ui.dp(c, 6), Ui.dp(c, 10), Ui.dp(c, 6), 0);
         list.addView(note);
+
+        // ---- help
+        LinearLayout hp = section("Help");
+        TextView copy = Ui.text(c, "Copy debug report", 15, Ui.ACCENT, true);
+        copy.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
+        copy.setOnClickListener(v -> {
+            String report = "device " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + ", Android " + android.os.Build.VERSION.RELEASE
+                    + "\nsettings: scale " + scale(prefs) + "x, HD look " + (on(prefs, "hdAll") ? "on" : "off") + ", smooth 2D " + (on(prefs, "smooth2d") ? "on" : "off")
+                    + ", filter " + (on(prefs, "filter") ? "smooth" : "sharp") + ", screen buttons " + (on(prefs, "buttons") ? "on" : "off") + "\n"
+                    + Native.debugReport();
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("Dual HD debug report", report));
+            android.widget.Toast.makeText(c, "Debug report copied", android.widget.Toast.LENGTH_SHORT).show();
+        });
+        hp.addView(copy);
+        TextView hn = Ui.text(c, "If a game slows down, keep playing for a bit, then copy the report here (Settings is in the in-game menu too). It covers the last 15 minutes of play.", 13, Ui.TEXT_DIM, false);
+        hn.setPadding(Ui.dp(c, 6), Ui.dp(c, 8), Ui.dp(c, 6), 0);
+        list.addView(hn);
     }
 
     private View folderRow(String label, String path, String action, View.OnClickListener cb) {

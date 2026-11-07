@@ -3,6 +3,7 @@
 // the Files app and in Finder when the iPhone is connected to a Mac).
 #define GLES_SILENCE_DEPRECATION 1
 #import <UIKit/UIKit.h>
+#include <sys/utsname.h>
 #import <GLKit/GLKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <GameController/GameController.h>
@@ -871,6 +872,17 @@ static NSArray* PercentChoices()
     return a;
 }
 
+static NSString* DebugReportText()
+{
+    struct utsname u; uname(&u);
+    NSUserDefaults* d = Prefs();
+    NSString* head = [NSString stringWithFormat:@"device %s, iOS %@, app %@\nsettings: scale %ldx, HD look %@, smooth 2D %@, filter %@, screen buttons %@\n",
+        u.machine, UIDevice.currentDevice.systemVersion, [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"],
+        (long)[d integerForKey:@"scale"], [d boolForKey:@"hdAll"] ? @"on" : @"off", [d boolForKey:@"smooth2d"] ? @"on" : @"off",
+        [d boolForKey:@"filter"] ? @"smooth" : @"sharp", [d boolForKey:@"buttons"] ? @"on" : @"off"];
+    return [head stringByAppendingString:[NSString stringWithUTF8String:wc09_debug_report()]];
+}
+
 /** The settings, in a navigation controller ready to present. */
 static UINavigationController* SettingsNavigation(void (^onDone)(void))
 {
@@ -946,6 +958,16 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
               @"footer": @"Saves and save states are kept in a Saves folder next to your games, in the same format as melonDS on a computer."},
             @{@"title": @"Game Enhancements", @"rows": packs,
               @"footer": @"Extra improvements made for specific games. They switch on by themselves when you play that game; tap one to see what it improves."},
+            @{@"title": @"Help", @"rows": @[
+                @{@"type": @"action", @"title": @"Copy Debug Report", @"symbol": @"doc.on.clipboard", @"color": RGB(0x64748B),
+                  @"action": [^(UIViewController* vc) {
+                      UIPasteboard.generalPasteboard.string = DebugReportText();
+                      UIAlertController* a = [UIAlertController alertControllerWithTitle:@"Debug Report Copied"
+                          message:@"It covers the last 15 minutes of play, with the slow moments in detail. Paste it wherever you report the problem." preferredStyle:UIAlertControllerStyleAlert];
+                      [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                      [vc presentViewController:a animated:YES completion:nil];
+                  } copy]}],
+              @"footer": @"If a game slows down, keep playing for a bit, then copy the report from here (the in-game menu has Settings too)."},
             @{@"title": @"About", @"rows": @[
                 @{@"type": @"info", @"title": @"Dual HD", @"symbol": @"rectangle.split.1x2.fill", @"color": RGB(0x0EA5E9),
                   @"value": [NSString stringWithFormat:@"Version %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]]}],
@@ -1095,7 +1117,8 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
     NSString* _rom;
     BOOL _fresh, _started, _paused, _ffwd, _flipped;
     UILabel* _perf;
-    CFTimeInterval _perfShown, _drawSum;
+    CFTimeInterval _perfShown, _drawSum, _hostShown, _hostSum;
+    int _hostCount;
     int _drawCount;
     CFTimeInterval _base;
     long _framesRun;
@@ -1345,6 +1368,14 @@ static std::atomic<bool> gMuted{false};
     CFTimeInterval t0 = CACurrentMediaTime();
     [self drawScreens:view];
     _drawSum += CACurrentMediaTime() - t0; _drawCount++;
+    _hostSum += CACurrentMediaTime() - t0; _hostCount++;
+    if (t0 - _hostShown > 1.0)
+    {
+        _hostShown = t0;
+        NSProcessInfo* pi = NSProcessInfo.processInfo;
+        wc09_set_host_info((int)pi.thermalState, pi.isLowPowerModeEnabled ? 1 : 0, _hostCount ? (float)(_hostSum / _hostCount * 1000) : 0, (int)self.framesPerSecond);
+        _hostSum = 0; _hostCount = 0;
+    }
     if (!_perf.hidden && t0 - _perfShown > 0.5)
     {
         _perfShown = t0;

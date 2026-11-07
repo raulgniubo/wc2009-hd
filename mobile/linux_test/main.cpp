@@ -83,6 +83,7 @@ int main(int argc, char** argv)
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     fprintf(stderr, "audio: %ld frames (%.1f per video frame), peak %d\n", audioFrames, (double)audioFrames / std::max(1, frames), peak);
     fprintf(stderr, "%d frames in %.0f ms (%.1f ms/frame)\n", frames, ms, ms / std::max(1, frames));
+    if (getenv("WC09_REPORT")) fprintf(stderr, "%s", wc09_debug_report());
 
     GLuint fbo, rb;
     glGenFramebuffers(1, &fbo); glGenRenderbuffers(1, &rb);

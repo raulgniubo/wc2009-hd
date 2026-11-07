@@ -23,6 +23,7 @@
 #include "SPI_Firmware.h"
 #include "Platform.h"
 #include "WC09Battle.h"
+#include "WC09Perf.h"
 #include "WC09Cards.h"
 #include "WC09Render.h"
 
@@ -84,6 +85,23 @@ std::string Report;
 u64 PerfFrames = 0, PerfUs = 0, PerfStart = 0, PerfMaxUs = 0;
 char PerfText[256] = "";
 int PerfFps = 0;
+u64 PerfLastCall = 0, PerfMaxGapUs = 0, PerfRender0 = 0, PerfRender3D0 = 0, PerfUploads0 = 0;
+
+// debug report: one sample per second, the last 15 minutes
+struct PerfSample
+{
+    u32 T;                       // seconds since the game started
+    u8 Fps, Thermal, LowPower, Hz;
+    float EmuMs, RenderMs, R3DMs, MaxMs, DrawMs, GapMs;
+    u16 Loading, Uploads, Hd2, Hd3, Draws;
+    float TexKB, BufKB;
+};
+std::vector<PerfSample> PerfLog;  // ring
+std::mutex PerfLogLock;
+size_t PerfLogNext = 0;
+u64 PerfGameStart = 0;
+std::atomic<int> HostThermal{0}, HostLowPower{0}, HostHz{0};
+std::atomic<float> HostDrawMs{0};
 
 // software renderer fallback: the RAM framebuffers go into this texture
 GLuint SoftTex = 0;
@@ -226,6 +244,8 @@ int wc09_load_rom(const char* path, int scale, int jit)
     std::vector<u8> rom;
     if (!path || !ReadFile(path, rom)) return 1;
     RomPath = path;
+    { std::lock_guard<std::mutex> plk(PerfLogLock); PerfLog.clear(); PerfLogNext = 0; }
+    PerfGameStart = 0; PerfLastCall = 0;
     std::string file = RomPath.substr(RomPath.rfind('/') + 1);
     RomBase = file.substr(0, file.rfind('.'));
     Scale = scale > 0 ? scale : 4;
@@ -330,6 +350,9 @@ void wc09_run_frame(void)
         return;
     }
     u64 t0 = Platform::GetUSCount();
+    if (PerfLastCall) PerfMaxGapUs = std::max(PerfMaxGapUs, t0 - PerfLastCall);
+    PerfLastCall = t0;
+    if (!PerfGameStart) PerfGameStart = Platform::GetMSCount();
     {
         std::lock_guard<std::mutex> lk(AudioLock);
         Nds->RunFrame();
@@ -350,6 +373,28 @@ void wc09_run_frame(void)
         snprintf(PerfText, sizeof(PerfText), "%.0f fps  ·  %.1f ms/frame (max %.0f)  ·  %.0f draws  ·  %.0f+%.0f KB up  ·  %.1f reads  ·  %d loading",
                  PerfFrames / secs, PerfUs / n / 1000.0, PerfMaxUs / 1000.0, st.draws / n, st.bufBytes / n / 1024.0, st.texBytes / n / 1024.0, st.readbacks / n, WC09::PendingHDLoads());
         if (getenv("WC09_GLSTATS")) fprintf(stderr, "perf: %s (buf uploads %.0f, tex uploads %.0f)\n", PerfText, st.bufUploads / n, st.texUploads / n);
+        {
+            u64 rus = WC09Perf::RenderUs, r3 = WC09Perf::Render3DUs, up = WC09Perf::HdUploads;
+            PerfSample s{};
+            s.T = (u32)((now - PerfGameStart) / 1000);
+            s.Fps = (u8)std::min(255, PerfFps);
+            s.RenderMs = (float)((rus - PerfRender0) / n / 1000.0);
+            s.R3DMs = (float)((r3 - PerfRender3D0) / n / 1000.0);
+            s.EmuMs = (float)std::max(0.0, PerfUs / n / 1000.0 - s.RenderMs);
+            s.MaxMs = PerfMaxUs / 1000.f;
+            s.GapMs = PerfMaxGapUs / 1000.f;
+            s.DrawMs = HostDrawMs; s.Hz = (u8)std::min(255, (int)HostHz); s.Thermal = (u8)HostThermal; s.LowPower = (u8)HostLowPower;
+            s.Loading = (u16)std::min(65535, WC09::PendingHDLoads());
+            s.Uploads = (u16)std::min<u64>(65535, up - PerfUploads0);
+            s.Hd2 = (u16)WC09Perf::Hd2DCount; s.Hd3 = (u16)WC09Perf::Hd3DCount;
+            s.Draws = (u16)std::min(65535.0, st.draws / n);
+            s.TexKB = (float)(st.texBytes / n / 1024.0); s.BufKB = (float)(st.bufBytes / n / 1024.0);
+            PerfRender0 = rus; PerfRender3D0 = r3; PerfUploads0 = up;
+            std::lock_guard<std::mutex> plk(PerfLogLock);
+            if (PerfLog.size() < 900) PerfLog.push_back(s);
+            else { PerfLog[PerfLogNext] = s; PerfLogNext = (PerfLogNext + 1) % PerfLog.size(); }
+        }
+        PerfMaxGapUs = 0;
         st = melonDS::GLES::Stats{};
         PerfFrames = 0; PerfUs = 0; PerfMaxUs = 0; PerfStart = now;
     }
@@ -587,4 +632,53 @@ int wc09_rom_info(const char* path, char* title, int titleCap, unsigned char* rg
     return 0;
 }
 
+}
+
+extern "C" {
+void wc09_set_host_info(int thermal, int lowPower, float drawMs, int displayHz)
+{
+    HostThermal = thermal; HostLowPower = lowPower; HostDrawMs = drawMs; HostHz = displayHz;
+}
+
+// one line per second around the slow moments, quiet stretches folded into one line each
+const char* wc09_debug_report(void)
+{
+    static std::string out;
+    out.clear();
+    char b[512];
+    void* fbT = nullptr; void* fbB = nullptr;
+    std::vector<PerfSample> v;
+    {
+        std::lock_guard<std::mutex> plk(PerfLogLock);
+        for (size_t i = 0; i < PerfLog.size(); i++) v.push_back(PerfLog[(PerfLogNext + i) % PerfLog.size()]);
+    }
+    snprintf(b, sizeof(b), "Dual HD debug report\ngame file %s  scale %dx  renderer %s\n", RomBase.c_str(), Scale, Nds && !Nds->GPU.GetFramebuffers(&fbT, &fbB) ? "OpenGL" : "software");
+    out += b;
+    int slow = 0;
+    for (auto& s : v) if (s.Fps < 57) slow++;
+    snprintf(b, sizeof(b), "%zu seconds logged, %d below 57 fps\n", v.size(), slow);
+    out += b;
+    out += "columns: time fps | emu ms, render ms (3d), max ms, gap ms, draw ms, display hz | loading, hd uploads, hd2d/hd3d cached, draws, tex KB, buf KB | thermal, low power\n";
+    auto line = [&](const PerfSample& s) {
+        snprintf(b, sizeof(b), "%02u:%02u %2u | %.1f %.1f(%.1f) %.0f %.0f %.1f %u | %u %u %u/%u %u %.0f %.0f | %u %u\n",
+                 s.T / 60, s.T % 60, s.Fps, s.EmuMs, s.RenderMs, s.R3DMs, s.MaxMs, s.GapMs, s.DrawMs, s.Hz,
+                 s.Loading, s.Uploads, s.Hd2, s.Hd3, s.Draws, s.TexKB, s.BufKB, s.Thermal, s.LowPower);
+        out += b;
+    };
+    std::vector<bool> show(v.size(), false);
+    for (size_t i = 0; i < v.size(); i++)
+        if (v[i].Fps < 57)
+            for (size_t j = (i >= 5 ? i - 5 : 0); j < std::min(v.size(), i + 4); j++) show[j] = true;
+    for (size_t i = 0; i < v.size();)
+    {
+        if (show[i]) { line(v[i]); i++; continue; }
+        size_t j = i; double emu = 0, ren = 0; int th = 0;
+        while (j < v.size() && !show[j]) { emu += v[j].EmuMs; ren += v[j].RenderMs; th = std::max<int>(th, v[j].Thermal); j++; }
+        snprintf(b, sizeof(b), "%02u:%02u-%02u:%02u fine: emu %.1f ms, render %.1f ms, thermal %d\n",
+                 v[i].T / 60, v[i].T % 60, v[j - 1].T / 60, v[j - 1].T % 60, emu / (j - i), ren / (j - i), th);
+        out += b;
+        i = j;
+    }
+    return out.c_str();
+}
 }

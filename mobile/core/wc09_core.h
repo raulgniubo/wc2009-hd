@@ -66,6 +66,11 @@ const char* wc09_renderer_report(int* software);
 const char* wc09_perf_text(void);
 /* frames per second the game ran at over the last second (0 before the first second) */
 int wc09_fps(void);
+/* the app's side of the picture, called about once a second: thermal state (0 nominal .. 3 critical),
+   low power mode, average ms to draw the screens, display refresh rate */
+void wc09_set_host_info(int thermal, int lowPower, float drawMs, int displayHz);
+/* text to paste into a bug report: per-second performance around slow moments */
+const char* wc09_debug_report(void);
 // 4-letter game code from a ROM header into code[5] (e.g. "CY8E"); 0 on success
 int wc09_rom_code(const char* path, char* code);   // the loaded game is Yu-Gi-Oh! 5D's WC2009 (the HD options apply)
 
