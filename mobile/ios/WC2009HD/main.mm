@@ -937,7 +937,7 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
         __weak MenuPanel* me = self;
         void (^handler)(void) = it[@"handler"];
         UIButton* b = [UIButton buttonWithConfiguration:c primaryAction:[UIAction actionWithHandler:^(UIAction*) {
-            [me hideThen:isCancel ? nil : handler cancelled:isCancel];
+            [me hideThen:(isCancel ? (void (^)(void))nil : handler) cancelled:isCancel];
         }]];
         b.contentHorizontalAlignment = isCancel ? UIControlContentHorizontalAlignmentCenter : UIControlContentHorizontalAlignmentLeading;
         if (isCancel) [st setCustomSpacing:10 afterView:st.arrangedSubviews.lastObject];
