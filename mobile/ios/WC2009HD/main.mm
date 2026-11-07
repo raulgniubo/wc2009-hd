@@ -622,7 +622,7 @@ static std::atomic<bool> gMuted{false};
     v.context = _ctx;
     v.drawableColorFormat = GLKViewDrawableColorFormatRGBA8888;
     v.drawableDepthFormat = GLKViewDrawableDepthFormatNone;
-    v.contentScaleFactor = UIScreen.mainScreen.nativeScale;
+    v.contentScaleFactor = self.traitCollection.displayScale > 0 ? self.traitCollection.displayScale : 3;
     v.backgroundColor = UIColor.blackColor;
     self.preferredFramesPerSecond = 60;
     [EAGLContext setCurrentContext:_ctx];
@@ -637,8 +637,8 @@ static std::atomic<bool> gMuted{false};
     [self.view addSubview:_controls];
 
     NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
-    [nc addObserver:self selector:@selector(willResign) name:UIApplicationWillResignActiveNotification object:nil];
-    [nc addObserver:self selector:@selector(didBecomeActive) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [nc addObserver:self selector:@selector(willResign) name:UISceneWillDeactivateNotification object:nil];
+    [nc addObserver:self selector:@selector(didBecomeActive) name:UISceneDidActivateNotification object:nil];
     [nc addObserver:self selector:@selector(settingChanged:) name:kSettingsChanged object:nil];
     gMuted = ![Prefs() boolForKey:@"sound"];
     [self setupAudio];
@@ -1146,7 +1146,7 @@ static UICollectionViewLayout* GridLayout()
                    "(and for Yu-Gi-Oh! 5D's WC2009, its HDCards folder) onto WC2009 HD.\n\n"
                    "Or use the Files app: On My iPhone > WC2009 HD.\n\n"
                    "Custom cover art: add a .png or .jpg with the same name as the game.";
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:UISceneDidActivateNotification object:nil];
     [self reload];
 }
 
@@ -1251,15 +1251,34 @@ static UICollectionViewLayout* GridLayout()
 
 // ------------------------------------------------------------------------------------------------
 
+// scene-based life cycle (required by the current iOS SDK)
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
-@property (nonatomic, strong) UIWindow* window;
 @end
 
 @implementation AppDelegate
 - (BOOL)application:(UIApplication*)app didFinishLaunchingWithOptions:(NSDictionary*)opts
 {
     RegisterDefaults();
-    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    return YES;
+}
+
+- (UISceneConfiguration*)application:(UIApplication*)app configurationForConnectingSceneSession:(UISceneSession*)session options:(UISceneConnectionOptions*)options
+{
+    UISceneConfiguration* c = [[UISceneConfiguration alloc] initWithName:@"Default" sessionRole:session.role];
+    c.delegateClass = NSClassFromString(@"SceneDelegate");
+    return c;
+}
+@end
+
+@interface SceneDelegate : UIResponder <UIWindowSceneDelegate>
+@property (nonatomic, strong) UIWindow* window;
+@end
+
+@implementation SceneDelegate
+- (void)scene:(UIScene*)scene willConnectToSession:(UISceneSession*)session options:(UISceneConnectionOptions*)options
+{
+    if (![scene isKindOfClass:UIWindowScene.class]) return;
+    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene*)scene];
     self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.window.tintColor = Accent();
     UINavigationController* nav = [[UINavigationController alloc] initWithRootViewController:[LibraryViewController new]];
@@ -1267,7 +1286,6 @@ static UICollectionViewLayout* GridLayout()
     self.window.rootViewController = nav;
     self.window.backgroundColor = UIColor.blackColor;
     [self.window makeKeyAndVisible];
-    return YES;
 }
 @end
 
