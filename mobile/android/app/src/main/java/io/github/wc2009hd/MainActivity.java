@@ -610,7 +610,7 @@ public final class MainActivity extends Activity
         perfView.setMinWidth(Ui.dp(this, 28));
         perfView.setPadding(Ui.dp(this, 5), Ui.dp(this, 1), Ui.dp(this, 5), Ui.dp(this, 1));
         FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(-2, -2);
-        plp.leftMargin = Ui.dp(this, 8); plp.topMargin = Ui.dp(this, 8);
+        plp.leftMargin = Ui.dp(this, 14); plp.topMargin = Ui.dp(this, 12);
         root.addView(perfView, plp);
         perfView.setVisibility(SettingsView.on(prefs, "perf") ? View.VISIBLE : View.GONE);
         perfTick.run();

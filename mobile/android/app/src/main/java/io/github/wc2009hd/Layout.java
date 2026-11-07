@@ -51,7 +51,7 @@ final class Layout {
             top.set(W / 2 - sw, y0, W / 2, y0 + sh);
             bottom.set(W / 2, y0, W / 2 + sw, y0 + sh);
         }
-        float mb = 34 * u, pad = 10 * u;
+        float mb = 34 * u, pad = 16 * u;   // rounded display corners: keep a little clear
         menu.set(W - pad - mb, pad, W - pad, pad + mb);
         ffwd.set(-1, -1, -1, -1);
         dpadR = 0;

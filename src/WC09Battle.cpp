@@ -1,3 +1,11 @@
+#if defined(__APPLE__)
+#include <pthread.h>
+#include <pthread/qos.h>
+#elif defined(__linux__) || defined(__ANDROID__)
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 #include "WC09Battle.h"
 #include "WC09Rom.h"
 #include "WC09Sprites.h"
@@ -293,8 +301,20 @@ void StartWorkers()
     if (!Prefetcher.T2.joinable()) Prefetcher.T2 = std::thread(PrefetchLoop);
 }
 
+// loading pictures must never take CPU time from the game itself: the workers run at low priority
+// (on phones that also puts them on the efficiency cores)
+void LowerThreadPriority()
+{
+#if defined(__APPLE__)
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#elif defined(__linux__) || defined(__ANDROID__)
+    setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);
+#endif
+}
+
 void PrefetchLoop()
 {
+    LowerThreadPriority();
     for (;;)
     {
         std::string name;
@@ -339,6 +359,12 @@ void PrefetchFolder(const std::string& name)
     StartWorkers();
     PrefCV.notify_all();
 }
+}
+
+int PendingHDLoads()
+{
+    std::lock_guard<std::mutex> lk(PrefLock);
+    return (int)(PrefQueue.size() + AsyncPending.size());
 }
 
 int LoadHDImageAsync(const std::string& name, std::vector<u8>& rgba, int& w, int& h)

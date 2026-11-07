@@ -347,8 +347,8 @@ void wc09_run_frame(void)
         PerfFps = (int)(PerfFrames * 1000.0 / (now - PerfStart) + 0.5);
         auto& st = melonDS::GLES::St();
         double n = std::max<u64>(1, PerfFrames), secs = (now - PerfStart) / 1000.0;
-        snprintf(PerfText, sizeof(PerfText), "%.0f fps  ·  %.1f ms/frame (max %.0f)  ·  %.0f draws  ·  %.0f+%.0f KB up  ·  %.1f reads",
-                 PerfFrames / secs, PerfUs / n / 1000.0, PerfMaxUs / 1000.0, st.draws / n, st.bufBytes / n / 1024.0, st.texBytes / n / 1024.0, st.readbacks / n);
+        snprintf(PerfText, sizeof(PerfText), "%.0f fps  ·  %.1f ms/frame (max %.0f)  ·  %.0f draws  ·  %.0f+%.0f KB up  ·  %.1f reads  ·  %d loading",
+                 PerfFrames / secs, PerfUs / n / 1000.0, PerfMaxUs / 1000.0, st.draws / n, st.bufBytes / n / 1024.0, st.texBytes / n / 1024.0, st.readbacks / n, WC09::PendingHDLoads());
         if (getenv("WC09_GLSTATS")) fprintf(stderr, "perf: %s (buf uploads %.0f, tex uploads %.0f)\n", PerfText, st.bufUploads / n, st.texUploads / n);
         st = melonDS::GLES::Stats{};
         PerfFrames = 0; PerfUs = 0; PerfMaxUs = 0; PerfStart = now;

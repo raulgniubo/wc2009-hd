@@ -120,6 +120,8 @@ void SetHDImageProvider(HDImageProvider provider);
 // index not ready). Lets missing images be skipped without a trip through the loader.
 using HDExistsCheck = std::function<int(const std::string& name)>;
 void SetHDExistsCheck(HDExistsCheck check);
+// pictures waiting for a loader thread (for the performance display)
+int PendingHDLoads();
 bool LoadHDImage(const std::string& name, std::vector<u8>& rgba, int& w, int& h);
 // the same, rendered/loaded on a worker thread: 1 = ready (filled in), 0 = still working, -1 = failed
 int LoadHDImageAsync(const std::string& name, std::vector<u8>& rgba, int& w, int& h);

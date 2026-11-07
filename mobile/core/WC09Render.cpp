@@ -7,6 +7,10 @@
 #include <cstring>
 #include <algorithm>
 #include <mutex>
+#if defined(__APPLE__)
+#include <pthread.h>
+#include <pthread/qos.h>
+#endif
 #include <memory>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -436,6 +440,9 @@ void SetupHDProvider(const std::string& folder, const std::string& fontDir)
             IndexedFolder = folder;
             Index.reset();
             std::thread([folder] {
+#if defined(__APPLE__)
+                pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#endif
                 auto set = std::make_shared<std::unordered_set<std::string>>();
                 ScanDir(folder, "", *set, 0);
                 std::lock_guard<std::mutex> lk2(IndexLock);

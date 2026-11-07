@@ -1191,7 +1191,7 @@ static std::atomic<bool> gMuted{false};
     {
         // full screen really is the whole display: only the menu button keeps out of the system's areas
         _layout.compute(self.view.bounds.size, UIEdgeInsetsZero, false);
-        CGFloat mb = 34, pad = 8, W = self.view.bounds.size.width;
+        CGFloat mb = 34, pad = 14, W = self.view.bounds.size.width;   // a little more room: the display's corners are rounded
         _layout.menu = CGRectMake(W - safe.right - pad - mb, safe.top + pad, mb, mb);
     }
     else _layout.compute(self.view.bounds.size, safe, true);
@@ -1355,7 +1355,7 @@ static std::atomic<bool> gMuted{false};
         [_perf sizeToFit];
         CGRect f = _perf.frame;
         f.size.width = MAX(f.size.width + 10, 28); f.size.height = MAX(f.size.height + 4, 18);
-        f.origin = CGPointMake(self.view.safeAreaInsets.left + 8, self.view.safeAreaInsets.top + 6);
+        f.origin = CGPointMake(self.view.safeAreaInsets.left + 14, self.view.safeAreaInsets.top + 12);
         _perf.frame = f;
         _drawSum = 0; _drawCount = 0;
     }
