@@ -317,6 +317,8 @@ public final class MainActivity extends Activity
         items.add("Change cover…"); acts.add(() -> pickCover(g));
         if (g.cover != null) { items.add("Use default cover"); acts.add(() -> { removeCovers(g); library.load(gameDir()); }); }
         items.add("Rename…"); acts.add(() -> rename(g));
+        items.add("Move earlier"); acts.add(() -> move(g, -1));
+        items.add("Move later"); acts.add(() -> move(g, 1));
         if (g.resume) {
             items.add("Remove resume point");
             acts.add(() -> { new File(gameDir() + "/Saves/" + g.base + ".ml0").delete(); library.load(gameDir()); });
@@ -330,6 +332,43 @@ public final class MainActivity extends Activity
 
     @Override
     public void chooseFolder() { pickFolder(); }
+
+    @Override
+    public void sortMenu() {
+        String cur = prefs.getString("sort", "recent");
+        final String[] keys = {"recent", "name", "custom"};
+        String[] names = {"Recently played", "Name", "Custom order (long-press a game to move it)"};
+        int sel = 0;
+        for (int i = 0; i < keys.length; i++) if (keys[i].equals(cur)) sel = i;
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Sort games by")
+                .setSingleChoiceItems(names, sel, (d, w) -> {
+                    if (keys[w].equals("custom")) saveOrder(library.shown());
+                    prefs.edit().putString("sort", keys[w]).apply();
+                    d.dismiss();
+                    library.load(gameDir());
+                })
+                .show();
+    }
+
+    private void saveOrder(java.util.List<LibraryView.Game> list) {
+        StringBuilder sb = new StringBuilder();
+        for (LibraryView.Game x : list) sb.append(x.rom.getName()).append('\n');
+        prefs.edit().putString("order", sb.toString()).apply();
+    }
+
+    /** Moves a game one place earlier (-1) or later (+1) in the custom order. */
+    private void move(LibraryView.Game g, int dir) {
+        java.util.List<LibraryView.Game> list = library.shown();
+        int i = -1;
+        for (int k = 0; k < list.size(); k++) if (list.get(k).rom.equals(g.rom)) i = k;
+        int j = i + dir;
+        if (i < 0 || j < 0 || j >= list.size()) return;
+        java.util.Collections.swap(list, i, j);
+        saveOrder(list);
+        prefs.edit().putString("sort", "custom").apply();
+        library.load(gameDir());
+    }
 
     @Override
     public void importGames() {

@@ -445,7 +445,7 @@ static void PostChange(NSString* key) { [NSNotificationCenter.defaultCenter post
 static void RegisterDefaults()
 {
     [Prefs() registerDefaults:@{
-        @"boxart": @YES, @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
+        @"boxart": @YES, @"sort": @"recent", @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
         @"buttons": @YES, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
     }];
 }
@@ -904,8 +904,8 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
             } copy]}];
         }
         [lib addObject:@{@"type": @"action", @"title": @"Add Games Folder…", @"action": [^(UIViewController* vc) { [FolderPicker presentFrom:vc]; } copy]}];
-        [lib addObject:@{@"type": @"switch", @"key": @"boxart", @"title": @"Download Box Art", @"symbol": @"photo.on.rectangle.angled", @"color": RGB(0xA855F7),
-                         @"detail": @"Shows each game's real box art, downloaded once from GameTDB. Your own covers always come first."}];
+        [lib addObject:@{@"type": @"switch", @"key": @"boxart", @"title": @"Box Art & Game Names", @"symbol": @"photo.on.rectangle.angled", @"color": RGB(0xA855F7),
+                         @"detail": @"Real box art and full game names, downloaded once from GameTDB. Your own covers and names always come first."}];
         return @[
             @{@"title": @"Library", @"rows": lib,
               @"footer": @"Pick a folder in Files (On My iPhone, iCloud Drive, a USB drive…) and every game in it shows up in your Library, with its saves kept next to it. Games you import go into Dual HD's own folder."},
@@ -1546,6 +1546,67 @@ static void TryBoxArt(NSString* code, NSArray<NSURL*>* urls, NSUInteger i)
     }] resume];
 }
 
+// ---- full game names (and publishers) from GameTDB, cached in "tdb"
+
+static NSString* HTMLText(NSString* s)
+{
+    s = [s stringByReplacingOccurrencesOfString:@"<[^>]+>" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0, s.length)];
+    NSDictionary* ents = @{@"&amp;": @"&", @"&#039;": @"'", @"&#39;": @"'", @"&quot;": @"\"", @"&lt;": @"<", @"&gt;": @">", @"&nbsp;": @" ", @"&eacute;": @"é", @"&#233;": @"é"};
+    for (NSString* k in ents) s = [s stringByReplacingOccurrencesOfString:k withString:ents[k]];
+    return [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+
+static NSString* FirstMatch(NSString* html, NSString* pattern)
+{
+    NSRegularExpression* re = [NSRegularExpression regularExpressionWithPattern:pattern options:NSRegularExpressionCaseInsensitive | NSRegularExpressionDotMatchesLineSeparators error:nil];
+    NSTextCheckingResult* m = [re firstMatchInString:html options:0 range:NSMakeRange(0, html.length)];
+    return m && m.numberOfRanges > 1 && [m rangeAtIndex:1].location != NSNotFound ? HTMLText([html substringWithRange:[m rangeAtIndex:1]]) : nil;
+}
+
+static NSString* const kGameInfoLoaded = @"WC09GameInfoLoaded";
+
+static NSDictionary* GameInfo(NSString* code) { return [Prefs() dictionaryForKey:@"tdb"][code]; }
+
+static void FetchGameInfo(NSString* code)
+{
+    static NSMutableSet* busy;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ busy = [NSMutableSet set]; });
+    if (code.length != 4 || GameInfo(code)) return;
+    @synchronized (busy) { if ([busy containsObject:code]) return; [busy addObject:code]; }
+    double missed = [Prefs() doubleForKey:[@"tdbMiss:" stringByAppendingString:code]];
+    if (missed > 0 && NSDate.date.timeIntervalSince1970 - missed < 7 * 86400) return;
+    NSURL* u = [NSURL URLWithString:[@"https://www.gametdb.com/DS/" stringByAppendingString:code]];
+    [[NSURLSession.sharedSession dataTaskWithURL:u completionHandler:^(NSData* data, NSURLResponse* resp, NSError* err) {
+        NSString* html = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+        NSString* title = nil, *pub = nil;
+        if (html && [(NSHTTPURLResponse*)resp statusCode] == 200)
+        {
+            title = FirstMatch(html, @"title \\(EN\\)\\s*</t[dh]>\\s*<td[^>]*>(.*?)</td>");
+            if (!title.length)
+            {
+                NSString* t = FirstMatch(html, @"<title>(.*?)</title>");
+                NSRange dash = [t rangeOfString:@" - "];
+                if (dash.location != NSNotFound) t = [t substringFromIndex:dash.location + 3];
+                NSRange bar = [t rangeOfString:@" | "];
+                if (bar.location != NSNotFound) t = [t substringToIndex:bar.location];
+                if (t.length && ![t.lowercaseString containsString:@"gametdb"]) title = t;
+            }
+            pub = FirstMatch(html, @"publisher\\s*</t[dh]>\\s*<td[^>]*>(.*?)</td>");
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (title.length)
+            {
+                NSMutableDictionary* all = [[Prefs() dictionaryForKey:@"tdb"] ?: @{} mutableCopy];
+                all[code] = @{@"title": title, @"publisher": pub ?: @""};
+                [Prefs() setObject:all forKey:@"tdb"];
+                [NSNotificationCenter.defaultCenter postNotificationName:kGameInfoLoaded object:code];
+            }
+            else [Prefs() setDouble:NSDate.date.timeIntervalSince1970 forKey:[@"tdbMiss:" stringByAppendingString:code]];
+        });
+    }] resume];
+}
+
 static void FetchBoxArt(NSString* code)
 {
     static NSMutableSet* busy;
@@ -1583,6 +1644,9 @@ static GameEntry* LoadEntry(NSString* path)
     else { g.title = lines.count == 1 && lines[0].length ? PrettyTitle(lines[0]) : g.base; g.publisher = @""; }
     g.code = wc09_rom_code(path.fileSystemRepresentation, code) == 0 ? [NSString stringWithUTF8String:code] : @"";
     g.enhanced = PackForCode(g.code) != nil;
+    NSDictionary* info = GameInfo(g.code);
+    if ([info[@"title"] length]) { g.title = info[@"title"]; if ([info[@"publisher"] length]) g.publisher = info[@"publisher"]; }
+    else if ([Prefs() boolForKey:@"boxart"]) FetchGameInfo(g.code);
 
     NSDictionary* meta = Meta(g.file);
     if ([meta[@"name"] length]) g.title = meta[@"name"];
@@ -1681,8 +1745,9 @@ static UILabel* Badge(NSString* text, UIColor* color)
         _star.layer.cornerRadius = 11; _star.clipsToBounds = YES;
         for (UIView* v in @[_badge, _hd, _star]) [_art addSubview:v];
         _title = [UILabel new];
-        _title.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-        _title.textColor = UIColor.whiteColor; _title.numberOfLines = 2;
+        _title.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+        _title.textColor = [UIColor colorWithWhite:1 alpha:0.86]; _title.numberOfLines = 3;
+        _title.textAlignment = NSTextAlignmentCenter;
         _sub = [UILabel new];
         _sub.font = [UIFont systemFontOfSize:12.5];
         _sub.textColor = [UIColor colorWithRed:0.6 green:0.65 blue:0.72 alpha:1];
@@ -1696,20 +1761,36 @@ static UILabel* Badge(NSString* text, UIColor* color)
 - (void)layoutSubviews
 {
     [super layoutSubviews];
-    CGFloat w = self.contentView.bounds.size.width;
-    _art.frame = CGRectMake(0, 0, w, w);
-    self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_art.frame cornerRadius:18].CGPath;
+    CGFloat w = self.contentView.bounds.size.width, areaH = floor(w * 0.9);
+    CGRect art;
+    if (_game.cover)
+    {
+        // box art at its own shape, sitting on the bottom of the art area (like a shelf)
+        CGSize is = _game.cover.size;
+        CGFloat k = MIN(w / MAX(1.0, is.width), areaH / MAX(1.0, is.height));
+        CGFloat aw = floor(is.width * k), ah = floor(is.height * k);
+        art = CGRectMake((w - aw) / 2, areaH - ah, aw, ah);
+        _art.layer.cornerRadius = 7;
+    }
+    else
+    {
+        art = CGRectMake(0, 0, w, areaH);
+        _art.layer.cornerRadius = 18;
+    }
+    _art.frame = art;
+    self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:art cornerRadius:_art.layer.cornerRadius].CGPath;
     _grad.frame = _art.bounds;
     _cover.frame = _art.bounds;
-    CGFloat s = floor(w * 0.55 / 32) * 32;
-    if (s < 32) s = w * 0.55;
-    _icon.frame = CGRectMake((w - s) / 2, (w - s) / 2, s, s);
-    _badge.frame = CGRectMake(w - 8 - 62, 8, 62, 20);
-    _star.frame = CGRectMake(8, 8, 22, 22);
-    _hd.frame = CGRectMake(8, w - 8 - 20, 42, 20);
-    CGSize ts = [_title sizeThatFits:CGSizeMake(w - 4, 40)];
-    _title.frame = CGRectMake(2, w + 10, w - 4, MIN(ts.height, 40));
-    _sub.frame = CGRectMake(2, CGRectGetMaxY(_title.frame) + 1, w - 4, 16);
+    CGFloat s = floor(MIN(art.size.width, art.size.height) * 0.6 / 32) * 32;
+    if (s < 32) s = MIN(art.size.width, art.size.height) * 0.6;
+    _icon.frame = CGRectMake((art.size.width - s) / 2, (art.size.height - s) / 2, s, s);
+    CGFloat bw = art.size.width;
+    _badge.frame = CGRectMake(bw - 6 - 62, 6, 62, 20);
+    _star.frame = CGRectMake(6, 6, 22, 22);
+    _hd.frame = CGRectMake(6, art.size.height - 6 - 20, 42, 20);
+    CGSize ts = [_title sizeThatFits:CGSizeMake(w - 4, 60)];
+    _title.frame = CGRectMake(2, areaH + 10, w - 4, MIN(ts.height, 60));
+    _sub.frame = CGRectZero;
 }
 
 - (void)setGame:(GameEntry*)g
@@ -1720,6 +1801,7 @@ static UILabel* Badge(NSString* text, UIColor* color)
     _cover.image = g.cover;
     _cover.hidden = g.cover == nil;
     _icon.hidden = g.cover != nil;
+    _grad.hidden = g.cover != nil;
     _title.text = g.title;
     _sub.text = g.publisher;
     _badge.hidden = !g.resume;
@@ -1756,7 +1838,7 @@ static UILabel* Badge(NSString* text, UIColor* color)
 
 // ---- library screen ----
 
-@interface LibraryViewController : UIViewController <UICollectionViewDataSource, UICollectionViewDelegate, UISearchResultsUpdating, UIDocumentPickerDelegate, PHPickerViewControllerDelegate>
+@interface LibraryViewController : UIViewController <UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDragDelegate, UICollectionViewDropDelegate, UISearchResultsUpdating, UIDocumentPickerDelegate, PHPickerViewControllerDelegate>
 @property (nonatomic, strong) UICollectionView* collectionView;
 @end
 
@@ -1772,6 +1854,99 @@ static UILabel* Badge(NSString* text, UIColor* color)
     UIView* _empty;
     UIView* _hud;
     UISearchController* _searchController;
+    UIBarButtonItem* _sortItem;
+}
+
+- (UIMenu*)sortMenu
+{
+    __weak LibraryViewController* me = self;
+    NSString* cur = [Prefs() stringForKey:@"sort"];
+    NSArray* opts = @[@[@"recent", @"Recently Played", @"clock"], @[@"name", @"Name", @"textformat"], @[@"custom", @"Custom Order", @"hand.draw"]];
+    NSMutableArray* acts = [NSMutableArray array];
+    for (NSArray* o in opts)
+    {
+        UIAction* a = [UIAction actionWithTitle:o[1] image:[UIImage systemImageNamed:o[2]] identifier:nil handler:^(UIAction*) {
+            [Prefs() setObject:o[0] forKey:@"sort"];
+            [me sortChanged];
+        }];
+        a.state = [cur isEqualToString:o[0]] ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [acts addObject:a];
+    }
+    return [UIMenu menuWithTitle:@"Sort by  (drag a game to reorder)" children:acts];
+}
+
+- (void)sortChanged
+{
+    _sortItem.menu = [self sortMenu];
+    [self sortAll];
+    [self rebuild];
+}
+
+- (void)sortAll
+{
+    NSString* sort = [Prefs() stringForKey:@"sort"];
+    NSArray* order = [Prefs() arrayForKey:@"order"] ?: @[];
+    _all = [_all sortedArrayUsingComparator:^NSComparisonResult(GameEntry* a, GameEntry* b) {
+        if ([sort isEqualToString:@"name"]) return [a.title localizedStandardCompare:b.title];
+        if ([sort isEqualToString:@"custom"])
+        {
+            NSUInteger ia = [order indexOfObject:a.file], ib = [order indexOfObject:b.file];
+            if (ia != ib) return ia < ib ? NSOrderedAscending : NSOrderedDescending;   // unknown ones go last
+            return [a.title localizedStandardCompare:b.title];
+        }
+        if (a.lastPlayed != b.lastPlayed) return a.lastPlayed > b.lastPlayed ? NSOrderedAscending : NSOrderedDescending;
+        return [a.title localizedStandardCompare:b.title];
+    }];
+}
+
+// ---- drag to reorder (switches to Custom Order) ----
+
+- (NSArray<UIDragItem*>*)collectionView:(UICollectionView*)cv itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath*)ip
+{
+    if (_search.length) return @[];
+    UIDragItem* item = [[UIDragItem alloc] initWithItemProvider:[NSItemProvider new]];
+    item.localObject = _sections[ip.section][ip.item];
+    return @[item];
+}
+
+- (UICollectionViewDropProposal*)collectionView:(UICollectionView*)cv dropSessionDidUpdate:(id<UIDropSession>)session withDestinationIndexPath:(NSIndexPath*)dest
+{
+    if (!session.localDragSession || !dest) return [[UICollectionViewDropProposal alloc] initWithDropOperation:UIDropOperationForbidden];
+    GameEntry* g = session.localDragSession.items.firstObject.localObject;
+    BOOL same = dest.section < (NSInteger)_sections.count && [_sections[dest.section] containsObject:g];
+    return [[UICollectionViewDropProposal alloc] initWithDropOperation:same ? UIDropOperationMove : UIDropOperationForbidden
+                                                                intent:UICollectionViewDropIntentInsertAtDestinationIndexPath];
+}
+
+- (void)collectionView:(UICollectionView*)cv performDropWithCoordinator:(id<UICollectionViewDropCoordinator>)coord
+{
+    id<UICollectionViewDropItem> it = coord.items.firstObject;
+    NSIndexPath* src = it.sourceIndexPath, *dst = coord.destinationIndexPath;
+    if (!src || !dst || src.section != dst.section) return;
+    NSMutableArray* sec = [_sections[src.section] mutableCopy];
+    GameEntry* g = sec[src.item];
+    [sec removeObjectAtIndex:src.item];
+    NSInteger to = MIN((NSInteger)sec.count, dst.item);
+    [sec insertObject:g atIndex:to];
+    NSMutableArray* secs = [_sections mutableCopy];
+    secs[src.section] = sec;
+    _sections = secs;
+    [cv performBatchUpdates:^{ [cv moveItemAtIndexPath:src toIndexPath:[NSIndexPath indexPathForItem:to inSection:src.section]]; } completion:nil];
+    [coord dropItem:it.dragItem toItemAtIndexPath:[NSIndexPath indexPathForItem:to inSection:src.section]];
+    // the new order becomes the custom order
+    NSMutableArray* order = [NSMutableArray array];
+    for (NSArray* sct in _sections) for (GameEntry* e in sct) [order addObject:e.file];
+    for (GameEntry* e in _all) if (![order containsObject:e.file]) [order addObject:e.file];
+    [Prefs() setObject:order forKey:@"order"];
+    if (![[Prefs() stringForKey:@"sort"] isEqualToString:@"custom"])
+    {
+        [Prefs() setObject:@"custom" forKey:@"sort"];
+        _sortItem.menu = [self sortMenu];
+    }
+    NSMutableArray* all = [NSMutableArray array];
+    for (NSString* f in order) for (GameEntry* e in _all) if ([e.file isEqualToString:f]) [all addObject:e];
+    _all = all;
+    [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
 }
 
 static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
@@ -1780,7 +1955,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
         CGFloat w = env.container.effectiveContentSize.width;
         NSInteger cols = MAX(2, (NSInteger)((w - 40) / 168));
         CGFloat cellW = floor((w - 40 - (cols - 1) * 16) / cols);
-        CGFloat cellH = cellW + 62;
+        CGFloat cellH = floor(cellW * 0.9) + 74;
         NSCollectionLayoutItem* item = [NSCollectionLayoutItem itemWithLayoutSize:
             [NSCollectionLayoutSize sizeWithWidthDimension:[NSCollectionLayoutDimension absoluteDimension:cellW] heightDimension:[NSCollectionLayoutDimension absoluteDimension:cellH]]];
         NSCollectionLayoutGroup* group = [NSCollectionLayoutGroup horizontalGroupWithLayoutSize:
@@ -1819,7 +1994,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = @"Library";
+    self.title = @"Nintendo DS";
     self.view.backgroundColor = AppBackground();
     self.collectionView = [[UICollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:_grid];
     self.collectionView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -1838,7 +2013,11 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
         [UIAction actionWithTitle:@"Add Games Folder…" image:[UIImage systemImageNamed:@"folder.badge.plus"] identifier:nil handler:^(UIAction*) { [FolderPicker presentFrom:me]; }],
     ]];
     UIBarButtonItem* plus = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"plus"] menu:add];
-    self.navigationItem.rightBarButtonItems = @[gear, plus];
+    _sortItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.up.arrow.down"] menu:[self sortMenu]];
+    self.navigationItem.rightBarButtonItems = @[gear, plus, _sortItem];
+    self.collectionView.dragDelegate = self;
+    self.collectionView.dropDelegate = self;
+    self.collectionView.dragInteractionEnabled = YES;
 
     UISearchController* sc = [[UISearchController alloc] initWithSearchResultsController:nil];
     sc.searchResultsUpdater = self;
@@ -1853,6 +2032,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:UISceneDidActivateNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:kSettingsChanged object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(boxArtLoaded) name:kBoxArtLoaded object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(boxArtLoaded) name:kGameInfoLoaded object:nil];
 }
 
 // several covers arrive together: reload once
@@ -1895,12 +2075,9 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
         }
         NSMutableArray<GameEntry*>* games = [NSMutableArray array];
         for (NSString* r in roms) [games addObject:LoadEntry(r)];
-        [games sortUsingComparator:^NSComparisonResult(GameEntry* a, GameEntry* b) {
-            if (a.lastPlayed != b.lastPlayed) return a.lastPlayed > b.lastPlayed ? NSOrderedAscending : NSOrderedDescending;
-            return [a.title localizedCaseInsensitiveCompare:b.title];
-        }];
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_all = games;
+            [self sortAll];
             [self rebuild];
         });
     });

@@ -38,6 +38,7 @@ final class LibraryView extends LinearLayout {
         void openSettings();
         void chooseFolder();
         void importGames();
+        void sortMenu();
     }
 
     static final class Game {
@@ -68,8 +69,15 @@ final class LibraryView extends LinearLayout {
         bar.setOrientation(HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(Ui.dp(c, 20), Ui.dp(c, 18), Ui.dp(c, 12), Ui.dp(c, 8));
-        TextView title = Ui.text(c, "Library", 30, Ui.TEXT, true);
+        TextView title = Ui.text(c, "Nintendo DS", 28, Ui.TEXT, true);
         bar.addView(title, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
+        TextView sortB = Ui.text(c, "⇅", 17, Ui.ACCENT, true);
+        sortB.setPadding(Ui.dp(c, 14), Ui.dp(c, 6), Ui.dp(c, 14), Ui.dp(c, 6));
+        sortB.setBackground(Ui.pressable(c, Ui.CARD, 18));
+        sortB.setOnClickListener(v -> listener.sortMenu());
+        LayoutParams sp = new LayoutParams(-2, -2);
+        sp.rightMargin = Ui.dp(c, 8);
+        bar.addView(sortB, sp);
         TextView add = Ui.text(c, "+  Add", 15, Ui.ACCENT, true);
         add.setPadding(Ui.dp(c, 14), Ui.dp(c, 8), Ui.dp(c, 14), Ui.dp(c, 8));
         add.setBackground(Ui.pressable(c, Ui.CARD, 18));
@@ -231,6 +239,60 @@ final class LibraryView extends LinearLayout {
         }).start();
     }
 
+    private static int rank(java.util.List<String> order, Game g) {
+        int i = order.indexOf(g.rom.getName());
+        return i < 0 ? Integer.MAX_VALUE : i;
+    }
+
+    /** The games as shown, for moving one in the custom order. */
+    java.util.List<Game> shown() { return new ArrayList<>(games); }
+
+    /** Full name and publisher from GameTDB, cached as "tdb:<code>" = "title\npublisher". */
+    private void fetchInfo(String code) {
+        long missed = prefs.getLong("tdbMiss:" + code, 0);
+        if (missed > 0 && System.currentTimeMillis() - missed < 7L * 86400 * 1000) return;
+        if (!fetching.add("i" + code)) return;
+        new Thread(() -> {
+            String title = null, pub = null;
+            try {
+                java.net.HttpURLConnection con = (java.net.HttpURLConnection) new java.net.URL("https://www.gametdb.com/DS/" + code).openConnection();
+                con.setConnectTimeout(8000); con.setReadTimeout(15000);
+                if (con.getResponseCode() == 200) {
+                    StringBuilder sb = new StringBuilder();
+                    try (java.io.BufferedReader rd = new java.io.BufferedReader(new java.io.InputStreamReader(con.getInputStream(), "UTF-8"))) {
+                        String line;
+                        while ((line = rd.readLine()) != null) sb.append(line).append('\n');
+                    }
+                    String html = sb.toString();
+                    title = match(html, "title \\(EN\\)\\s*</t[dh]>\\s*<td[^>]*>(.*?)</td>");
+                    if (title == null) {
+                        String t = match(html, "<title>(.*?)</title>");
+                        if (t != null) {
+                            int d = t.indexOf(" - "); if (d >= 0) t = t.substring(d + 3);
+                            int bar = t.indexOf(" | "); if (bar >= 0) t = t.substring(0, bar);
+                            if (!t.toLowerCase().contains("gametdb") && !t.isEmpty()) title = t;
+                        }
+                    }
+                    pub = match(html, "publisher\\s*</t[dh]>\\s*<td[^>]*>(.*?)</td>");
+                }
+                con.disconnect();
+            } catch (Exception ignored) {}
+            if (title != null && !title.isEmpty()) {
+                prefs.edit().putString("tdb:" + code, title + "\n" + (pub == null ? "" : pub)).apply();
+                post(() -> { removeCallbacks(reloadSoon); postDelayed(reloadSoon, 300); });
+            } else prefs.edit().putLong("tdbMiss:" + code, System.currentTimeMillis()).apply();
+            fetching.remove("i" + code);
+        }).start();
+    }
+
+    private static String match(String html, String re) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(re, java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL).matcher(html);
+        if (!m.find()) return null;
+        String s = m.group(1).replaceAll("<[^>]+>", "").replace("&amp;", "&").replace("&#039;", "'").replace("&#39;", "'")
+                .replace("&quot;", "\"").replace("&nbsp;", " ").replace("&eacute;", "é").trim();
+        return s.isEmpty() ? null : s;
+    }
+
     private final Runnable reloadSoon = () -> { if (!dir.isEmpty()) load(dir); };
 
     /** Rescans the folder (call after playing, to update the order and the resume badges). */
@@ -269,6 +331,13 @@ final class LibraryView extends LinearLayout {
                 g.publisher = "";
             }
             g.title = prettyTitle(g.title);
+            String codeT = Native.romCode(f.getAbsolutePath());
+            String tdb = prefs.getString("tdb:" + codeT, "");
+            if (!tdb.isEmpty()) {
+                String[] tp = tdb.split("\n", -1);
+                g.title = tp[0];
+                if (tp.length > 1 && !tp[1].isEmpty()) g.publisher = tp[1];
+            } else if (codeT != null && codeT.length() == 4 && prefs.getBoolean("boxart", true)) fetchInfo(codeT);
             String custom = prefs.getString("name:" + n, "");
             if (!custom.isEmpty()) g.title = custom;
             g.favorite = prefs.getBoolean("fav:" + n, false);
@@ -286,7 +355,12 @@ final class LibraryView extends LinearLayout {
             g.lastPlayed = prefs.getLong("played:" + n, 0);
             out.add(g);
         }
-        Collections.sort(out, (a, b) -> a.favorite != b.favorite ? (a.favorite ? -1 : 1) : a.lastPlayed != b.lastPlayed ? Long.compare(b.lastPlayed, a.lastPlayed)
+        String sort = prefs.getString("sort", "recent");
+        java.util.List<String> order = java.util.Arrays.asList(prefs.getString("order", "").split("\n"));
+        Collections.sort(out, (a, b) -> a.favorite != b.favorite ? (a.favorite ? -1 : 1)
+                : sort.equals("name") ? a.title.compareToIgnoreCase(b.title)
+                : sort.equals("custom") ? (rank(order, a) != rank(order, b) ? Integer.compare(rank(order, a), rank(order, b)) : a.title.compareToIgnoreCase(b.title))
+                : a.lastPlayed != b.lastPlayed ? Long.compare(b.lastPlayed, a.lastPlayed)
                 : a.title.compareToIgnoreCase(b.title));
         return out;
     }
@@ -352,19 +426,20 @@ final class LibraryView extends LinearLayout {
         Tile(Context c) {
             super(c);
             setOrientation(VERTICAL);
-            setBackground(Ui.pressable(c, Ui.CARD, 16));
+            setBackground(Ui.pressable(c, 0x00000000, 16));
             setLayoutParams(new AbsListView.LayoutParams(-1, -2));
             art = new Art(c);
             addView(art, new LayoutParams(-1, -2));
-            title = Ui.text(c, "", 15, Ui.TEXT, true);
-            title.setMaxLines(2);
+            title = Ui.text(c, "", 14, 0xDDFFFFFF, false);
+            title.setMaxLines(3);
             title.setEllipsize(TextUtils.TruncateAt.END);
-            title.setPadding(Ui.dp(c, 12), Ui.dp(c, 10), Ui.dp(c, 12), 0);
-            addView(title);
+            title.setGravity(Gravity.CENTER_HORIZONTAL);
+            title.setPadding(Ui.dp(c, 4), Ui.dp(c, 10), Ui.dp(c, 4), Ui.dp(c, 6));
+            addView(title, new LayoutParams(-1, -2));
             sub = Ui.text(c, "", 12.5f, Ui.TEXT_DIM, false);
             sub.setSingleLine(true);
             sub.setEllipsize(TextUtils.TruncateAt.END);
-            sub.setPadding(Ui.dp(c, 12), Ui.dp(c, 2), Ui.dp(c, 12), Ui.dp(c, 12));
+            sub.setVisibility(GONE);
             addView(sub);
         }
 
@@ -389,42 +464,53 @@ final class LibraryView extends LinearLayout {
         @Override
         protected void onMeasure(int w, int h) {
             int size = MeasureSpec.getSize(w);
-            setMeasuredDimension(size, size);
+            setMeasuredDimension(size, Math.round(size * 0.9f));
         }
 
         @Override
         protected void onDraw(Canvas c) {
             if (game == null) return;
             int w = getWidth(), h = getHeight();
+            RectF box;
+            float rad;
+            if (game.cover != null) {
+                // box art at its own shape, standing on the bottom of the area
+                Bitmap b = game.cover;
+                float k = Math.min((float) w / b.getWidth(), (float) h / b.getHeight());
+                float bw = b.getWidth() * k, bh = b.getHeight() * k;
+                box = new RectF((w - bw) / 2, h - bh, (w + bw) / 2, h);
+                rad = Ui.dp(getContext(), 7);
+            } else {
+                box = new RectF(0, 0, w, h);
+                rad = r;
+            }
+            paint.setShader(null);
+            paint.setColor(0x66000000);
+            c.drawRoundRect(new RectF(box.left + 2, box.top + 6, box.right - 2, box.bottom + 6), rad, rad, paint);
             clip.reset();
-            clip.addRoundRect(new RectF(0, 0, w, h + r), new float[] {r, r, r, r, 0, 0, 0, 0}, Path.Direction.CW);
+            clip.addRoundRect(box, rad, rad, Path.Direction.CW);
             c.save();
             c.clipPath(clip);
             if (game.cover != null) {
-                Bitmap b = game.cover;
-                float s = Math.max((float) w / b.getWidth(), (float) h / b.getHeight());
-                float bw = b.getWidth() * s, bh = b.getHeight() * s;
                 paint.setFilterBitmap(true);
-                c.drawBitmap(b, null, new RectF((w - bw) / 2, (h - bh) / 2, (w + bw) / 2, (h + bh) / 2), paint);
+                c.drawBitmap(game.cover, null, box, paint);
             } else {
                 int t = game.tint;
                 paint.setShader(new LinearGradient(0, 0, w, h, mix(t, 0xFF0A0E16, 0.45f), mix(t, 0xFF0A0E16, 0.8f), Shader.TileMode.CLAMP));
-                c.drawRect(0, 0, w, h, paint);
+                c.drawRect(box, paint);
                 paint.setShader(null);
-                int s = (int) (w * 0.56f) / 32 * 32;   // whole multiple of 32: even pixels
-                if (s < 32) s = (int) (w * 0.56f);
+                int s = (int) (Math.min(w, h) * 0.6f) / 32 * 32;
+                if (s < 32) s = (int) (Math.min(w, h) * 0.6f);
                 int x = (w - s) / 2, y = (h - s) / 2;
-                paint.setColor(0x55000000);
-                c.drawRoundRect(new RectF(x + s * 0.03f, y + s * 0.06f, x + s * 1.03f, y + s * 1.06f), s * 0.08f, s * 0.08f, paint);
                 c.drawBitmap(game.icon, new Rect(0, 0, 32, 32), new Rect(x, y, x + s, y + s), pix);
             }
             c.restore();
-            float bh = Ui.dp(getContext(), 22), bm = Ui.dp(getContext(), 8);
+            float bh = Ui.dp(getContext(), 22), bm = Ui.dp(getContext(), 6);
             paint.setTextSize(Ui.dp(getContext(), 11));
             paint.setFakeBoldText(true);
             paint.setTextAlign(Paint.Align.CENTER);
             if (game.favorite) {
-                RectF sr = new RectF(bm, bm, bm + bh, bm + bh);
+                RectF sr = new RectF(box.left + bm, box.top + bm, box.left + bm + bh, box.top + bm + bh);
                 paint.setColor(0xD90A0E16);
                 c.drawRoundRect(sr, bh / 2, bh / 2, paint);
                 paint.setColor(0xFFFACC15);
@@ -434,21 +520,18 @@ final class LibraryView extends LinearLayout {
             }
             if (game.enhanced) {
                 float bw = Ui.dp(getContext(), 42);
-                RectF hr = new RectF(bm, h - bm - bh, bm + bw, h - bm);
+                RectF hr = new RectF(box.left + bm, box.bottom - bm - bh, box.left + bm + bw, box.bottom - bm);
                 paint.setColor(0xD90A0E16);
                 c.drawRoundRect(hr, bh / 2, bh / 2, paint);
                 paint.setColor(0xFFF2C14E);
                 c.drawText("✦ HD", hr.centerX(), hr.centerY() - (paint.descent() + paint.ascent()) / 2, paint);
             }
             if (game.resume) {
+                float pw = Ui.dp(getContext(), 62);
+                RectF pr = new RectF(box.right - bm - pw, box.top + bm, box.right - bm, box.top + bm + bh);
                 paint.setColor(0xE60A0E16);
-                float ph = Ui.dp(getContext(), 22), pw = Ui.dp(getContext(), 64), m = Ui.dp(getContext(), 8);
-                RectF pr = new RectF(w - m - pw, m, w - m, m + ph);
-                c.drawRoundRect(pr, ph / 2, ph / 2, paint);
+                c.drawRoundRect(pr, bh / 2, bh / 2, paint);
                 paint.setColor(Ui.ACCENT);
-                paint.setTextSize(Ui.dp(getContext(), 11));
-                paint.setFakeBoldText(true);
-                paint.setTextAlign(Paint.Align.CENTER);
                 c.drawText("RESUME", pr.centerX(), pr.centerY() - (paint.descent() + paint.ascent()) / 2, paint);
             }
         }
