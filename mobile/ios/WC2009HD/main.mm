@@ -538,7 +538,7 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
 {
     [Prefs() setObject:_row[@"choices"][ip.row][@"value"] forKey:_row[@"key"]];
     PostChange(_row[@"key"]);
-    [UISelectionFeedbackGenerator.new selectionChanged];
+    [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
     [tv reloadData];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self.navigationController popViewControllerAnimated:YES];
@@ -1736,7 +1736,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
         dispatch_async(dispatch_get_main_queue(), ^{
             [self->_hud removeFromSuperview];
             self->_hud = nil;
-            [UINotificationFeedbackGenerator.new notificationOccurred:copied ? UINotificationFeedbackTypeSuccess : UINotificationFeedbackTypeWarning];
+            [[[UINotificationFeedbackGenerator alloc] init] notificationOccurred:copied ? UINotificationFeedbackTypeSuccess : UINotificationFeedbackTypeWarning];
             [self reload];
         });
     });

@@ -21,8 +21,10 @@ jobs:
         run: mobile/ios/build_ios_lib.sh
       - name: Check the app builds (unsigned)
         run: |
+          set -o pipefail
+          rm -rf mobile/ios/build
           xcodebuild -project mobile/ios/WC2009HD.xcodeproj -target WC2009HD -configuration Release \
-            -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -30
+            -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | grep -E 'error:|warning: .*main.mm|BUILD' | head -60
           test -d mobile/ios/build/Release-iphoneos/WC2009HD.app
       - name: Package the Xcode project
         run: |
