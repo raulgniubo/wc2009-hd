@@ -35,6 +35,8 @@
 #include "ArchiveUtil.h"
 #endif
 #include "EmuInstance.h"
+#include <QDir>
+#include <QFile>
 #include "Config.h"
 #include "Platform.h"
 #include "Net.h"
@@ -452,10 +454,37 @@ string EmuInstance::getAssetPath(bool gba, const string& configpath, const strin
 {
     string result;
 
+    // WC09 fork: saves and save states go to a "Saves" folder next to the game (a relative path in
+    // the settings is taken from the game's folder too), so the game folder stays tidy
+    std::string romdir = gba ? baseGBAROMDir : baseROMDir;
+    bool wc09Saves = false;
     if (configpath.empty())
-        result = gba ? baseGBAROMDir : baseROMDir;
+    {
+        result = romdir;
+        if (!gba && file.empty() && !romdir.empty() && (ext == ".sav" || (ext.size() == 4 && ext.compare(0, 3, ".ml") == 0)))
+        {
+            result = romdir + "/Saves";
+            wc09Saves = true;
+        }
+    }
+    else if (!QDir::isAbsolutePath(QString::fromStdString(configpath)) && !romdir.empty())
+    {
+        result = romdir + "/" + configpath;
+        wc09Saves = true;
+    }
     else
         result = configpath;
+    if (wc09Saves)
+    {
+        QDir().mkpath(QString::fromStdString(result));
+        // a save left next to the game by an earlier version is moved in once
+        if (ext == ".sav" && !baseAssetName.empty())
+        {
+            QString oldp = QString::fromStdString(romdir + "/" + baseAssetName + ext);
+            QString newp = QString::fromStdString(result + "/" + baseAssetName + ext);
+            if (QFile::exists(oldp) && !QFile::exists(newp)) QFile::rename(oldp, newp);
+        }
+    }
 
     // cut off trailing slashes
     for (;;)
