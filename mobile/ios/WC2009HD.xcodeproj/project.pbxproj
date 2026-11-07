@@ -19,6 +19,8 @@
 		E4B6A2F4B9D262B55267EC15 /* QuartzCore.framework */ = {isa = PBXBuildFile; fileRef = EDFDA4133F0D395CA22654DD /* QuartzCore.framework */; };
 		0B82586B60C3C8B46ED7BC7A /* CoreGraphics.framework */ = {isa = PBXBuildFile; fileRef = A4F371C4F7EE2340D814A91C /* CoreGraphics.framework */; };
 		A48BE848118E6F61D924AB27 /* AudioToolbox.framework */ = {isa = PBXBuildFile; fileRef = 038412974CD3C477A369F0B8 /* AudioToolbox.framework */; };
+		0DBB8760B0D33B8AE7450061 /* PhotosUI.framework */ = {isa = PBXBuildFile; fileRef = FD614A108B39D385C8D92387 /* PhotosUI.framework */; };
+		DE0282A7A43512C0EEA0B9B1 /* UniformTypeIdentifiers.framework */ = {isa = PBXBuildFile; fileRef = AB93B4C2356BBED60AD58496 /* UniformTypeIdentifiers.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +37,8 @@
 		EDFDA4133F0D395CA22654DD /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		A4F371C4F7EE2340D814A91C /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		038412974CD3C477A369F0B8 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		FD614A108B39D385C8D92387 /* PhotosUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PhotosUI.framework; path = System/Library/Frameworks/PhotosUI.framework; sourceTree = SDKROOT; };
+		AB93B4C2356BBED60AD58496 /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 		F5BF48AA40CAD7891EB709FC /* WC2009HD.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WC2009HD.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -51,6 +55,8 @@
 				E4B6A2F4B9D262B55267EC15 /* QuartzCore.framework */,
 				0B82586B60C3C8B46ED7BC7A /* CoreGraphics.framework */,
 				A48BE848118E6F61D924AB27 /* AudioToolbox.framework */,
+				0DBB8760B0D33B8AE7450061 /* PhotosUI.framework */,
+				DE0282A7A43512C0EEA0B9B1 /* UniformTypeIdentifiers.framework */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -89,6 +95,8 @@
 				EDFDA4133F0D395CA22654DD /* QuartzCore.framework */,
 				A4F371C4F7EE2340D814A91C /* CoreGraphics.framework */,
 				038412974CD3C477A369F0B8 /* AudioToolbox.framework */,
+				FD614A108B39D385C8D92387 /* PhotosUI.framework */,
+				AB93B4C2356BBED60AD58496 /* UniformTypeIdentifiers.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";

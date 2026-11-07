@@ -433,6 +433,17 @@ void wc09_set_option(int option, int value)
     ApplyHdOptions();
 }
 
+int wc09_rom_code(const char* path, char* code)
+{
+    code[0] = 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return 1;
+    bool ok = fseek(f, 0x0C, SEEK_SET) == 0 && fread(code, 1, 4, f) == 4;
+    fclose(f);
+    code[ok ? 4 : 0] = 0;
+    return ok ? 0 : 2;
+}
+
 int wc09_is_hd_game(void) { return Nds && WC09::IsActive() ? 1 : 0; }
 
 int wc09_rom_info(const char* path, char* title, int titleCap, unsigned char* rgba)

@@ -18,7 +18,7 @@ files = {
     "Inter-Medium.ttf": ("fonts/Inter-Medium.ttf", "file", "resources"),
     "Inter-Bold.ttf": ("fonts/Inter-Bold.ttf", "file", "resources"),
 }
-frameworks = ["OpenGLES", "GLKit", "AVFoundation", "GameController", "UIKit", "QuartzCore", "CoreGraphics", "AudioToolbox"]
+frameworks = ["OpenGLES", "GLKit", "AVFoundation", "GameController", "UIKit", "QuartzCore", "CoreGraphics", "AudioToolbox", "PhotosUI", "UniformTypeIdentifiers"]
 
 P = uid("project"); T = uid("target"); MAIN = uid("maingroup"); APPG = uid("appgroup"); FWG = uid("fwgroup")
 PRODG = uid("prodgroup"); PROD = uid("product")

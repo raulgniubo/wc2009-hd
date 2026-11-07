@@ -58,7 +58,9 @@ enum
     WC09_OPT_HD_ALL = 4,        // WC2009: master switch; 0 = the game exactly as on the DS (default 1)
 };
 void wc09_set_option(int option, int value);
-int wc09_is_hd_game(void);   // the loaded game is Yu-Gi-Oh! 5D's WC2009 (the HD options apply)
+int wc09_is_hd_game(void);
+// 4-letter game code from a ROM header into code[5] (e.g. "CY8E"); 0 on success
+int wc09_rom_code(const char* path, char* code);   // the loaded game is Yu-Gi-Oh! 5D's WC2009 (the HD options apply)
 
 // title (UTF-8, lines separated by '\n') and 32x32 RGBA icon from a ROM's banner; 0 on success
 int wc09_rom_info(const char* path, char* title, int titleCap, unsigned char* rgba32x32);      // write pending in-game save data now (call when backgrounded)
