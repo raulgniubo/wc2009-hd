@@ -33,7 +33,8 @@ final class Native {
     /** "title\nsubtitle\npublisher" from the ROM's banner, icon into argb (32x32); null if unreadable */
     static native String romInfo(String path, int[] argb);
 
-    static final int OPT_HD_CARDS = 0, OPT_HD_TEXT = 1, OPT_SMOOTH_2D = 2, OPT_LINEAR_FILTER = 3;
+    static final int OPT_HD_CARDS = 0, OPT_HD_TEXT = 1, OPT_SMOOTH_2D = 2, OPT_LINEAR_FILTER = 3, OPT_HD_ALL = 4;
+    static native boolean isHdGame();
 
     private Native() {}
 }

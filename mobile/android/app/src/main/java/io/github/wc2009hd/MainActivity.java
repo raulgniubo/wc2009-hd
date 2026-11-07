@@ -344,7 +344,7 @@ public final class MainActivity extends Activity
         if (game == null) return;
         switch (key) {
             case "scale": { int s = SettingsView.scale(prefs); game.queueEvent(() -> Native.setScale(s)); break; }
-            case "filter": case "smooth2d": case "hdCards": case "hdText":
+            case "filter": case "smooth2d": case "hdCards": case "hdText": case "hdAll":
                 game.queueEvent(this::applyOptions); break;
             case "buttons": controls.setShowButtons(SettingsView.on(prefs, "buttons")); relayout(); break;
             case "opacity": controls.setOpacity(SettingsView.opacity(prefs)); break;
@@ -359,6 +359,7 @@ public final class MainActivity extends Activity
         Native.setOption(Native.OPT_HD_TEXT, SettingsView.on(prefs, "hdText") ? 1 : 0);
         Native.setOption(Native.OPT_SMOOTH_2D, SettingsView.on(prefs, "smooth2d") ? 1 : 0);
         Native.setOption(Native.OPT_LINEAR_FILTER, SettingsView.on(prefs, "filter") ? 1 : 0);
+        Native.setOption(Native.OPT_HD_ALL, SettingsView.on(prefs, "hdAll") ? 1 : 0);
     }
 
     // ================================================================ game
@@ -453,10 +454,23 @@ public final class MainActivity extends Activity
     public void onMenu() {
         if (game == null || settings != null) return;
         game.setPaused(true);
-        String[] items = {"Save state", "Load state", "Settings", "Restart from in-game save", "Back to library"};
+        boolean hdGame = Native.isHdGame(), hd = SettingsView.on(prefs, "hdAll");
+        String[] items = hdGame
+                ? new String[] {"Save state", "Load state", hd ? "Switch to original look" : "Switch to HD look", "Settings", "Restart from in-game save", "Back to library"}
+                : new String[] {"Save state", "Load state", "Settings", "Restart from in-game save", "Back to library"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(currentRom != null ? currentRom.getName().replaceAll("\\.nds$", "") : "Menu")
                 .setItems(items, (d, which) -> {
+                    if (hdGame) {
+                        if (which == 2) {
+                            prefs.edit().putBoolean("hdAll", !hd).apply();
+                            settingChanged("hdAll");
+                            toast(hd ? "Original look" : "HD look");
+                            game.setPaused(false);
+                            return;
+                        }
+                        if (which > 2) which--;
+                    }
                     switch (which) {
                         case 0: stateDialog(true); return;
                         case 1: stateDialog(false); return;

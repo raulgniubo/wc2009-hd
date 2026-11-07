@@ -370,7 +370,7 @@ static int PrefScale() { return (int)[Prefs() integerForKey:@"scale"]; }
 static void RegisterDefaults()
 {
     [Prefs() registerDefaults:@{
-        @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
+        @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
         @"buttons": @YES, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
     }];
 }
@@ -381,6 +381,7 @@ static void ApplyCoreOptions()
     wc09_set_option(WC09_OPT_HD_TEXT, [Prefs() boolForKey:@"hdText"]);
     wc09_set_option(WC09_OPT_SMOOTH_2D, [Prefs() boolForKey:@"smooth2d"]);
     wc09_set_option(WC09_OPT_LINEAR_FILTER, [Prefs() boolForKey:@"filter"]);
+    wc09_set_option(WC09_OPT_HD_ALL, [Prefs() boolForKey:@"hdAll"]);
 }
 
 static UIColor* Accent() { return [UIColor colorWithRed:0.29 green:0.64 blue:1.0 alpha:1]; }
@@ -406,9 +407,10 @@ static UIColor* Accent() { return [UIColor colorWithRed:0.29 green:0.64 blue:1.0
                 @{@"type": @"switch", @"key": @"smooth2d", @"label": @"Smooth 2D graphics"}],
               @"footer": @"Higher resolution is sharper. 4x looks great on most iPhones; 6x and 8x need a recent one and use more battery. Smooth 2D upscales menus and sprites with smooth edges instead of blocky pixels."},
             @{@"title": @"Yu-Gi-Oh! 5D's WC2009 HD", @"rows": @[
+                @{@"type": @"switch", @"key": @"hdAll", @"label": @"HD improvements"},
                 @{@"type": @"switch", @"key": @"hdCards", @"label": @"HD card art"},
                 @{@"type": @"switch", @"key": @"hdText", @"label": @"HD text and menus"}],
-              @"footer": @"Real card images (from the HDCards folder next to the game) and card text redrawn in a clean font."},
+              @"footer": @"Turn HD improvements off to play exactly like the original DS (you can also switch it from the in-game menu to compare). Card art uses the HDCards folder next to the game."},
             @{@"title": @"Controls", @"rows": @[
                 @{@"type": @"switch", @"key": @"buttons", @"label": @"On-screen buttons"},
                 @{@"type": @"seg", @"key": @"opacity", @"label": @"Button opacity", @"items": @[@"25%", @"40%", @"55%", @"75%", @"95%"], @"values": @[@0.25f, @0.4f, @0.55f, @0.75f, @0.95f]},
@@ -628,7 +630,7 @@ static std::atomic<bool> gMuted{false};
 {
     NSString* key = n.object;
     if ([key isEqualToString:@"scale"]) { if (_started) { [EAGLContext setCurrentContext:_ctx]; wc09_set_scale(PrefScale()); } }
-    else if ([@[@"filter", @"smooth2d", @"hdCards", @"hdText"] containsObject:key]) ApplyCoreOptions();
+    else if ([@[@"filter", @"smooth2d", @"hdCards", @"hdText", @"hdAll"] containsObject:key]) ApplyCoreOptions();
     else if ([key isEqualToString:@"buttons"]) { _controls.showButtons = [Prefs() boolForKey:@"buttons"]; [self.view setNeedsLayout]; }
     else if ([key isEqualToString:@"opacity"]) { _controls.opacity = [Prefs() floatForKey:@"opacity"]; [_controls setNeedsDisplay]; }
     else if ([key isEqualToString:@"haptics"]) _controls.haptics = [Prefs() boolForKey:@"haptics"];
@@ -760,6 +762,18 @@ static std::atomic<bool> gMuted{false};
     __weak GameViewController* me = self;
     [m addAction:[UIAlertAction actionWithTitle:@"Save state" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:YES]; }]];
     [m addAction:[UIAlertAction actionWithTitle:@"Load state" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:NO]; }]];
+    if (wc09_is_hd_game())
+    {
+        BOOL hd = [Prefs() boolForKey:@"hdAll"];
+        [m addAction:[UIAlertAction actionWithTitle:(hd ? @"Switch to original look" : @"Switch to HD look") style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
+            GameViewController* g = me;
+            if (!g) return;
+            [Prefs() setBool:!hd forKey:@"hdAll"];
+            ApplyCoreOptions();
+            [g toast:hd ? @"Original look" : @"HD look"];
+            [g resume];
+        }]];
+    }
     [m addAction:[UIAlertAction actionWithTitle:@"Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me openSettings]; }]];
     [m addAction:[UIAlertAction actionWithTitle:@"Restart from in-game save" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me restartAsk]; }]];
     [m addAction:[UIAlertAction actionWithTitle:@"Back to library" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) { [me close]; }]];

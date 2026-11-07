@@ -114,6 +114,16 @@ bool ReadFile(const std::string& path, std::vector<u8>& out)
 // screen drawing
 GLuint Prog = 0, Vao = 0, Vbo = 0;
 bool LinearFilter = true;
+bool OptHdAll = true, OptHdCards = true, OptHdText = true, OptSmooth2D = true;
+
+// the master switch off = the original game: no HD layers, and no 2D smoothing for it either
+void ApplyHdOptions()
+{
+    bool all = OptHdAll || !WC09::IsActive();
+    WC09::SetHDCardsEnabled(all && OptHdCards);
+    WC09::SetHDTextEnabled(all && OptHdText);
+    WC09::SetSmooth2D(all && OptSmooth2D);
+}
 GLint LocLayer = -1;
 const char* kVS = R"(#version 300 es
 in vec2 vPos; in vec2 vUV; out vec2 fUV;
@@ -255,6 +265,7 @@ int wc09_load_rom(const char* path, int scale, int jit)
     // the WC2009 HD work: on for this game
     const char* gc = Nds->NDSCartSlot.GetCart()->GetHeader().GameCode;
     WC09::SetActive(gc[0] == 'C' && gc[1] == 'Y' && gc[2] == '8');
+    ApplyHdOptions();
     SetupHDProvider(GameDir + "/HDCards", FontDir);
 
     Nds->Start();
@@ -413,12 +424,16 @@ void wc09_set_option(int option, int value)
 {
     switch (option)
     {
-    case WC09_OPT_HD_CARDS: WC09::SetHDCardsEnabled(value != 0); break;
-    case WC09_OPT_HD_TEXT: WC09::SetHDTextEnabled(value != 0); break;
-    case WC09_OPT_SMOOTH_2D: WC09::SetSmooth2D(value != 0); break;
+    case WC09_OPT_HD_CARDS: OptHdCards = value != 0; break;
+    case WC09_OPT_HD_TEXT: OptHdText = value != 0; break;
+    case WC09_OPT_SMOOTH_2D: OptSmooth2D = value != 0; break;
+    case WC09_OPT_HD_ALL: OptHdAll = value != 0; break;
     case WC09_OPT_LINEAR_FILTER: LinearFilter = value != 0; break;
     }
+    ApplyHdOptions();
 }
+
+int wc09_is_hd_game(void) { return Nds && WC09::IsActive() ? 1 : 0; }
 
 int wc09_rom_info(const char* path, char* title, int titleCap, unsigned char* rgba)
 {

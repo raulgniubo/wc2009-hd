@@ -55,8 +55,10 @@ enum
     WC09_OPT_HD_TEXT = 1,       // WC2009: card text and panels in a real font (default 1)
     WC09_OPT_SMOOTH_2D = 2,     // smooth upscaling of 2D graphics (default 1)
     WC09_OPT_LINEAR_FILTER = 3, // 1 = smooth screen scaling, 0 = sharp pixels (default 1)
+    WC09_OPT_HD_ALL = 4,        // WC2009: master switch; 0 = the game exactly as on the DS (default 1)
 };
 void wc09_set_option(int option, int value);
+int wc09_is_hd_game(void);   // the loaded game is Yu-Gi-Oh! 5D's WC2009 (the HD options apply)
 
 // title (UTF-8, lines separated by '\n') and 32x32 RGBA icon from a ROM's banner; 0 on success
 int wc09_rom_info(const char* path, char* title, int titleCap, unsigned char* rgba32x32);      // write pending in-game save data now (call when backgrounded)

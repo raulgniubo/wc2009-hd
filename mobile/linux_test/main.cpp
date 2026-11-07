@@ -23,10 +23,11 @@ int main(int argc, char** argv)
     const char* gameDir = argv[1]; const char* fontDir = argv[2]; const char* state = argv[3];
     int frames = atoi(argv[4]); const char* out = argv[5];
     int scale = argc > 6 ? atoi(argv[6]) : 4;
-    std::map<int, unsigned> keys; std::map<int, std::pair<int, int>> taps;
+    std::map<int, unsigned> keys; std::map<int, std::pair<int, int>> taps; std::multimap<int, std::pair<int, int>> opts;
     for (int i = 7; i < argc; i++)
     {
         if (argv[i][0] == 'f') { int f; unsigned k; if (sscanf(argv[i] + 1, "%d:%x", &f, &k) == 2) keys[f] = k; }
+        if (argv[i][0] == 'o') { int f, o, v; if (sscanf(argv[i] + 1, "%d:%d,%d", &f, &o, &v) == 3) opts.insert({f, {o, v}}); }
         if (argv[i][0] == 't') { int f, x, y; if (sscanf(argv[i] + 1, "%d:%d,%d", &f, &x, &y) == 3) taps[f] = {x, y}; }
     }
 
@@ -69,6 +70,7 @@ int main(int argc, char** argv)
             if (wc09_load_rom(rom, scale, 1) || (state[0] && strcmp(state, "-") && wc09_load_state_file(state))) { fprintf(stderr, "reload failed\n"); return 8; }
             fprintf(stderr, "reloaded at frame %d\n", f);
         }
+        for (auto it = opts.lower_bound(f); it != opts.upper_bound(f); ++it) wc09_set_option(it->second.first, it->second.second);
         if (keys.count(f)) wc09_set_keys(keys[f]);
         if (taps.count(f)) wc09_touch(1, taps[f].first, taps[f].second);
         if (taps.count(f - 3)) wc09_touch(0, 0, 0);

@@ -115,6 +115,7 @@ FN(void, glReset)(JNIEnv*, jclass) { wc09_gl_reset(); }
 FN(jint, audioQueued)(JNIEnv*, jclass) { return wc09_audio_queued(); }
 FN(void, audioStart)(JNIEnv*, jclass) { std::lock_guard<std::mutex> lk(StreamLock); if (!Stream) OpenStream(); }
 FN(void, audioStop)(JNIEnv*, jclass) { std::lock_guard<std::mutex> lk(StreamLock); CloseStream(); }
+FN(jboolean, isHdGame)(JNIEnv*, jclass) { return wc09_is_hd_game() ? JNI_TRUE : JNI_FALSE; }
 FN(void, setMuted)(JNIEnv*, jclass, jboolean m) { Muted = m; }
 FN(void, shutdown)(JNIEnv*, jclass) { wc09_shutdown(); }
 FN(void, setOption)(JNIEnv*, jclass, jint o, jint v) { wc09_set_option(o, v); }

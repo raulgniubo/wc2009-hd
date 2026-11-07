@@ -21,7 +21,7 @@ final class SettingsView extends LinearLayout {
     static int scale(SharedPreferences p) { return p.getInt("scale", 4); }
     static boolean on(SharedPreferences p, String key) {
         switch (key) {
-            case "jit": case "filter": case "smooth2d": case "hdCards": case "hdText": case "buttons":
+            case "hdAll": case "jit": case "filter": case "smooth2d": case "hdCards": case "hdText": case "buttons":
             case "haptics": case "resume": case "sound": return p.getBoolean(key, true);
             default: return p.getBoolean(key, false);
         }
@@ -82,6 +82,8 @@ final class SettingsView extends LinearLayout {
 
         // ---- WC2009
         LinearLayout w = section("Yu-Gi-Oh! 5D's WC2009 HD");
+        w.addView(toggle("hdAll", "HD improvements", "Off plays the game exactly like the original DS. You can also switch it from the in-game menu to compare."));
+        w.addView(Ui.divider(c));
         w.addView(toggle("hdCards", "HD card art", "Real card images instead of the DS's small pictures (needs the HDCards folder)."));
         w.addView(Ui.divider(c));
         w.addView(toggle("hdText", "HD text and menus", "Card text, descriptions and panels redrawn in a clean font."));
