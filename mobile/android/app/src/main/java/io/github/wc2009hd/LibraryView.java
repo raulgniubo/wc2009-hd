@@ -119,11 +119,16 @@ final class LibraryView extends LinearLayout {
         art.setImageResource(R.mipmap.ic_launcher);
         col.addView(art, new LayoutParams(Ui.dp(c, 112), Ui.dp(c, 112)));
 
-        TextView title = Ui.text(c, "Add your games", 28, Ui.TEXT, true);
+        TextView brand = Ui.text(c, "DUAL HD", 13, Ui.ACCENT, true);
+        brand.setLetterSpacing(0.27f);
+        brand.setGravity(Gravity.CENTER);
+        brand.setPadding(0, Ui.dp(c, 16), 0, 0);
+        col.addView(brand, new LayoutParams(-1, -2));
+        TextView title = Ui.text(c, "Your DS games, in HD", 28, Ui.TEXT, true);
         title.setGravity(Gravity.CENTER);
-        title.setPadding(0, Ui.dp(c, 18), 0, Ui.dp(c, 6));
+        title.setPadding(0, Ui.dp(c, 6), 0, Ui.dp(c, 6));
         col.addView(title, new LayoutParams(-1, -2));
-        TextView sub = Ui.text(c, "Dual HD plays DS games (.nds files) with sharp HD upscaling, save states and controller support.", 16, Ui.TEXT_DIM, false);
+        TextView sub = Ui.text(c, "Add your games to get started. Pick the folder that has them, or import .nds files one by one.", 16, Ui.TEXT_DIM, false);
         sub.setGravity(Gravity.CENTER);
         sub.setLineSpacing(0, 1.2f);
         col.addView(sub, new LayoutParams(-1, -2));
@@ -145,11 +150,19 @@ final class LibraryView extends LinearLayout {
         ip.topMargin = Ui.dp(c, 12);
         col.addView(imp, ip);
 
-        col.addView(tip(c, "📁", "A folder for all your games", "Pick any folder on your phone or SD card. Every game in it shows up here, and new ones appear on their own. Now using:"), tipLp(c, 26));
-        folderLabel = Ui.text(c, "", 13.5f, Ui.ACCENT, false);
-        folderLabel.setPadding(Ui.dp(c, 64), Ui.dp(c, 4), Ui.dp(c, 18), 0);
-        col.addView(folderLabel);
-        col.addView(tip(c, "⬇", "Or import games", "Add one or more .nds files from anywhere on your phone. They're copied into your games folder."), tipLp(c, 12));
+        folderLabel = Ui.text(c, "", 13, Ui.TEXT_DIM, false);
+        folderLabel.setGravity(Gravity.CENTER);
+        folderLabel.setPadding(0, Ui.dp(c, 10), 0, 0);
+        col.addView(folderLabel, new LayoutParams(-1, -2));
+
+        TextView why = Ui.text(c, "WHY DUAL HD", 12.5f, Ui.TEXT_DIM, true);
+        why.setLetterSpacing(0.06f);
+        LayoutParams wl = new LayoutParams(-1, -2);
+        wl.topMargin = Ui.dp(c, 30);
+        col.addView(why, wl);
+        col.addView(tip(c, "HD", "Up to 8x resolution", "Sharp HD upscaling for every game, from 2x to 8x, with smooth 2D graphics."), tipLp(c, 8));
+        col.addView(tip(c, "▤", "Made for big screens", "Layouts for portrait, landscape and foldables, full screen mode and game controllers."), tipLp(c, 12));
+        col.addView(tip(c, "↺", "Never lose progress", "Save states, and every game picks up right where you left off."), tipLp(c, 12));
         col.addView(tip(c, "✦", "Game enhancements", "Some games get extra improvements made just for them. See Settings > Game enhancements."), tipLp(c, 12));
         return sv;
     }
@@ -189,7 +202,7 @@ final class LibraryView extends LinearLayout {
             ui.post(() -> {
                 games.clear(); games.addAll(found);
                 adapter.notifyDataSetChanged();
-                folderLabel.setText(folder);
+                folderLabel.setText("Games folder: " + folder);
                 empty.setVisibility(found.isEmpty() ? VISIBLE : GONE);
             });
         }).start();

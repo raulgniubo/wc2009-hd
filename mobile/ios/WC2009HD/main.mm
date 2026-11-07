@@ -699,7 +699,34 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
     if (!enabled) c.textProperties.color = UIColor.tertiaryLabelColor;
     if (row[@"symbol"]) { c.image = SettingsIcon(row[@"symbol"], row[@"color"] ?: Accent()); c.imageToTextPadding = 14; }
     c.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(11, 0, 11, 0);
-    cell.contentConfiguration = c;
+    if (row[@"symbol"] && row[@"detail"])
+    {
+        // icon lined up with the first line of the title (not centred on the whole text)
+        UIImageView* iv = [[UIImageView alloc] initWithImage:SettingsIcon(row[@"symbol"], row[@"color"] ?: Accent())];
+        UILabel* tl = [UILabel new];
+        tl.text = row[@"title"]; tl.numberOfLines = 0;
+        tl.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        tl.textColor = enabled ? UIColor.labelColor : UIColor.tertiaryLabelColor;
+        UILabel* dl = [UILabel new];
+        dl.text = row[@"detail"]; dl.numberOfLines = 0;
+        dl.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+        dl.textColor = UIColor.secondaryLabelColor;
+        UIStackView* txt = [[UIStackView alloc] initWithArrangedSubviews:@[tl, dl]];
+        txt.axis = UILayoutConstraintAxisVertical; txt.spacing = 3;
+        txt.layoutMarginsRelativeArrangement = YES;
+        txt.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(MAX(0.0, (29 - tl.font.lineHeight) / 2), 0, 0, 0);
+        UIStackView* st = [[UIStackView alloc] initWithArrangedSubviews:@[iv, txt]];
+        st.spacing = 14; st.alignment = UIStackViewAlignmentTop;
+        st.translatesAutoresizingMaskIntoConstraints = NO;
+        [cell.contentView addSubview:st];
+        UILayoutGuide* g = cell.contentView.layoutMarginsGuide;
+        [NSLayoutConstraint activateConstraints:@[
+            [st.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [st.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
+            [st.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:11],
+            [st.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-11],
+            [iv.widthAnchor constraintEqualToConstant:29], [iv.heightAnchor constraintEqualToConstant:29]]];
+    }
+    else cell.contentConfiguration = c;
 
     if ([type isEqualToString:@"switch"])
     {
@@ -1820,12 +1847,17 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
         [glow.centerXAnchor constraintEqualToAnchor:body.centerXAnchor], [glow.centerYAnchor constraintEqualToAnchor:body.centerYAnchor],
         [glow.widthAnchor constraintEqualToConstant:180], [glow.heightAnchor constraintEqualToConstant:180]]];
 
+    UILabel* brand = [UILabel new];
+    brand.attributedText = [[NSAttributedString alloc] initWithString:@"DUAL HD" attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightHeavy], NSKernAttributeName: @3.5,
+        NSForegroundColorAttributeName: Accent()}];
+    brand.textAlignment = NSTextAlignmentCenter;
     UILabel* title = [UILabel new];
-    title.text = @"Add your games";
+    title.text = @"Your DS games, in HD";
     title.font = [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
-    title.textColor = UIColor.whiteColor; title.textAlignment = NSTextAlignmentCenter;
+    title.textColor = UIColor.whiteColor; title.textAlignment = NSTextAlignmentCenter; title.numberOfLines = 0;
     UILabel* sub = [UILabel new];
-    sub.text = @"Dual HD plays DS games (.nds files) with sharp HD upscaling, save states and controller support.";
+    sub.text = @"Add your games to get started. Pick a folder that has them (On My iPhone, iCloud Drive, a USB drive…), or import .nds files one by one.";
     sub.font = [UIFont systemFontOfSize:16]; sub.numberOfLines = 0;
     sub.textColor = UIColor.secondaryLabelColor; sub.textAlignment = NSTextAlignmentCenter;
 
@@ -1846,19 +1878,27 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
     fc.contentInsets = NSDirectionalEdgeInsetsMake(14, 20, 14, 20);
     UIButton* files = [UIButton buttonWithConfiguration:fc primaryAction:[UIAction actionWithHandler:^(UIAction*) { [me importGames]; }]];
 
-    UIView* card = [self tipCard:@"folder.fill" title:@"A folder for all your games"
-                            text:@"Pick any folder in Files: On My iPhone, iCloud Drive, a USB drive… Every game in it shows up here, and new ones appear on their own."];
-    UIView* card1 = [self tipCard:@"square.and.arrow.down.fill" title:@"Or import games"
-                             text:@"Add one or more .nds files from anywhere you saved them. They're copied into Dual HD."];
-    UIView* card2 = [self tipCard:@"sparkles" title:@"Game enhancements"
+    UILabel* why = [UILabel new];
+    why.text = @"WHY DUAL HD";
+    why.font = [UIFont systemFontOfSize:12.5 weight:UIFontWeightSemibold];
+    why.textColor = UIColor.secondaryLabelColor;
+    UIView* card = [self tipCard:@"sparkles.tv" title:@"Up to 8x resolution"
+                            text:@"Sharp HD upscaling for every game, from 2x to 8x, with smooth 2D graphics."];
+    UIView* card1 = [self tipCard:@"rectangle.split.1x2.fill" title:@"Made for big screens"
+                             text:@"Layouts for portrait, landscape and foldables, full screen mode and game controllers."];
+    UIView* card3 = [self tipCard:@"clock.arrow.circlepath" title:@"Never lose progress"
+                             text:@"Save states, and every game picks up right where you left off."];
+    UIView* card2 = [self tipCard:@"wand.and.stars" title:@"Game enhancements"
                              text:@"Some games get extra improvements made just for them. See Settings > Game Enhancements."];
 
-    UIStackView* st = [[UIStackView alloc] initWithArrangedSubviews:@[art, title, sub, imp, files, card, card1, card2]];
+    UIStackView* st = [[UIStackView alloc] initWithArrangedSubviews:@[art, brand, title, sub, imp, files, why, card, card1, card3, card2]];
     st.axis = UILayoutConstraintAxisVertical; st.spacing = 14; st.alignment = UIStackViewAlignmentFill;
-    [st setCustomSpacing:26 afterView:art];
+    [st setCustomSpacing:22 afterView:art];
+    [st setCustomSpacing:6 afterView:brand];
     [st setCustomSpacing:8 afterView:title];
     [st setCustomSpacing:26 afterView:sub];
-    [st setCustomSpacing:26 afterView:files];
+    [st setCustomSpacing:34 afterView:files];
+    [st setCustomSpacing:8 afterView:why];
     st.translatesAutoresizingMaskIntoConstraints = NO;
     [sv addSubview:st];
     [NSLayoutConstraint activateConstraints:@[
