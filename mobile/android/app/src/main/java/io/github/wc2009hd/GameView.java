@@ -25,6 +25,7 @@ final class GameView extends GLSurfaceView implements GLSurfaceView.Renderer {
     private long baseNs;
     private long framesRun;
     private volatile boolean paused, fastForward;
+    private volatile int ffSpeed = 3;
 
     GameView(Context c, Host host, Layout layout, Input input) {
         super(c);
@@ -38,6 +39,7 @@ final class GameView extends GLSurfaceView implements GLSurfaceView.Renderer {
 
     void setPaused(boolean p) { paused = p; resync(); }
     void setFastForward(boolean f) { fastForward = f; resync(); }
+    void setFastForwardSpeed(int s) { ffSpeed = Math.max(2, Math.min(4, s)); }
     private void resync() { baseNs = 0; }
 
     @Override
@@ -71,7 +73,7 @@ final class GameView extends GLSurfaceView implements GLSurfaceView.Renderer {
             long now = System.nanoTime();
             int run;
             if (fastForward) {
-                run = 3;
+                run = ffSpeed;
             } else {
                 if (baseNs == 0) { baseNs = now; framesRun = 0; }
                 long due = (long) ((now - baseNs) * DS_FPS / 1e9) + 1 - framesRun;

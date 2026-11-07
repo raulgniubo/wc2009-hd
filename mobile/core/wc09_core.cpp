@@ -113,6 +113,7 @@ bool ReadFile(const std::string& path, std::vector<u8>& out)
 
 // screen drawing
 GLuint Prog = 0, Vao = 0, Vbo = 0;
+bool LinearFilter = true;
 GLint LocLayer = -1;
 const char* kVS = R"(#version 300 es
 in vec2 vPos; in vec2 vUV; out vec2 fUV;
@@ -304,8 +305,8 @@ void wc09_draw_screen(int screen, int x, int y, int w, int h, int fbWidth, int f
     glUniform1f(LocLayer, (float)(screen ? 1 : 0));
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, LinearFilter ? GL_LINEAR : GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, LinearFilter ? GL_LINEAR : GL_NEAREST);
     glBindVertexArray(Vao);
     glBindBuffer(GL_ARRAY_BUFFER, Vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
@@ -392,9 +393,84 @@ void wc09_flush_save(void) { FlushSave(true); }
 
 void wc09_shutdown(void)
 {
+    // call with the game's GL context current: the renderer and screen program are deleted
     FlushSave(true);
-    std::lock_guard<std::mutex> lk(AudioLock);
-    Nds.reset();
+    {
+        std::lock_guard<std::mutex> lk(AudioLock);
+        Nds.reset();
+        NDS::Current = nullptr;
+    }
+    if (Prog) { glDeleteProgram(Prog); glDeleteVertexArrays(1, &Vao); glDeleteBuffers(1, &Vbo); }
+    Prog = 0; Vao = 0; Vbo = 0;
+#ifdef MELONDS_GLES_30
+    melonDS::GLES30::S() = melonDS::GLES30::State();
+#endif
+    { std::lock_guard<std::mutex> lk(RingLock); RingCount = 0; }
+    RomBase.clear();
+}
+
+void wc09_set_option(int option, int value)
+{
+    switch (option)
+    {
+    case WC09_OPT_HD_CARDS: WC09::SetHDCardsEnabled(value != 0); break;
+    case WC09_OPT_HD_TEXT: WC09::SetHDTextEnabled(value != 0); break;
+    case WC09_OPT_SMOOTH_2D: WC09::SetSmooth2D(value != 0); break;
+    case WC09_OPT_LINEAR_FILTER: LinearFilter = value != 0; break;
+    }
+}
+
+int wc09_rom_info(const char* path, char* title, int titleCap, unsigned char* rgba)
+{
+    if (title && titleCap > 0) title[0] = 0;
+    if (rgba) memset(rgba, 0, 32 * 32 * 4);
+    FILE* f = fopen(path, "rb");
+    if (!f) return 1;
+    u8 hdr[0x200];
+    u8 banner[0x840];
+    bool ok = fread(hdr, 1, sizeof(hdr), f) == sizeof(hdr);
+    u32 off = ok ? (hdr[0x68] | hdr[0x69] << 8 | hdr[0x6A] << 16 | (u32)hdr[0x6B] << 24) : 0;
+    ok = ok && off != 0 && fseek(f, off, SEEK_SET) == 0 && fread(banner, 1, sizeof(banner), f) == sizeof(banner);
+    fclose(f);
+    if (!ok) return 2;
+    if (rgba)
+    {
+        // 4bpp, 4x4 tiles of 8x8; palette entry 0 is transparent
+        u32 pal[16];
+        for (int i = 0; i < 16; i++)
+        {
+            u16 c = banner[0x220 + i * 2] | banner[0x221 + i * 2] << 8;
+            u32 r = (c & 31) * 255 / 31, g = ((c >> 5) & 31) * 255 / 31, b = ((c >> 10) & 31) * 255 / 31;
+            pal[i] = r | g << 8 | b << 16 | (i ? 0xFF000000u : 0);
+        }
+        for (int t = 0; t < 16; t++)
+            for (int py = 0; py < 8; py++)
+                for (int px = 0; px < 8; px++)
+                {
+                    u8 v = banner[0x20 + t * 32 + py * 4 + px / 2];
+                    int idx = (px & 1) ? (v >> 4) : (v & 15);
+                    int x = (t % 4) * 8 + px, y = (t / 4) * 8 + py;
+                    u32 c = pal[idx];
+                    memcpy(&rgba[(y * 32 + x) * 4], &c, 4);
+                }
+    }
+    if (title && titleCap > 1)
+    {
+        // English title (falls back to Japanese), UTF-16 -> UTF-8
+        const u8* t16 = &banner[0x240 + 0x100];
+        if (!(t16[0] | t16[1])) t16 = &banner[0x240];
+        int n = 0;
+        for (int i = 0; i < 128 && n < titleCap - 4; i++)
+        {
+            u32 c = t16[i * 2] | t16[i * 2 + 1] << 8;
+            if (!c) break;
+            if (c < 0x80) title[n++] = (char)c;
+            else if (c < 0x800) { title[n++] = (char)(0xC0 | c >> 6); title[n++] = (char)(0x80 | (c & 63)); }
+            else { title[n++] = (char)(0xE0 | c >> 12); title[n++] = (char)(0x80 | ((c >> 6) & 63)); title[n++] = (char)(0x80 | (c & 63)); }
+        }
+        title[n] = 0;
+    }
+    return 0;
 }
 
 }

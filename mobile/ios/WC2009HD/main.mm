@@ -8,6 +8,7 @@
 #import <GameController/GameController.h>
 #include <OpenGLES/ES3/gl.h>
 #include <mutex>
+#include <atomic>
 #include <cmath>
 #include "wc09_core.h"
 
@@ -127,6 +128,7 @@ struct Layout
 @property (nonatomic) BOOL showButtons;
 @property (nonatomic) CGFloat opacity;
 @property (nonatomic) BOOL ffwdOn;
+@property (nonatomic) BOOL haptics;
 @property (nonatomic) Layout* layout;
 @end
 
@@ -147,7 +149,7 @@ struct Layout
         self.opaque = NO;
         _held = [NSMapTable weakToStrongObjectsMapTable];
         _haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
-        _showButtons = YES; _opacity = 0.55;
+        _showButtons = YES; _opacity = 0.55; _haptics = YES;
     }
     return self;
 }
@@ -244,7 +246,7 @@ struct Layout
 {
     unsigned k = 0;
     for (UITouch* t in _held) { int v = [[_held objectForKey:t] intValue]; if (v > 0) k |= (unsigned)v; }
-    if (k & ~_lastKeys) [_haptic impactOccurred];
+    if (_haptics && (k & ~_lastKeys)) [_haptic impactOccurred];
     if (k != _lastKeys) { _lastKeys = k; gInput.setScreenKeys(k); [self setNeedsDisplay]; }
 }
 
@@ -356,29 +358,187 @@ struct Layout
 }
 @end
 
+
 // ------------------------------------------------------------------------------------------------
+// Settings (NSUserDefaults; same keys as the Android app)
+
+static NSString* const kSettingsChanged = @"WC09SettingsChanged";
+
+static NSUserDefaults* Prefs() { return NSUserDefaults.standardUserDefaults; }
+static int PrefScale() { return (int)[Prefs() integerForKey:@"scale"]; }
+
+static void RegisterDefaults()
+{
+    [Prefs() registerDefaults:@{
+        @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
+        @"buttons": @YES, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
+    }];
+}
+
+static void ApplyCoreOptions()
+{
+    wc09_set_option(WC09_OPT_HD_CARDS, [Prefs() boolForKey:@"hdCards"]);
+    wc09_set_option(WC09_OPT_HD_TEXT, [Prefs() boolForKey:@"hdText"]);
+    wc09_set_option(WC09_OPT_SMOOTH_2D, [Prefs() boolForKey:@"smooth2d"]);
+    wc09_set_option(WC09_OPT_LINEAR_FILTER, [Prefs() boolForKey:@"filter"]);
+}
+
+static UIColor* Accent() { return [UIColor colorWithRed:0.29 green:0.64 blue:1.0 alpha:1]; }
+
+@interface SettingsViewController : UITableViewController <UIAdaptivePresentationControllerDelegate>
+@property (nonatomic, copy) void (^onDone)(void);
+@end
+
+@implementation SettingsViewController
+{
+    NSArray<NSDictionary*>* _sections;
+}
+
+- (instancetype)init
+{
+    if ((self = [super initWithStyle:UITableViewStyleInsetGrouped]))
+    {
+        self.title = @"Settings";
+        _sections = @[
+            @{@"title": @"Graphics", @"rows": @[
+                @{@"type": @"seg", @"key": @"scale", @"label": @"Resolution", @"items": @[@"2x", @"3x", @"4x", @"5x", @"6x", @"8x"], @"values": @[@2, @3, @4, @5, @6, @8]},
+                @{@"type": @"seg", @"key": @"filter", @"label": @"Screen filter", @"items": @[@"Smooth", @"Sharp"], @"values": @[@YES, @NO]},
+                @{@"type": @"switch", @"key": @"smooth2d", @"label": @"Smooth 2D graphics"}],
+              @"footer": @"Higher resolution is sharper. 4x looks great on most iPhones; 6x and 8x need a recent one and use more battery. Smooth 2D upscales menus and sprites with smooth edges instead of blocky pixels."},
+            @{@"title": @"Yu-Gi-Oh! 5D's WC2009 HD", @"rows": @[
+                @{@"type": @"switch", @"key": @"hdCards", @"label": @"HD card art"},
+                @{@"type": @"switch", @"key": @"hdText", @"label": @"HD text and menus"}],
+              @"footer": @"Real card images (from the HDCards folder next to the game) and card text redrawn in a clean font."},
+            @{@"title": @"Controls", @"rows": @[
+                @{@"type": @"switch", @"key": @"buttons", @"label": @"On-screen buttons"},
+                @{@"type": @"seg", @"key": @"opacity", @"label": @"Button opacity", @"items": @[@"25%", @"40%", @"55%", @"75%", @"95%"], @"values": @[@0.25f, @0.4f, @0.55f, @0.75f, @0.95f]},
+                @{@"type": @"switch", @"key": @"haptics", @"label": @"Vibration"}],
+              @"footer": @"Game controllers (Xbox, PlayStation, MFi) work as well."},
+            @{@"title": @"Gameplay", @"rows": @[
+                @{@"type": @"switch", @"key": @"resume", @"label": @"Resume where you left off"},
+                @{@"type": @"switch", @"key": @"sound", @"label": @"Sound"},
+                @{@"type": @"seg", @"key": @"ffSpeed", @"label": @"Fast forward speed", @"items": @[@"2x", @"3x", @"4x"], @"values": @[@2, @3, @4]}],
+              @"footer": @"Saves and save states are kept in a Saves folder next to each game, in the same format as the computer version.\n\nCustom cover art: put a .png or .jpg with the same name as the game next to it (or in a Covers folder)."},
+        ];
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    self.navigationController.presentationController.delegate = self;   // swipe down = Done
+}
+
+- (void)done
+{
+    void (^cb)(void) = self.onDone;
+    [self dismissViewControllerAnimated:YES completion:^{ if (cb) cb(); }];
+}
+
+- (void)presentationControllerDidDismiss:(UIPresentationController*)pc { if (self.onDone) self.onDone(); }
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView*)tv { return _sections.count; }
+- (NSInteger)tableView:(UITableView*)tv numberOfRowsInSection:(NSInteger)s { return [_sections[s][@"rows"] count]; }
+- (NSString*)tableView:(UITableView*)tv titleForHeaderInSection:(NSInteger)s { return _sections[s][@"title"]; }
+- (NSString*)tableView:(UITableView*)tv titleForFooterInSection:(NSInteger)s { return _sections[s][@"footer"]; }
+
+- (UITableViewCell*)tableView:(UITableView*)tv cellForRowAtIndexPath:(NSIndexPath*)ip
+{
+    NSDictionary* row = _sections[ip.section][@"rows"][ip.row];
+    UITableViewCell* cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    NSString* key = row[@"key"];
+    if ([row[@"type"] isEqualToString:@"switch"])
+    {
+        cell.textLabel.text = row[@"label"];
+        UISwitch* sw = [[UISwitch alloc] init];
+        sw.on = [Prefs() boolForKey:key];
+        sw.onTintColor = Accent();
+        sw.accessibilityIdentifier = key;
+        [sw addTarget:self action:@selector(switched:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = sw;
+    }
+    else
+    {
+        UILabel* l = [[UILabel alloc] init];
+        l.text = row[@"label"];
+        l.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        UISegmentedControl* seg = [[UISegmentedControl alloc] initWithItems:row[@"items"]];
+        seg.accessibilityIdentifier = [NSString stringWithFormat:@"%ld.%ld", (long)ip.section, (long)ip.row];
+        NSArray* values = row[@"values"];
+        id cur = [Prefs() objectForKey:key];
+        seg.selectedSegmentIndex = 0;
+        for (NSUInteger i = 0; i < values.count; i++)
+            if (fabs([values[i] doubleValue] - [cur doubleValue]) < 0.01) seg.selectedSegmentIndex = i;
+        seg.selectedSegmentTintColor = Accent();
+        [seg setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.blackColor} forState:UIControlStateSelected];
+        [seg addTarget:self action:@selector(segmented:) forControlEvents:UIControlEventValueChanged];
+        UIStackView* st = [[UIStackView alloc] initWithArrangedSubviews:@[l, seg]];
+        st.axis = UILayoutConstraintAxisVertical; st.spacing = 10;
+        st.translatesAutoresizingMaskIntoConstraints = NO;
+        [cell.contentView addSubview:st];
+        UILayoutGuide* g = cell.contentView.layoutMarginsGuide;
+        [NSLayoutConstraint activateConstraints:@[
+            [st.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [st.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
+            [st.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:12],
+            [st.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-12]]];
+    }
+    return cell;
+}
+
+- (void)switched:(UISwitch*)sw
+{
+    [Prefs() setBool:sw.on forKey:sw.accessibilityIdentifier];
+    [NSNotificationCenter.defaultCenter postNotificationName:kSettingsChanged object:sw.accessibilityIdentifier];
+}
+
+- (void)segmented:(UISegmentedControl*)seg
+{
+    NSArray* parts = [seg.accessibilityIdentifier componentsSeparatedByString:@"."];
+    NSDictionary* row = _sections[[parts[0] integerValue]][@"rows"][[parts[1] integerValue]];
+    [Prefs() setObject:row[@"values"][seg.selectedSegmentIndex] forKey:row[@"key"]];
+    [NSNotificationCenter.defaultCenter postNotificationName:kSettingsChanged object:row[@"key"]];
+}
+@end
+
+// ------------------------------------------------------------------------------------------------
+// The game screen
 
 @interface GameViewController : GLKViewController <ControlsDelegate>
+- (instancetype)initWithRom:(NSString*)rom fresh:(BOOL)fresh;
+@property (nonatomic, copy) void (^onClose)(void);
 @end
 
 @implementation GameViewController
 {
     EAGLContext* _ctx;
     ControlsView* _controls;
-    UIView* _setupView;
     Layout _layout;
-    BOOL _started, _paused, _ffwd;
+    NSString* _rom;
+    BOOL _fresh, _started, _paused, _ffwd;
     CFTimeInterval _base;
     long _framesRun;
     AVAudioEngine* _engine;
     AVAudioSourceNode* _source;
-    NSString* _gameDir;
 }
 
-- (NSUserDefaults*)prefs { return NSUserDefaults.standardUserDefaults; }
-- (int)scale { NSInteger s = [self.prefs integerForKey:@"scale"]; return s > 0 ? (int)s : 4; }
-- (BOOL)buttonsOn { return [self.prefs objectForKey:@"buttons"] ? [self.prefs boolForKey:@"buttons"] : YES; }
-- (CGFloat)opacity { return [self.prefs objectForKey:@"opacity"] ? [self.prefs floatForKey:@"opacity"] : 0.55; }
+static std::atomic<bool> gMuted{false};
+
+- (instancetype)initWithRom:(NSString*)rom fresh:(BOOL)fresh
+{
+    if ((self = [super initWithNibName:nil bundle:nil])) { _rom = rom; _fresh = fresh; }
+    return self;
+}
+
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 
 - (void)viewDidLoad
 {
@@ -397,14 +557,18 @@ struct Layout
     _controls.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _controls.delegate = self;
     _controls.layout = &_layout;
-    _controls.showButtons = self.buttonsOn;
-    _controls.opacity = self.opacity;
+    _controls.showButtons = [Prefs() boolForKey:@"buttons"];
+    _controls.opacity = [Prefs() floatForKey:@"opacity"];
+    _controls.haptics = [Prefs() boolForKey:@"haptics"];
     [self.view addSubview:_controls];
 
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(willResign) name:UIApplicationWillResignActiveNotification object:nil];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(didBecomeActive) name:UIApplicationDidBecomeActiveNotification object:nil];
+    NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
+    [nc addObserver:self selector:@selector(willResign) name:UIApplicationWillResignActiveNotification object:nil];
+    [nc addObserver:self selector:@selector(didBecomeActive) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [nc addObserver:self selector:@selector(settingChanged:) name:kSettingsChanged object:nil];
+    gMuted = ![Prefs() boolForKey:@"sound"];
     [self setupAudio];
-    [self tryStart];
+    [self start];
 }
 
 - (BOOL)prefersStatusBarHidden { return YES; }
@@ -414,90 +578,61 @@ struct Layout
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
-    _layout.compute(self.view.bounds.size, self.view.safeAreaInsets, self.buttonsOn);
+    _layout.compute(self.view.bounds.size, self.view.safeAreaInsets, [Prefs() boolForKey:@"buttons"]);
     [_controls setNeedsDisplay];
 }
 
-// ---- finding the game: Documents, or one folder inside it ----
-
-static NSString* FindRomIn(NSString* dir)
+- (void)start
 {
-    for (NSString* f in [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil])
-        if ([f.pathExtension.lowercaseString isEqualToString:@"nds"] && ![f hasPrefix:@"."]) return f;
-    return nil;
-}
-
-- (NSString*)findGameDir
-{
-    NSString* docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    if (FindRomIn(docs)) return docs;
-    for (NSString* f in [NSFileManager.defaultManager contentsOfDirectoryAtPath:docs error:nil])
-    {
-        NSString* p = [docs stringByAppendingPathComponent:f];
-        BOOL isDir = NO;
-        if ([NSFileManager.defaultManager fileExistsAtPath:p isDirectory:&isDir] && isDir && FindRomIn(p)) return p;
-    }
-    return nil;
-}
-
-- (void)tryStart
-{
-    _gameDir = [self findGameDir];
-    if (!_gameDir) { [self showSetup]; return; }
-    [_setupView removeFromSuperview]; _setupView = nil;
-
     [EAGLContext setCurrentContext:_ctx];
     NSString* data = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"wc09"];
     [NSFileManager.defaultManager createDirectoryAtPath:data withIntermediateDirectories:YES attributes:nil error:nil];
-    wc09_init(_gameDir.fileSystemRepresentation, data.fileSystemRepresentation, NSBundle.mainBundle.resourcePath.fileSystemRepresentation);
-    const char* rom = wc09_find_rom();
-    if (!rom[0] || wc09_load_rom(rom, self.scale, 0) != 0)
+    wc09_init(_rom.stringByDeletingLastPathComponent.fileSystemRepresentation, data.fileSystemRepresentation,
+              NSBundle.mainBundle.resourcePath.fileSystemRepresentation);
+    ApplyCoreOptions();
+    if (wc09_load_rom(_rom.fileSystemRepresentation, PrefScale(), 0) != 0)
     {
-        [self alert:@"Couldn't start" message:[NSString stringWithFormat:@"Couldn't load the game in %@", _gameDir.lastPathComponent]];
+        UIAlertController* a = [UIAlertController alertControllerWithTitle:@"Couldn't start the game"
+            message:[NSString stringWithFormat:@"%@ couldn't be loaded.", _rom.lastPathComponent] preferredStyle:UIAlertControllerStyleAlert];
+        __weak GameViewController* me = self;
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me close]; }]];
+        dispatch_async(dispatch_get_main_queue(), ^{ [self presentViewController:a animated:YES completion:nil]; });
         return;
     }
     _started = YES;
-    if (wc09_state_exists(kAutoSlot) && wc09_load_state(kAutoSlot) == 0) [self toast:@"Resumed where you left off"];
+    if (!_fresh && [Prefs() boolForKey:@"resume"] && wc09_state_exists(kAutoSlot) && wc09_load_state(kAutoSlot) == 0)
+        dispatch_async(dispatch_get_main_queue(), ^{ [self toast:@"Resumed where you left off"]; });
     _base = 0;
     [_engine startAndReturnError:nil];
 }
 
-- (void)showSetup
+/** Saves the resume point, shuts the emulator down and goes back to the library. */
+- (void)close
 {
-    if (_setupView) return;
-    UIScrollView* sv = [[UIScrollView alloc] initWithFrame:self.view.bounds];
-    sv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    sv.backgroundColor = UIColor.blackColor;
-    UIStackView* st = [[UIStackView alloc] init];
-    st.axis = UILayoutConstraintAxisVertical; st.spacing = 18; st.alignment = UIStackViewAlignmentFill;
-    st.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel* title = [[UILabel alloc] init];
-    title.text = @"Yu-Gi-Oh! 5D's WC2009 HD";
-    title.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
-    title.textColor = UIColor.whiteColor; title.textAlignment = NSTextAlignmentCenter; title.numberOfLines = 0;
-    UILabel* body = [[UILabel alloc] init];
-    body.numberOfLines = 0;
-    body.textColor = [UIColor colorWithWhite:0.8 alpha:1];
-    body.font = [UIFont systemFontOfSize:16];
-    body.text = @"Add the game to this app:\n\n"
-                 "From a Mac: connect the iPhone, open Finder, click the iPhone, open the Files tab and drag the game folder "
-                 "(the .nds file and the HDCards folder) onto WC2009 HD.\n\n"
-                 "Or on the iPhone: Files app > On My iPhone > WC2009 HD, and put them there.\n\n"
-                 "In-game saves and save states go to a Saves folder next to the game.";
-    UIButton* b = [UIButton buttonWithType:UIButtonTypeSystem];
-    [b setTitle:@"Check again" forState:UIControlStateNormal];
-    b.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
-    [b addTarget:self action:@selector(tryStart) forControlEvents:UIControlEventTouchUpInside];
-    [st addArrangedSubview:title]; [st addArrangedSubview:body]; [st addArrangedSubview:b];
-    [sv addSubview:st];
-    [NSLayoutConstraint activateConstraints:@[
-        [st.leadingAnchor constraintEqualToAnchor:sv.frameLayoutGuide.leadingAnchor constant:28],
-        [st.trailingAnchor constraintEqualToAnchor:sv.frameLayoutGuide.trailingAnchor constant:-28],
-        [st.topAnchor constraintEqualToAnchor:sv.contentLayoutGuide.topAnchor constant:60],
-        [st.bottomAnchor constraintEqualToAnchor:sv.contentLayoutGuide.bottomAnchor constant:-28],
-    ]];
-    [self.view addSubview:sv];
-    _setupView = sv;
+    if (_started)
+    {
+        [EAGLContext setCurrentContext:_ctx];
+        if ([Prefs() boolForKey:@"resume"]) wc09_save_state(kAutoSlot); else wc09_delete_state(kAutoSlot);
+        wc09_flush_save();
+        wc09_shutdown();
+        _started = NO;
+    }
+    [_engine stop];
+    gInput.releaseAll();
+    self.paused = YES;
+    void (^cb)(void) = self.onClose;
+    [self.presentingViewController dismissViewControllerAnimated:YES completion:^{ if (cb) cb(); }];
+}
+
+- (void)settingChanged:(NSNotification*)n
+{
+    NSString* key = n.object;
+    if ([key isEqualToString:@"scale"]) { if (_started) { [EAGLContext setCurrentContext:_ctx]; wc09_set_scale(PrefScale()); } }
+    else if ([@[@"filter", @"smooth2d", @"hdCards", @"hdText"] containsObject:key]) ApplyCoreOptions();
+    else if ([key isEqualToString:@"buttons"]) { _controls.showButtons = [Prefs() boolForKey:@"buttons"]; [self.view setNeedsLayout]; }
+    else if ([key isEqualToString:@"opacity"]) { _controls.opacity = [Prefs() floatForKey:@"opacity"]; [_controls setNeedsDisplay]; }
+    else if ([key isEqualToString:@"haptics"]) _controls.haptics = [Prefs() boolForKey:@"haptics"];
+    else if ([key isEqualToString:@"sound"]) gMuted = ![Prefs() boolForKey:@"sound"];
 }
 
 // ---- audio ----
@@ -514,14 +649,15 @@ static NSString* FindRomIn(NSString* dir)
         static float last[2] = {0, 0};
         int n = (int)MIN(frames, (AVAudioFrameCount)4096);
         int got = wc09_audio_read(tmp, n);
+        bool mute = gMuted;
         float* L = (float*)abl->mBuffers[0].mData;
         float* R = abl->mNumberBuffers > 1 ? (float*)abl->mBuffers[1].mData : nullptr;
         for (int i = 0; i < (int)frames; i++)
         {
             if (i < got) { last[0] = tmp[i * 2] / 32768.f; last[1] = tmp[i * 2 + 1] / 32768.f; }
             else { last[0] *= 0.94f; last[1] *= 0.94f; }
-            L[i] = last[0];
-            if (R) R[i] = last[1];
+            L[i] = mute ? 0 : last[0];
+            if (R) R[i] = mute ? 0 : last[1];
         }
         return noErr;
     }];
@@ -538,7 +674,7 @@ static NSString* FindRomIn(NSString* dir)
     if (!_started || _paused) return;
     [EAGLContext setCurrentContext:_ctx];
     int run;
-    if (_ffwd) run = 3;
+    if (_ffwd) run = (int)MAX(2, MIN(4, [Prefs() integerForKey:@"ffSpeed"]));
     else
     {
         CFTimeInterval now = CACurrentMediaTime();
@@ -575,14 +711,14 @@ static NSString* FindRomIn(NSString* dir)
     gInput.releaseAll();
     [_controls releaseAll];
     [EAGLContext setCurrentContext:_ctx];
-    wc09_save_state(kAutoSlot);
+    if ([Prefs() boolForKey:@"resume"]) wc09_save_state(kAutoSlot);
     wc09_flush_save();
     [_engine pause];
 }
 
 - (void)didBecomeActive
 {
-    if (!_started) { [self tryStart]; return; }
+    if (!_started) return;
     _base = 0;
     [_engine startAndReturnError:nil];
 }
@@ -591,8 +727,7 @@ static NSString* FindRomIn(NSString* dir)
 
 - (void)pollControllers
 {
-    GCController* c = GCController.controllers.firstObject;
-    GCExtendedGamepad* g = c.extendedGamepad;
+    GCExtendedGamepad* g = GCController.controllers.firstObject.extendedGamepad;
     if (!g) return;
     unsigned k = 0;
     if (g.buttonA.pressed) k |= WC09_KEY_A;
@@ -606,7 +741,7 @@ static NSString* FindRomIn(NSString* dir)
     float x = g.dpad.xAxis.value + g.leftThumbstick.xAxis.value, y = g.dpad.yAxis.value + g.leftThumbstick.yAxis.value;
     if (x < -0.5f) k |= WC09_KEY_LEFT;
     if (x > 0.5f) k |= WC09_KEY_RIGHT;
-    if (y > 0.5f) k |= WC09_KEY_UP;     // GameController: up is positive
+    if (y > 0.5f) k |= WC09_KEY_UP;
     if (y < -0.5f) k |= WC09_KEY_DOWN;
     gInput.setPadKeys(k);
 }
@@ -621,21 +756,29 @@ static NSString* FindRomIn(NSString* dir)
 {
     if (!_started) return;
     _paused = YES;
-    UIAlertController* m = [UIAlertController alertControllerWithTitle:@"WC2009 HD" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController* m = [UIAlertController alertControllerWithTitle:_rom.lastPathComponent.stringByDeletingPathExtension message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak GameViewController* me = self;
-    [m addAction:[UIAlertAction actionWithTitle:@"Save state…" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:YES]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Load state…" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:NO]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Resolution: %dx", self.scale] style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me scaleMenu]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:(self.buttonsOn ? @"Hide buttons" : @"Show buttons") style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me toggleButtons]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Button opacity" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me opacityMenu]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Restart from in-game save" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) { [me restartAsk]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Back to the game" style:UIAlertActionStyleCancel handler:^(UIAlertAction*) { [me resume]; }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Save state" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:YES]; }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Load state" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:NO]; }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me openSettings]; }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Restart from in-game save" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me restartAsk]; }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Back to library" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) { [me close]; }]];
+    [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction*) { [me resume]; }]];
     [self present:m];
+}
+
+- (void)openSettings
+{
+    SettingsViewController* s = [[SettingsViewController alloc] init];
+    __weak GameViewController* me = self;
+    s.onDone = ^{ [me resume]; };
+    UINavigationController* nav = [[UINavigationController alloc] initWithRootViewController:s];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)present:(UIAlertController*)a
 {
-    if (a.popoverPresentationController)   // iPad
+    if (a.popoverPresentationController)
     {
         a.popoverPresentationController.sourceView = self.view;
         a.popoverPresentationController.sourceRect = _layout.menu;
@@ -649,7 +792,7 @@ static NSString* FindRomIn(NSString* dir)
     __weak GameViewController* me = self;
     for (int i = 1; i <= 8; i++)
     {
-        NSString* t = [NSString stringWithFormat:@"Slot %d%@", i, wc09_state_exists(i) ? @"" : @"  (empty)"];
+        NSString* t = [NSString stringWithFormat:@"Slot %d%@", i, wc09_state_exists(i) ? @"" : @"   (empty)"];
         [m addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
             GameViewController* s = me;
             if (!s) return;
@@ -664,58 +807,10 @@ static NSString* FindRomIn(NSString* dir)
     [self present:m];
 }
 
-- (void)scaleMenu
-{
-    UIAlertController* m = [UIAlertController alertControllerWithTitle:@"Resolution" message:@"Higher is sharper but needs a faster iPhone." preferredStyle:UIAlertControllerStyleActionSheet];
-    __weak GameViewController* me = self;
-    int scales[] = {2, 3, 4, 5, 6, 8};
-    for (int s : scales)
-    {
-        NSString* t = [NSString stringWithFormat:@"%dx%@%@", s, s == 4 ? @" (recommended)" : @"", s == self.scale ? @"  ✓" : @""];
-        [m addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
-            GameViewController* g = me;
-            if (!g) return;
-            [g.prefs setInteger:s forKey:@"scale"];
-            [EAGLContext setCurrentContext:g->_ctx];
-            wc09_set_scale(s);
-            [g resume];
-        }]];
-    }
-    [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction*) { [me resume]; }]];
-    [self present:m];
-}
-
-- (void)toggleButtons
-{
-    BOOL on = !self.buttonsOn;
-    [self.prefs setBool:on forKey:@"buttons"];
-    _controls.showButtons = on;
-    [self.view setNeedsLayout];
-    [self resume];
-}
-
-- (void)opacityMenu
-{
-    UIAlertController* m = [UIAlertController alertControllerWithTitle:@"Button opacity" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    __weak GameViewController* me = self;
-    float vals[] = {0.25f, 0.4f, 0.55f, 0.75f, 0.95f};
-    for (float v : vals)
-        [m addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%d%%", (int)lroundf(v * 100)] style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
-            GameViewController* g = me;
-            if (!g) return;
-            [g.prefs setFloat:v forKey:@"opacity"];
-            g->_controls.opacity = v;
-            [g->_controls setNeedsDisplay];
-            [g resume];
-        }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction*) { [me resume]; }]];
-    [self present:m];
-}
-
 - (void)restartAsk
 {
     UIAlertController* a = [UIAlertController alertControllerWithTitle:@"Restart the game?"
-        message:@"Starts again from your last in-game save. Anything after that save is lost (save states stay)."
+        message:@"Starts again from your last in-game save. Anything after it is lost (save states are kept)."
         preferredStyle:UIAlertControllerStyleAlert];
     __weak GameViewController* me = self;
     [a addAction:[UIAlertAction actionWithTitle:@"Restart" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) {
@@ -723,19 +818,11 @@ static NSString* FindRomIn(NSString* dir)
         if (!g) return;
         [EAGLContext setCurrentContext:g->_ctx];
         wc09_delete_state(kAutoSlot);
-        const char* rom = wc09_find_rom();
-        if (rom[0]) wc09_load_rom(rom, g.scale, 0);
+        wc09_load_rom(g->_rom.fileSystemRepresentation, PrefScale(), 0);
         [g resume];
     }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction*) { [me resume]; }]];
     [self presentViewController:a animated:YES completion:nil];
-}
-
-- (void)alert:(NSString*)title message:(NSString*)msg
-{
-    UIAlertController* a = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-    dispatch_async(dispatch_get_main_queue(), ^{ [self presentViewController:a animated:YES completion:nil]; });
 }
 
 - (void)toast:(NSString*)text
@@ -753,6 +840,322 @@ static NSString* FindRomIn(NSString* dir)
 @end
 
 // ------------------------------------------------------------------------------------------------
+// The library: every .nds in Documents (and one folder deep), most recently played first
+
+@interface GameEntry : NSObject
+@property (nonatomic, copy) NSString *path, *title, *publisher, *base;
+@property (nonatomic, strong) UIImage *icon, *cover;
+@property (nonatomic, strong) UIColor* tint;
+@property (nonatomic) BOOL resume;
+@property (nonatomic) double lastPlayed;
+@end
+@implementation GameEntry
+@end
+
+static NSString* PrettyTitle(NSString* s)
+{
+    NSMutableArray* words = [NSMutableArray array];
+    for (NSString* w in [s componentsSeparatedByString:@" "])
+    {
+        BOOL caps = w.length > 3 && [w isEqualToString:w.uppercaseString] && ![w isEqualToString:w.lowercaseString];
+        [words addObject:caps ? [[w substringToIndex:1] stringByAppendingString:[w substringFromIndex:1].lowercaseString] : w];
+    }
+    return [words componentsJoinedByString:@" "];
+}
+
+static GameEntry* LoadEntry(NSString* path)
+{
+    GameEntry* g = [GameEntry new];
+    g.path = path;
+    g.base = path.lastPathComponent.stringByDeletingPathExtension;
+    char title[512];
+    unsigned char px[32 * 32 * 4];
+    NSArray<NSString*>* lines = @[];
+    if (wc09_rom_info(path.fileSystemRepresentation, title, sizeof(title), px) == 0)
+        lines = [[NSString stringWithUTF8String:title] componentsSeparatedByString:@"\n"];
+    if (lines.count >= 2)
+    {
+        g.title = PrettyTitle([[lines subarrayWithRange:NSMakeRange(0, lines.count - 1)] componentsJoinedByString:@" "]);
+        g.publisher = lines.lastObject;
+    }
+    else { g.title = lines.count == 1 && lines[0].length ? PrettyTitle(lines[0]) : g.base; g.publisher = @""; }
+
+    // icon -> UIImage, and its average colour for the tile background
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef bc = CGBitmapContextCreate(px, 32, 32, 8, 128, cs, kCGImageAlphaPremultipliedLast);
+    long r = 0, gg = 0, b = 0, n = 0;
+    for (int i = 0; i < 32 * 32; i++)
+        if (px[i * 4 + 3]) { r += px[i * 4]; gg += px[i * 4 + 1]; b += px[i * 4 + 2]; n++; }
+    CGImageRef img = CGBitmapContextCreateImage(bc);
+    g.icon = [UIImage imageWithCGImage:img];
+    CGImageRelease(img); CGContextRelease(bc); CGColorSpaceRelease(cs);
+    g.tint = n ? [UIColor colorWithRed:r / n / 255.0 green:gg / n / 255.0 blue:b / n / 255.0 alpha:1] : [UIColor colorWithRed:0.16 green:0.2 blue:0.27 alpha:1];
+
+    NSString* dir = path.stringByDeletingLastPathComponent;
+    for (NSString* d in @[dir, [dir stringByAppendingPathComponent:@"Covers"]])
+        for (NSString* ext in @[@"png", @"jpg", @"jpeg", @"heic"])
+        {
+            if (g.cover) break;
+            NSString* f = [[d stringByAppendingPathComponent:g.base] stringByAppendingPathExtension:ext];
+            UIImage* im = [UIImage imageWithContentsOfFile:f];
+            if (im) g.cover = [im imageByPreparingThumbnailOfSize:CGSizeMake(512, 512 * im.size.height / MAX(1.0, im.size.width))] ?: im;
+        }
+    g.resume = [NSFileManager.defaultManager fileExistsAtPath:[[dir stringByAppendingPathComponent:@"Saves"] stringByAppendingPathComponent:[g.base stringByAppendingString:@".ml0"]]];
+    g.lastPlayed = [Prefs() doubleForKey:[@"played:" stringByAppendingString:path.lastPathComponent]];
+    return g;
+}
+
+@interface GameCell : UICollectionViewCell
+@property (nonatomic, strong) GameEntry* game;
+@end
+
+@implementation GameCell
+{
+    UIView* _art;
+    CAGradientLayer* _grad;
+    UIImageView *_icon, *_cover;
+    UILabel *_title, *_sub, *_badge;
+}
+
+- (instancetype)initWithFrame:(CGRect)f
+{
+    if ((self = [super initWithFrame:f]))
+    {
+        self.contentView.backgroundColor = [UIColor colorWithRed:0.082 green:0.106 blue:0.153 alpha:1];
+        self.contentView.layer.cornerRadius = 16;
+        self.contentView.layer.cornerCurve = kCACornerCurveContinuous;
+        self.contentView.clipsToBounds = YES;
+        _art = [UIView new];
+        _grad = [CAGradientLayer layer];
+        _grad.startPoint = CGPointMake(0, 0); _grad.endPoint = CGPointMake(1, 1);
+        [_art.layer addSublayer:_grad];
+        _art.clipsToBounds = YES;
+        _icon = [UIImageView new];
+        _icon.layer.magnificationFilter = kCAFilterNearest;
+        _icon.layer.shadowColor = UIColor.blackColor.CGColor; _icon.layer.shadowOpacity = 0.4; _icon.layer.shadowRadius = 8; _icon.layer.shadowOffset = CGSizeMake(0, 4);
+        _cover = [UIImageView new];
+        _cover.contentMode = UIViewContentModeScaleAspectFill;
+        _cover.clipsToBounds = YES;
+        [_art addSubview:_icon]; [_art addSubview:_cover];
+        _title = [UILabel new];
+        _title.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+        _title.textColor = UIColor.whiteColor; _title.numberOfLines = 2;
+        _sub = [UILabel new];
+        _sub.font = [UIFont systemFontOfSize:12.5];
+        _sub.textColor = [UIColor colorWithRed:0.6 green:0.65 blue:0.72 alpha:1];
+        _badge = [UILabel new];
+        _badge.text = @"RESUME";
+        _badge.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold];
+        _badge.textColor = Accent(); _badge.textAlignment = NSTextAlignmentCenter;
+        _badge.backgroundColor = [UIColor colorWithRed:0.04 green:0.055 blue:0.086 alpha:0.9];
+        _badge.layer.cornerRadius = 11; _badge.clipsToBounds = YES;
+        for (UIView* v in @[_art, _title, _sub, _badge]) [self.contentView addSubview:v];
+    }
+    return self;
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+    CGFloat w = self.contentView.bounds.size.width;
+    _art.frame = CGRectMake(0, 0, w, w);
+    _grad.frame = _art.bounds;
+    _cover.frame = _art.bounds;
+    CGFloat s = floor(w * 0.56 / 32) * 32;
+    if (s < 32) s = w * 0.56;
+    _icon.frame = CGRectMake((w - s) / 2, (w - s) / 2, s, s);
+    _title.frame = CGRectMake(12, w + 9, w - 24, 40);
+    [_title sizeToFit];
+    _title.frame = CGRectMake(12, w + 9, w - 24, _title.frame.size.height);
+    _sub.frame = CGRectMake(12, CGRectGetMaxY(_title.frame) + 2, w - 24, 16);
+    _badge.frame = CGRectMake(w - 8 - 64, 8, 64, 22);
+}
+
+static UIColor* Mix(UIColor* a, UIColor* b, CGFloat t)
+{
+    CGFloat r1, g1, b1, a1, r2, g2, b2, a2;
+    [a getRed:&r1 green:&g1 blue:&b1 alpha:&a1]; [b getRed:&r2 green:&g2 blue:&b2 alpha:&a2];
+    return [UIColor colorWithRed:r1 + (r2 - r1) * t green:g1 + (g2 - g1) * t blue:b1 + (b2 - b1) * t alpha:1];
+}
+
+- (void)setGame:(GameEntry*)g
+{
+    _game = g;
+    UIColor* bg = [UIColor colorWithRed:0.04 green:0.055 blue:0.086 alpha:1];
+    _grad.colors = @[(id)Mix(g.tint, bg, 0.45).CGColor, (id)Mix(g.tint, bg, 0.8).CGColor];
+    _icon.image = g.icon;
+    _cover.image = g.cover;
+    _cover.hidden = g.cover == nil;
+    _icon.hidden = g.cover != nil;
+    _title.text = g.title;
+    _sub.text = g.publisher;
+    _badge.hidden = !g.resume;
+    [self setNeedsLayout];
+}
+
+- (void)setHighlighted:(BOOL)h
+{
+    [super setHighlighted:h];
+    [UIView animateWithDuration:0.15 animations:^{ self.transform = h ? CGAffineTransformMakeScale(0.96, 0.96) : CGAffineTransformIdentity; }];
+}
+@end
+
+@interface LibraryViewController : UICollectionViewController
+@end
+
+@implementation LibraryViewController
+{
+    NSArray<GameEntry*>* _games;
+    UILabel* _empty;
+}
+
+static UICollectionViewLayout* GridLayout()
+{
+    return [[UICollectionViewCompositionalLayout alloc] initWithSectionProvider:^NSCollectionLayoutSection*(NSInteger s, id<NSCollectionLayoutEnvironment> env) {
+        CGFloat w = env.container.effectiveContentSize.width;
+        NSInteger cols = MAX(2, (NSInteger)((w - 32) / 170));
+        CGFloat cellW = (w - 32 - (cols - 1) * 14) / cols;
+        NSCollectionLayoutSize* is = [NSCollectionLayoutSize sizeWithWidthDimension:[NSCollectionLayoutDimension absoluteDimension:cellW]
+                                                                    heightDimension:[NSCollectionLayoutDimension absoluteDimension:cellW + 72]];
+        NSCollectionLayoutItem* item = [NSCollectionLayoutItem itemWithLayoutSize:is];
+        NSCollectionLayoutSize* gs = [NSCollectionLayoutSize sizeWithWidthDimension:[NSCollectionLayoutDimension fractionalWidthDimension:1]
+                                                                    heightDimension:[NSCollectionLayoutDimension absoluteDimension:cellW + 72]];
+        NSCollectionLayoutGroup* group = [NSCollectionLayoutGroup horizontalGroupWithLayoutSize:gs repeatingSubitem:item count:cols];
+        group.interItemSpacing = [NSCollectionLayoutSpacing fixedSpacing:14];
+        NSCollectionLayoutSection* sec = [NSCollectionLayoutSection sectionWithGroup:group];
+        sec.interGroupSpacing = 16;
+        sec.contentInsets = NSDirectionalEdgeInsetsMake(8, 16, 24, 16);
+        return sec;
+    }];
+}
+
+- (instancetype)init { return [super initWithCollectionViewLayout:GridLayout()]; }
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    self.title = @"Library";
+    self.navigationController.navigationBar.prefersLargeTitles = YES;
+    self.collectionView.backgroundColor = [UIColor colorWithRed:0.04 green:0.055 blue:0.086 alpha:1];
+    [self.collectionView registerClass:GameCell.class forCellWithReuseIdentifier:@"g"];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"]
+                                                                              style:UIBarButtonItemStylePlain target:self action:@selector(openSettings)];
+    UIRefreshControl* rc = [UIRefreshControl new];
+    [rc addTarget:self action:@selector(pulled:) forControlEvents:UIControlEventValueChanged];
+    self.collectionView.refreshControl = rc;
+    _empty = [UILabel new];
+    _empty.numberOfLines = 0; _empty.textAlignment = NSTextAlignmentCenter;
+    _empty.textColor = [UIColor colorWithRed:0.6 green:0.65 blue:0.72 alpha:1];
+    _empty.font = [UIFont systemFontOfSize:16];
+    _empty.text = @"No games yet\n\n"
+                   "From a Mac: plug in the iPhone, open Finder, click the iPhone, open the Files tab and drag your .nds files "
+                   "(and for Yu-Gi-Oh! 5D's WC2009, its HDCards folder) onto WC2009 HD.\n\n"
+                   "Or use the Files app: On My iPhone > WC2009 HD.\n\n"
+                   "Custom cover art: add a .png or .jpg with the same name as the game.";
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [self reload];
+}
+
+- (UIStatusBarStyle)preferredStatusBarStyle { return UIStatusBarStyleLightContent; }
+
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self reload]; }
+
+- (void)pulled:(UIRefreshControl*)rc { [self reload]; [rc endRefreshing]; }
+
+- (void)reload
+{
+    NSString* docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSMutableArray<NSString*>* roms = [NSMutableArray array];
+        NSFileManager* fm = NSFileManager.defaultManager;
+        void (^scan)(NSString*) = ^(NSString* dir) {
+            for (NSString* f in [fm contentsOfDirectoryAtPath:dir error:nil])
+                if ([f.pathExtension.lowercaseString isEqualToString:@"nds"] && ![f hasPrefix:@"."]) [roms addObject:[dir stringByAppendingPathComponent:f]];
+        };
+        scan(docs);
+        for (NSString* f in [fm contentsOfDirectoryAtPath:docs error:nil])
+        {
+            NSString* p = [docs stringByAppendingPathComponent:f];
+            BOOL isDir = NO;
+            if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir && ![@[@"Saves", @"HDCards", @"Covers"] containsObject:f]) scan(p);
+        }
+        NSMutableArray<GameEntry*>* games = [NSMutableArray array];
+        for (NSString* r in roms) [games addObject:LoadEntry(r)];
+        [games sortUsingComparator:^NSComparisonResult(GameEntry* a, GameEntry* b) {
+            if (a.lastPlayed != b.lastPlayed) return a.lastPlayed > b.lastPlayed ? NSOrderedAscending : NSOrderedDescending;
+            return [a.title localizedCaseInsensitiveCompare:b.title];
+        }];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self->_games = games;
+            [self.collectionView reloadData];
+            self.collectionView.backgroundView = games.count ? nil : [self emptyView];
+        });
+    });
+}
+
+- (UIView*)emptyView
+{
+    UIView* v = [UIView new];
+    _empty.translatesAutoresizingMaskIntoConstraints = NO;
+    [v addSubview:_empty];
+    [NSLayoutConstraint activateConstraints:@[
+        [_empty.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:32],
+        [_empty.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-32],
+        [_empty.centerYAnchor constraintEqualToAnchor:v.centerYAnchor constant:-40]]];
+    return v;
+}
+
+- (NSInteger)collectionView:(UICollectionView*)cv numberOfItemsInSection:(NSInteger)s { return _games.count; }
+
+- (UICollectionViewCell*)collectionView:(UICollectionView*)cv cellForItemAtIndexPath:(NSIndexPath*)ip
+{
+    GameCell* c = [cv dequeueReusableCellWithReuseIdentifier:@"g" forIndexPath:ip];
+    c.game = _games[ip.item];
+    return c;
+}
+
+- (void)collectionView:(UICollectionView*)cv didSelectItemAtIndexPath:(NSIndexPath*)ip { [self play:_games[ip.item] fresh:NO]; }
+
+- (UIContextMenuConfiguration*)collectionView:(UICollectionView*)cv contextMenuConfigurationForItemAtIndexPath:(NSIndexPath*)ip point:(CGPoint)p
+{
+    GameEntry* g = _games[ip.item];
+    __weak LibraryViewController* me = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu*(NSArray<UIMenuElement*>*) {
+        NSMutableArray* items = [NSMutableArray arrayWithObject:[UIAction actionWithTitle:@"Play" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(UIAction*) { [me play:g fresh:NO]; }]];
+        if (g.resume)
+        {
+            [items addObject:[UIAction actionWithTitle:@"Start from in-game save" image:[UIImage systemImageNamed:@"arrow.counterclockwise"] identifier:nil handler:^(UIAction*) { [me play:g fresh:YES]; }]];
+            UIAction* del = [UIAction actionWithTitle:@"Remove resume point" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction*) {
+                NSString* f = [[[g.path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"Saves"] stringByAppendingPathComponent:g.base] stringByAppendingString:@".ml0"];
+                [NSFileManager.defaultManager removeItemAtPath:f error:nil];
+                [me reload];
+            }];
+            del.attributes = UIMenuElementAttributesDestructive;
+            [items addObject:del];
+        }
+        return [UIMenu menuWithTitle:g.title children:items];
+    }];
+}
+
+- (void)play:(GameEntry*)g fresh:(BOOL)fresh
+{
+    [Prefs() setDouble:NSDate.date.timeIntervalSince1970 forKey:[@"played:" stringByAppendingString:g.path.lastPathComponent]];
+    GameViewController* vc = [[GameViewController alloc] initWithRom:g.path fresh:fresh];
+    vc.modalPresentationStyle = UIModalPresentationFullScreen;
+    vc.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+    __weak LibraryViewController* me = self;
+    vc.onClose = ^{ [me reload]; };
+    [self presentViewController:vc animated:YES completion:nil];
+}
+
+- (void)openSettings
+{
+    UINavigationController* nav = [[UINavigationController alloc] initWithRootViewController:[SettingsViewController new]];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+@end
+
+// ------------------------------------------------------------------------------------------------
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow* window;
@@ -761,8 +1164,13 @@ static NSString* FindRomIn(NSString* dir)
 @implementation AppDelegate
 - (BOOL)application:(UIApplication*)app didFinishLaunchingWithOptions:(NSDictionary*)opts
 {
+    RegisterDefaults();
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    self.window.rootViewController = [[GameViewController alloc] init];
+    self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    self.window.tintColor = Accent();
+    UINavigationController* nav = [[UINavigationController alloc] initWithRootViewController:[LibraryViewController new]];
+    nav.navigationBar.prefersLargeTitles = YES;
+    self.window.rootViewController = nav;
     self.window.backgroundColor = UIColor.blackColor;
     [self.window makeKeyAndVisible];
     return YES;

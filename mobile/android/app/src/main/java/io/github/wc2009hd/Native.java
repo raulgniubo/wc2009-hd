@@ -27,6 +27,13 @@ final class Native {
     static native int audioQueued();
     static native void audioStart();
     static native void audioStop();
+    static native void setMuted(boolean muted);
+    static native void shutdown();
+    static native void setOption(int option, int value);
+    /** "title\nsubtitle\npublisher" from the ROM's banner, icon into argb (32x32); null if unreadable */
+    static native String romInfo(String path, int[] argb);
+
+    static final int OPT_HD_CARDS = 0, OPT_HD_TEXT = 1, OPT_SMOOTH_2D = 2, OPT_LINEAR_FILTER = 3;
 
     private Native() {}
 }

@@ -62,6 +62,13 @@ int main(int argc, char** argv)
             wc09_gl_reset();
             fprintf(stderr, "context replaced at frame %d\n", f);
         }
+        if (f == frames / 2 && getenv("WC09_RELOAD"))
+        {
+            // back to the library and into the game again
+            wc09_shutdown();
+            if (wc09_load_rom(rom, scale, 1) || (state[0] && strcmp(state, "-") && wc09_load_state_file(state))) { fprintf(stderr, "reload failed\n"); return 8; }
+            fprintf(stderr, "reloaded at frame %d\n", f);
+        }
         if (keys.count(f)) wc09_set_keys(keys[f]);
         if (taps.count(f)) wc09_touch(1, taps[f].first, taps[f].second);
         if (taps.count(f - 3)) wc09_touch(0, 0, 0);

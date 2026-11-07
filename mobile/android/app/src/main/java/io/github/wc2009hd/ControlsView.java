@@ -21,6 +21,7 @@ final class ControlsView extends View {
     private boolean showButtons = true;
     private float opacity = 0.6f;
     private boolean ffwdOn;
+    private boolean haptics = true;
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -45,6 +46,7 @@ final class ControlsView extends View {
     void setShowButtons(boolean on) { showButtons = on; invalidate(); }
     void setOpacity(float o) { opacity = o; invalidate(); }
     void setFastForward(boolean on) { ffwdOn = on; invalidate(); }
+    void setHaptics(boolean on) { haptics = on; }
 
     // ---- input ----
 
@@ -146,7 +148,7 @@ final class ControlsView extends View {
     private void updateKeys() {
         int k = 0;
         for (int i = 0; i < held.size(); i++) if (held.valueAt(i) > 0) k |= held.valueAt(i);
-        if ((k & ~lastKeys) != 0) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        if (haptics && (k & ~lastKeys) != 0) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         if (k != lastKeys) { lastKeys = k; input.setScreenKeys(k); invalidate(); }
     }
 

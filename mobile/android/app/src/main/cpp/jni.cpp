@@ -7,6 +7,7 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
+#include <atomic>
 #include "wc09_core.h"
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "WC09", __VA_ARGS__)
@@ -25,11 +26,13 @@ std::string JStr(JNIEnv* env, jstring s)
 std::mutex StreamLock;
 AAudioStream* Stream = nullptr;
 short LastSample[2] = {0, 0};
+std::atomic<bool> Muted{false};
 
 aaudio_data_callback_result_t AudioCallback(AAudioStream*, void*, void* data, int32_t frames)
 {
     short* out = (short*)data;
     int got = wc09_audio_read(out, frames);
+    if (Muted) { memset(out, 0, (size_t)frames * 4); LastSample[0] = LastSample[1] = 0; return AAUDIO_CALLBACK_RESULT_CONTINUE; }
     if (got > 0) { LastSample[0] = out[got * 2 - 2]; LastSample[1] = out[got * 2 - 1]; }
     // not enough yet: fade the last sample out instead of clicking to zero
     for (int i = got; i < frames; i++)
@@ -112,3 +115,20 @@ FN(void, glReset)(JNIEnv*, jclass) { wc09_gl_reset(); }
 FN(jint, audioQueued)(JNIEnv*, jclass) { return wc09_audio_queued(); }
 FN(void, audioStart)(JNIEnv*, jclass) { std::lock_guard<std::mutex> lk(StreamLock); if (!Stream) OpenStream(); }
 FN(void, audioStop)(JNIEnv*, jclass) { std::lock_guard<std::mutex> lk(StreamLock); CloseStream(); }
+FN(void, setMuted)(JNIEnv*, jclass, jboolean m) { Muted = m; }
+FN(void, shutdown)(JNIEnv*, jclass) { wc09_shutdown(); }
+FN(void, setOption)(JNIEnv*, jclass, jint o, jint v) { wc09_set_option(o, v); }
+FN(jstring, romInfo)(JNIEnv* env, jclass, jstring path, jintArray argb)
+{
+    char title[512];
+    unsigned char px[32 * 32 * 4];
+    if (wc09_rom_info(JStr(env, path).c_str(), title, sizeof(title), px) != 0) return nullptr;
+    if (argb && env->GetArrayLength(argb) >= 32 * 32)
+    {
+        jint out[32 * 32];
+        for (int i = 0; i < 32 * 32; i++)
+            out[i] = (jint)((unsigned)px[i * 4 + 3] << 24 | (unsigned)px[i * 4] << 16 | (unsigned)px[i * 4 + 1] << 8 | px[i * 4 + 2]);
+        env->SetIntArrayRegion(argb, 0, 32 * 32, out);
+    }
+    return env->NewStringUTF(title);
+}

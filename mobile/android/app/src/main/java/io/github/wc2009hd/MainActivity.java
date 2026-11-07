@@ -7,14 +7,12 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
-import android.text.method.LinkMovementMethod;
 import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.KeyEvent;
@@ -24,7 +22,6 @@ import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -38,54 +35,65 @@ import java.io.OutputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-public final class MainActivity extends Activity implements GameView.Host, ControlsView.Listener {
+public final class MainActivity extends Activity
+        implements GameView.Host, ControlsView.Listener, LibraryView.Listener, SettingsView.Listener {
     private static final int REQ_FOLDER = 1, REQ_PERMS = 2;
-    private static final int AUTO_SLOT = 0;   // "resume where you left off" state
+    private static final int AUTO_SLOT = 0;   // the resume point
 
     private SharedPreferences prefs;
     private final Layout layout = new Layout();
     private final Input input = new Input();
+    private FrameLayout root;
+
+    private enum Screen { SETUP, LIBRARY, SETTINGS, GAME }
+    private Screen screen = Screen.SETUP;
+    private LibraryView library;
+    private SettingsView settings;      // over the library or over the game
     private GameView game;
     private ControlsView controls;
-    private FrameLayout root;
-    private boolean inGame;
+    private File currentRom;
+    private boolean freshStart;
 
-    // ---------------------------------------------------------------- lifecycle
+    // ================================================================ lifecycle
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         prefs = getSharedPreferences("wc09", MODE_PRIVATE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().setStatusBarColor(Ui.BG);
+        getWindow().setNavigationBarColor(Ui.BG);
         root = new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
+        root.setBackgroundColor(Ui.BG);
         setContentView(root);
         copyFonts();
-        showSetupOrGame();
+        route();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        hideSystemBars();
-        if (inGame) {
+        applySystemBars();
+        if (game != null) {
             prefs.edit().putBoolean("running", true).apply();
             game.onResume();
-            game.setPaused(false);
-            Native.audioStart();
-        } else {
-            showSetupOrGame();   // came back from the permission screen
+            if (settings == null) game.setPaused(false);
+            if (SettingsView.on(prefs, "sound")) Native.audioStart();
+        } else if (screen == Screen.SETUP) {
+            route();   // back from the permission screen
+        } else if (screen == Screen.LIBRARY && library != null) {
+            library.load(gameDir());   // games may have been added
         }
     }
 
     @Override
     protected void onPause() {
-        if (inGame) {
+        if (game != null) {
             game.setPaused(true);
             input.releaseAll();
             Native.audioStop();
-            // remember where we are (the process may be killed in the background)
-            runOnGlAndWait(() -> { Native.saveState(AUTO_SLOT); Native.flushSave(); });
+            boolean resume = SettingsView.on(prefs, "resume");
+            runOnGlAndWait(() -> { if (resume) Native.saveState(AUTO_SLOT); Native.flushSave(); });
             prefs.edit().putBoolean("running", false).apply();
             game.onPause();
         }
@@ -95,132 +103,143 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
     @Override
     public void onWindowFocusChanged(boolean focus) {
         super.onWindowFocusChanged(focus);
-        if (focus) hideSystemBars();
+        if (focus) applySystemBars();
     }
 
-    private void hideSystemBars() {
+    /** Full screen while playing; normal bars in the library and settings. */
+    private void applySystemBars() {
+        boolean full = game != null;
         if (Build.VERSION.SDK_INT >= 30) {
             WindowInsetsController c = getWindow().getInsetsController();
-            if (c != null) {
+            if (c == null) return;
+            if (full) {
                 c.hide(WindowInsets.Type.systemBars());
                 c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            } else {
+                c.show(WindowInsets.Type.systemBars());
             }
         } else {
-            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            getWindow().getDecorView().setSystemUiVisibility(full ? View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                     | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN : 0);
         }
     }
 
     private void runOnGlAndWait(Runnable r) {
+        if (game == null) { r.run(); return; }
         CountDownLatch done = new CountDownLatch(1);
         game.queueEvent(() -> { try { r.run(); } finally { done.countDown(); } });
         try { done.await(3, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
     }
 
-    // ---------------------------------------------------------------- setup screen
+    @Override
+    public void onBackPressed() {
+        if (settings != null) closeSettings();
+        else if (game != null) onMenu();
+        else super.onBackPressed();
+    }
+
+    // ================================================================ routing
+
+    private String gameDir() { return prefs.getString("gameDir", ""); }
 
     private boolean hasFileAccess() {
         if (Build.VERSION.SDK_INT >= 30) return Environment.isExternalStorageManager();
         return checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
     }
 
-    private String gameDir() { return prefs.getString("gameDir", ""); }
-
-    private static File findRom(String dir) {
-        File[] fs = new File(dir).listFiles();
-        if (fs == null) return null;
-        for (File f : fs)
-            if (f.isFile() && f.getName().toLowerCase().endsWith(".nds") && !f.getName().startsWith(".")) return f;
-        return null;
-    }
-
-    private void showSetupOrGame() {
-        if (inGame) return;
-        if (hasFileAccess() && !gameDir().isEmpty() && findRom(gameDir()) != null) startGameView();
+    private void route() {
+        if (game != null) return;
+        if (hasFileAccess() && !gameDir().isEmpty() && new File(gameDir()).isDirectory()) showLibrary();
         else showSetup();
     }
 
-    private void showSetup() {
+    private void showLibrary() {
+        screen = Screen.LIBRARY;
+        settings = null;
         root.removeAllViews();
-        float dp = getResources().getDisplayMetrics().density;
+        library = new LibraryView(this, prefs, this);
+        root.addView(library, new FrameLayout.LayoutParams(-1, -1));
+        library.load(gameDir());
+        applySystemBars();
+    }
+
+    // ================================================================ first-run setup
+
+    private void showSetup() {
+        screen = Screen.SETUP;
+        root.removeAllViews();
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER_HORIZONTAL);
-        int pad = (int) (28 * dp);
-        col.setPadding(pad, pad, pad, pad);
+        int pad = Ui.dp(this, 28);
+        col.setPadding(pad, Ui.dp(this, 56), pad, pad);
 
-        TextView title = new TextView(this);
-        title.setText("Yu-Gi-Oh! 5D's WC2009 HD");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(24);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
-        col.addView(title);
+        col.addView(Ui.text(this, "Welcome", 32, Ui.TEXT, true));
+        TextView sub = Ui.text(this, "Two quick steps and your games are ready.", 16, Ui.TEXT_DIM, false);
+        sub.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 22));
+        col.addView(sub);
 
         boolean access = hasFileAccess();
+        col.addView(step("1", "Allow file access", access ? "Done." : "So the app can read your games and keep saves next to them.",
+                access, access ? null : (v -> requestAccess())));
         String dir = gameDir();
-        boolean romOk = !dir.isEmpty() && access && findRom(dir) != null;
-
-        TextView body = new TextView(this);
-        body.setTextColor(0xFFC8CDD6);
-        body.setTextSize(16);
-        body.setLineSpacing(0, 1.25f);
-        StringBuilder s = new StringBuilder();
-        s.append("\nPut the game folder on your phone (the .nds file plus the HDCards folder, ")
-         .append("for example in Download/Yu-Gi-Oh 5Ds WC2009), then:\n\n");
-        s.append(access ? "1. File access: allowed ✓\n" : "1. Allow file access, so the game can read the folder and save next to it.\n");
-        if (!dir.isEmpty() && !romOk && access) s.append("\nNo .nds file found in:\n").append(dir).append("\n");
-        s.append("\n2. Choose the game folder.\n\nIn-game saves and save states go to a Saves folder inside it.");
-        body.setText(s);
-        col.addView(body);
-
-        if (!access) col.addView(button("Allow file access", v -> requestAccess(), dp));
-        Button pick = button(dir.isEmpty() ? "Choose game folder" : "Choose another folder", v -> pickFolder(), dp);
-        pick.setEnabled(access);
-        col.addView(pick);
+        col.addView(step("2", "Choose your games folder",
+                "A folder with your .nds files, for example Download/DS Games. For Yu-Gi-Oh! 5D's WC2009, put its HDCards folder in there too."
+                        + (dir.isEmpty() ? "" : "\n\nCurrent: " + dir),
+                false, access ? (v -> pickFolder()) : null));
 
         ScrollView sv = new ScrollView(this);
         sv.addView(col);
-        root.addView(sv, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(sv, new FrameLayout.LayoutParams(-1, -1));
     }
 
-    private Button button(String label, View.OnClickListener l, float dp) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextSize(17);
-        b.setOnClickListener(l);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = (int) (16 * dp);
-        b.setLayoutParams(lp);
-        return b;
+    private View step(String num, String title, String body, boolean done, View.OnClickListener action) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setPadding(Ui.dp(this, 18), Ui.dp(this, 18), Ui.dp(this, 18), Ui.dp(this, 18));
+        card.setBackground(action != null ? Ui.pressable(this, Ui.CARD, 18) : Ui.rounded(Ui.CARD, Ui.dp(this, 18)));
+        if (action != null) card.setOnClickListener(action);
+        else if (!done) card.setAlpha(0.5f);
+        TextView n = Ui.text(this, done ? "✓" : num, 17, done ? 0xFF06111F : Ui.TEXT, true);
+        n.setGravity(Gravity.CENTER);
+        n.setBackground(Ui.rounded(done ? Ui.ACCENT : Ui.CARD_HI, Ui.dp(this, 18)));
+        card.addView(n, new LinearLayout.LayoutParams(Ui.dp(this, 36), Ui.dp(this, 36)));
+        LinearLayout txt = new LinearLayout(this);
+        txt.setOrientation(LinearLayout.VERTICAL);
+        txt.setPadding(Ui.dp(this, 16), 0, 0, 0);
+        txt.addView(Ui.text(this, title, 17, action != null ? Ui.ACCENT : Ui.TEXT, true));
+        TextView b = Ui.text(this, body, 14, Ui.TEXT_DIM, false);
+        b.setPadding(0, Ui.dp(this, 4), 0, 0);
+        b.setLineSpacing(0, 1.2f);
+        txt.addView(b);
+        card.addView(txt, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = Ui.dp(this, 14);
+        card.setLayoutParams(lp);
+        return card;
     }
 
     private void requestAccess() {
         if (Build.VERSION.SDK_INT >= 30) {
             try {
-                startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        Uri.parse("package:" + getPackageName())));
+                startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + getPackageName())));
             } catch (Exception e) {
                 startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
             }
         } else {
-            requestPermissions(new String[] {Manifest.permission.READ_EXTERNAL_STORAGE,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_PERMS);
+            requestPermissions(new String[] {Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_PERMS);
         }
     }
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
-        showSetupOrGame();
+        route();
     }
 
     private void pickFolder() {
-        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        startActivityForResult(i, REQ_FOLDER);
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_FOLDER);
     }
 
     @Override
@@ -228,21 +247,22 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
         super.onActivityResult(req, res, data);
         if (req != REQ_FOLDER || res != RESULT_OK || data == null || data.getData() == null) return;
         String path = treeToPath(data.getData());
-        if (path == null) { toast("That folder can't be used, pick one in the phone storage or SD card"); return; }
+        if (path == null || !new File(path).isDirectory()) {
+            toast("That folder can't be used. Pick one in the phone's storage or on the SD card.");
+            return;
+        }
         prefs.edit().putString("gameDir", path).apply();
-        if (findRom(path) == null) { toast("No .nds file in that folder"); showSetup(); return; }
-        showSetupOrGame();
+        showLibrary();
     }
 
-    /** content://.../tree/primary:Download/Game -> /storage/emulated/0/Download/Game */
+    /** content://.../tree/primary:Download/Games -> /storage/emulated/0/Download/Games */
     private static String treeToPath(Uri tree) {
         String id;
         try { id = DocumentsContract.getTreeDocumentId(tree); } catch (Exception e) { return null; }
         int colon = id.indexOf(':');
         if (colon < 0) return null;
         String vol = id.substring(0, colon), rel = id.substring(colon + 1);
-        String base = vol.equalsIgnoreCase("primary") ? Environment.getExternalStorageDirectory().getAbsolutePath()
-                : "/storage/" + vol;
+        String base = vol.equalsIgnoreCase("primary") ? Environment.getExternalStorageDirectory().getAbsolutePath() : "/storage/" + vol;
         return rel.isEmpty() ? base : base + "/" + rel;
     }
 
@@ -260,48 +280,135 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
         }
     }
 
-    // ---------------------------------------------------------------- game
+    // ================================================================ library
+
+    @Override
+    public void play(LibraryView.Game g, boolean fresh) {
+        prefs.edit().putLong("played:" + g.rom.getName(), System.currentTimeMillis()).apply();
+        currentRom = g.rom;
+        freshStart = fresh;
+        startGameView();
+    }
+
+    @Override
+    public void gameOptions(LibraryView.Game g) {
+        String[] items = g.resume ? new String[] {"Play", "Start from the in-game save", "Remove resume point"} : new String[] {"Play"};
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(g.title)
+                .setItems(items, (d, which) -> {
+                    if (which == 0) play(g, false);
+                    else if (which == 1) play(g, true);
+                    else {
+                        new File(gameDir() + "/Saves/" + g.base + ".ml0").delete();
+                        library.load(gameDir());
+                    }
+                })
+                .show();
+    }
+
+    // ================================================================ settings
+
+    @Override
+    public void openSettings() {
+        settings = new SettingsView(this, prefs, this, gameDir());
+        if (game != null) {
+            game.setPaused(true);
+            root.addView(settings, new FrameLayout.LayoutParams(-1, -1));
+        } else {
+            screen = Screen.SETTINGS;
+            root.removeAllViews();
+            root.addView(settings, new FrameLayout.LayoutParams(-1, -1));
+        }
+    }
+
+    @Override
+    public void closeSettings() {
+        if (game != null) {
+            root.removeView(settings);
+            settings = null;
+            game.setPaused(false);
+            applySystemBars();
+        } else {
+            showLibrary();
+        }
+    }
+
+    @Override
+    public void changeFolder() {
+        if (game != null) { closeSettings(); leaveGame(); }
+        pickFolder();
+    }
+
+    @Override
+    public void settingChanged(String key) {
+        if (game == null) return;
+        switch (key) {
+            case "scale": { int s = SettingsView.scale(prefs); game.queueEvent(() -> Native.setScale(s)); break; }
+            case "filter": case "smooth2d": case "hdCards": case "hdText":
+                game.queueEvent(this::applyOptions); break;
+            case "buttons": controls.setShowButtons(SettingsView.on(prefs, "buttons")); relayout(); break;
+            case "opacity": controls.setOpacity(SettingsView.opacity(prefs)); break;
+            case "haptics": controls.setHaptics(SettingsView.on(prefs, "haptics")); break;
+            case "sound": Native.setMuted(!SettingsView.on(prefs, "sound")); break;
+            case "ffSpeed": game.setFastForwardSpeed(SettingsView.ffSpeed(prefs)); break;
+        }
+    }
+
+    private void applyOptions() {
+        Native.setOption(Native.OPT_HD_CARDS, SettingsView.on(prefs, "hdCards") ? 1 : 0);
+        Native.setOption(Native.OPT_HD_TEXT, SettingsView.on(prefs, "hdText") ? 1 : 0);
+        Native.setOption(Native.OPT_SMOOTH_2D, SettingsView.on(prefs, "smooth2d") ? 1 : 0);
+        Native.setOption(Native.OPT_LINEAR_FILTER, SettingsView.on(prefs, "filter") ? 1 : 0);
+    }
+
+    // ================================================================ game
 
     private void startGameView() {
+        screen = Screen.GAME;
         root.removeAllViews();
+        settings = null;
         game = new GameView(this, this, layout, input);
+        game.setFastForwardSpeed(SettingsView.ffSpeed(prefs));
         controls = new ControlsView(this, layout, input, this);
-        controls.setShowButtons(prefs.getBoolean("buttons", true));
-        controls.setOpacity(prefs.getFloat("opacity", 0.55f));
-        root.addView(game, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        root.addView(controls, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        root.addOnLayoutChangeListener((v, l, t, r, btm, ol, ot, or, ob) -> relayout());
-        inGame = true;
+        controls.setShowButtons(SettingsView.on(prefs, "buttons"));
+        controls.setOpacity(SettingsView.opacity(prefs));
+        controls.setHaptics(SettingsView.on(prefs, "haptics"));
+        root.setBackgroundColor(Color.BLACK);
+        root.addView(game, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(controls, new FrameLayout.LayoutParams(-1, -1));
+        root.addOnLayoutChangeListener(relayoutListener);
         relayout();
+        Native.setMuted(!SettingsView.on(prefs, "sound"));
         Native.audioStart();
+        applySystemBars();
     }
+
+    private final View.OnLayoutChangeListener relayoutListener = (v, l, t, r, b, ol, ot, or, ob) -> relayout();
 
     private void relayout() {
         if (controls == null) return;
-        layout.compute(root.getWidth(), root.getHeight(), getResources().getDisplayMetrics().density,
-                prefs.getBoolean("buttons", true));
+        layout.compute(root.getWidth(), root.getHeight(), getResources().getDisplayMetrics().density, SettingsView.on(prefs, "buttons"));
         controls.invalidate();
     }
 
     /** GL thread. */
     @Override
     public String startGame() {
-        String dir = gameDir();
-        File rom = findRom(dir);
-        if (rom == null) return "No .nds file found in " + dir;
-        boolean jit = prefs.getBoolean("jit", true);
+        File rom = currentRom;
+        if (rom == null || !rom.exists()) return "The game file isn't there anymore.";
+        boolean jit = SettingsView.on(prefs, "jit");
         if (jit && prefs.getBoolean("running", false)) {
-            // the last session ended in a crash with the JIT on: play it safe
             jit = false;
             prefs.edit().putBoolean("jit", false).apply();
-            runOnUiThread(() -> toast("The last session crashed, so the fast CPU mode (JIT) was turned off. You can turn it back on in the menu."));
+            runOnUiThread(() -> toast("The last session crashed, so Fast CPU mode was turned off. You can turn it back on in Settings."));
         }
         prefs.edit().putBoolean("running", true).commit();
-        Native.init(dir, getFilesDir().getAbsolutePath() + "/data", getFilesDir().getAbsolutePath() + "/fonts");
-        int r = Native.loadRom(rom.getAbsolutePath(), prefs.getInt("scale", 4), jit);
-        if (r != 0) return "Couldn't load " + rom.getName() + " (error " + r + ")";
+        Native.init(gameDir(), getFilesDir().getAbsolutePath() + "/data", getFilesDir().getAbsolutePath() + "/fonts");
+        applyOptions();
+        int r = Native.loadRom(rom.getAbsolutePath(), SettingsView.scale(prefs), jit);
+        if (r != 0) return "Couldn't load " + rom.getName() + " (error " + r + ").";
         Native.everLoaded = true;
-        if (Native.stateExists(AUTO_SLOT) && Native.loadState(AUTO_SLOT) == 0)
+        if (!freshStart && SettingsView.on(prefs, "resume") && Native.stateExists(AUTO_SLOT) && Native.loadState(AUTO_SLOT) == 0)
             runOnUiThread(() -> toast("Resumed where you left off"));
         return null;
     }
@@ -309,11 +416,34 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
     @Override
     public void onStartFailed(String message) {
         runOnUiThread(() -> {
-            inGame = false;
             prefs.edit().putBoolean("running", false).apply();
-            new AlertDialog.Builder(this).setTitle("Couldn't start").setMessage(message)
-                    .setPositiveButton("OK", (d, w) -> { root.removeAllViews(); showSetup(); }).show();
+            closeGame();
+            new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("Couldn't start the game").setMessage(message).setPositiveButton("OK", null).show();
         });
+    }
+
+    /** Saves the resume point, shuts the emulator down and goes back to the library. */
+    private void leaveGame() {
+        if (game == null) return;
+        boolean resume = SettingsView.on(prefs, "resume");
+        runOnGlAndWait(() -> {
+            if (resume) Native.saveState(AUTO_SLOT); else Native.deleteState(AUTO_SLOT);
+            Native.flushSave();
+            Native.shutdown();
+        });
+        prefs.edit().putBoolean("running", false).apply();
+        closeGame();
+    }
+
+    private void closeGame() {
+        Native.audioStop();
+        input.releaseAll();
+        if (game != null) game.onPause();
+        root.removeOnLayoutChangeListener(relayoutListener);
+        game = null; controls = null;
+        root.setBackgroundColor(Ui.BG);
+        showLibrary();
     }
 
     @Override
@@ -321,27 +451,19 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
 
     @Override
     public void onMenu() {
+        if (game == null || settings != null) return;
         game.setPaused(true);
-        String[] items = {
-                "Save state…", "Load state…", "Resolution: " + prefs.getInt("scale", 4) + "x",
-                prefs.getBoolean("buttons", true) ? "Hide buttons" : "Show buttons",
-                "Button opacity", "Fast CPU mode (JIT): " + (prefs.getBoolean("jit", true) ? "on" : "off"),
-                "Restart from in-game save", "Change game folder"
-        };
+        String[] items = {"Save state", "Load state", "Settings", "Restart from in-game save", "Back to library"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("WC2009 HD")
+                .setTitle(currentRom != null ? currentRom.getName().replaceAll("\\.nds$", "") : "Menu")
                 .setItems(items, (d, which) -> {
                     switch (which) {
                         case 0: stateDialog(true); return;
                         case 1: stateDialog(false); return;
-                        case 2: scaleDialog(); return;
-                        case 3: toggleButtons(); break;
-                        case 4: opacityDialog(); return;
-                        case 5: toggleJit(); break;
-                        case 6: restart(); break;
-                        case 7: changeFolder(); return;
+                        case 2: openSettings(); return;
+                        case 3: restart(); return;
+                        case 4: leaveGame(); return;
                     }
-                    game.setPaused(false);
                 })
                 .setOnCancelListener(d -> game.setPaused(false))
                 .show();
@@ -349,7 +471,7 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
 
     private void stateDialog(boolean save) {
         String[] slots = new String[8];
-        for (int i = 0; i < 8; i++) slots[i] = "Slot " + (i + 1) + (Native.stateExists(i + 1) ? "" : "  (empty)");
+        for (int i = 0; i < 8; i++) slots[i] = "Slot " + (i + 1) + (Native.stateExists(i + 1) ? "" : "   (empty)");
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(save ? "Save state" : "Load state")
                 .setItems(slots, (d, which) -> {
@@ -365,59 +487,13 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
                 .show();
     }
 
-    private void scaleDialog() {
-        final int[] scales = {2, 3, 4, 5, 6, 8};
-        String[] names = {"2x (fastest)", "3x", "4x (recommended)", "5x", "6x (sharp, needs a fast phone)", "8x (sharpest, high-end phones)"};
-        int cur = prefs.getInt("scale", 4), sel = 2;
-        for (int i = 0; i < scales.length; i++) if (scales[i] == cur) sel = i;
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Resolution")
-                .setSingleChoiceItems(names, sel, (d, which) -> {
-                    int s = scales[which];
-                    prefs.edit().putInt("scale", s).apply();
-                    game.queueEvent(() -> Native.setScale(s));
-                    d.dismiss();
-                    game.setPaused(false);
-                })
-                .setOnCancelListener(d -> game.setPaused(false))
-                .show();
-    }
-
-    private void toggleButtons() {
-        boolean on = !prefs.getBoolean("buttons", true);
-        prefs.edit().putBoolean("buttons", on).apply();
-        controls.setShowButtons(on);
-        relayout();
-    }
-
-    private void opacityDialog() {
-        final float[] vals = {0.25f, 0.4f, 0.55f, 0.75f, 0.95f};
-        String[] names = {"25%", "40%", "55%", "75%", "95%"};
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Button opacity")
-                .setItems(names, (d, which) -> {
-                    prefs.edit().putFloat("opacity", vals[which]).apply();
-                    controls.setOpacity(vals[which]);
-                    game.setPaused(false);
-                })
-                .setOnCancelListener(d -> game.setPaused(false))
-                .show();
-    }
-
-    private void toggleJit() {
-        boolean on = !prefs.getBoolean("jit", true);
-        prefs.edit().putBoolean("jit", on).apply();
-        toast("Takes effect next time the app starts");
-    }
-
     private void restart() {
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Restart the game?")
-                .setMessage("Starts again from your last in-game save. Anything after that save is lost (save states stay).")
+                .setMessage("Starts again from your last in-game save. Anything after it is lost (save states are kept).")
                 .setPositiveButton("Restart", (d, w) -> game.queueEvent(() -> {
                     Native.deleteState(AUTO_SLOT);
-                    File rom = findRom(gameDir());
-                    if (rom != null) Native.loadRom(rom.getAbsolutePath(), prefs.getInt("scale", 4), prefs.getBoolean("jit", true));
+                    if (currentRom != null) Native.loadRom(currentRom.getAbsolutePath(), SettingsView.scale(prefs), SettingsView.on(prefs, "jit"));
                     game.setPaused(false);
                 }))
                 .setNegativeButton("Cancel", (d, w) -> game.setPaused(false))
@@ -425,24 +501,11 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
                 .show();
     }
 
-    private void changeFolder() {
-        // leave the game (remembering where it was), then pick; cancelling comes back to the same game
-        runOnGlAndWait(() -> { Native.saveState(AUTO_SLOT); Native.flushSave(); });
-        Native.audioStop();
-        input.releaseAll();
-        inGame = false;
-        game.onPause();
-        root.removeAllViews();
-        game = null; controls = null;
-        prefs.edit().putBoolean("running", false).apply();
-        pickFolder();
-    }
-
     private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }
 
-    // ---------------------------------------------------------------- gamepads
+    // ================================================================ gamepads
 
-    private int padKeys;
+    private int padKeys, stickKeys;
 
     private static int mapKey(int code) {
         switch (code) {
@@ -464,7 +527,7 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
-        if (inGame) {
+        if (game != null && settings == null) {
             if (e.getKeyCode() == KeyEvent.KEYCODE_BUTTON_MODE && e.getAction() == KeyEvent.ACTION_DOWN) { onMenu(); return true; }
             int k = mapKey(e.getKeyCode());
             if (k != 0) {
@@ -477,11 +540,9 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
         return super.dispatchKeyEvent(e);
     }
 
-    private int stickKeys;
-
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent e) {
-        if (inGame && (e.getSource() & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+        if (game != null && (e.getSource() & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
                 && e.getAction() == MotionEvent.ACTION_MOVE) {
             float x = e.getAxisValue(MotionEvent.AXIS_HAT_X) + e.getAxisValue(MotionEvent.AXIS_X);
             float y = e.getAxisValue(MotionEvent.AXIS_HAT_Y) + e.getAxisValue(MotionEvent.AXIS_Y);
@@ -490,19 +551,12 @@ public final class MainActivity extends Activity implements GameView.Host, Contr
             if (x > 0.5f) k |= Native.RIGHT;
             if (y < -0.5f) k |= Native.UP;
             if (y > 0.5f) k |= Native.DOWN;
-            float lt = e.getAxisValue(MotionEvent.AXIS_LTRIGGER), rt = e.getAxisValue(MotionEvent.AXIS_RTRIGGER);
-            if (lt > 0.5f) k |= Native.L;
-            if (rt > 0.5f) k |= Native.R;
+            if (e.getAxisValue(MotionEvent.AXIS_LTRIGGER) > 0.5f) k |= Native.L;
+            if (e.getAxisValue(MotionEvent.AXIS_RTRIGGER) > 0.5f) k |= Native.R;
             stickKeys = k;
             input.setPadKeys(padKeys | stickKeys);
             return true;
         }
         return super.dispatchGenericMotionEvent(e);
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (inGame) onMenu();
-        else super.onBackPressed();
     }
 }

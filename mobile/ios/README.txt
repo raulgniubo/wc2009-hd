@@ -27,25 +27,29 @@ Install it on your iPhone (with Xcode)
   (your saves are kept).
 
 
-Put the game on the iPhone
---------------------------
+Add games
+---------
   The app shows its own folder in the Files app and in Finder.
 
   From the Mac: with the iPhone plugged in, open Finder, click the iPhone in the sidebar,
-  open the "Files" tab, and drag the game folder (the one with the .nds file and the HDCards
-  folder) onto "WC2009 HD".
+  open the "Files" tab, and drag your .nds files onto "WC2009 HD". For Yu-Gi-Oh! 5D's WC2009
+  also drag its HDCards folder (next to the .nds). Folders with a game inside work too.
 
   Or on the iPhone: Files app > On My iPhone > WC2009 HD.
 
-  Then open the app. In-game saves and save states go to a "Saves" folder next to the game,
-  so you can copy them to and from the computer the same way.
+  Every game shows up in the Library. Pull down to refresh after adding some.
+  Custom cover art: put a .png or .jpg with the same name as the game next to it.
 
 
 Playing
 -------
-  Touch the bottom screen to play, like on the DS. The buttons are on screen too, and a
-  game controller works as well.
-  The menu button (three lines) has: save/load state, resolution (2x to 8x), hide buttons,
-  button opacity, and restart from the in-game save.
-  The double arrow is fast forward.
-  When you leave the app it remembers where you were and picks up there next time.
+  Tap a game to play; touch and hold for more (start from the in-game save, remove the
+  resume point).
+  Touch the bottom screen like on the DS. The buttons are on screen too, and game
+  controllers work.
+  In game, the menu button (three lines) has save/load state, settings, restart and
+  "Back to library". The double arrow is fast forward.
+  Settings (gear in the Library): resolution 2x to 8x, smooth or sharp screen, smooth 2D,
+  the WC2009 HD options, buttons, opacity, vibration, resume, sound, fast forward speed.
+  Saves and save states go to a "Saves" folder next to each game, same format as the
+  computer version.
