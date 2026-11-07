@@ -11,6 +11,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 #include "types.h"
 
 namespace melonDS::WC09
@@ -24,6 +25,7 @@ struct SpriteHD
     s16 DX = 0, DY = 0;      // runtime sprite tile-space offset into the matched OAM
     s16 IW = 0, IH = 0;      // full image size (pixels, original resolution)
     bool HF = false, VF = false;   // the matched OAM is drawn flipped inside the image
+    bool NoMask = false;     // HD picture shown whole (thin outlines the game draws jagged: rings)
     bool Text = false;       // not an HD image, but anti-aliased text: drawn with smooth edges
 };
 
@@ -47,5 +49,7 @@ int CardFromThumbTexture(u64 hash);
 
 // "<set>/<name>" for the HD loader (HDCards/<set>/<name>.png).
 std::string SpriteImageName(int image);
+// every indexed sprite image whose name starts with prefix (e.g. "trunk/")
+std::vector<std::string> SpriteImageNamesWithPrefix(const std::string& prefix);
 
 }

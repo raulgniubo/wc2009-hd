@@ -31,6 +31,7 @@ struct BGReplacement
     bool Mirror = false;              // drawn horizontally flipped
     bool ScreenSpace = false;         // rect is in screen pixels (fixed on screen, ignores BG scroll)
     bool Fallback = false;            // transparent HD pixels show the original pixels (card sets)
+    bool NoWindow = false;            // shown everywhere in its rect, whatever the game's windows hide
 };
 
 // Duel card-detail text panel area on the top screen (DS pixels).
@@ -116,6 +117,9 @@ std::string CardDescEn(int card);
 using HDImageProvider = std::function<bool(const std::string& name, std::vector<u8>& rgba, int& w, int& h)>;
 void SetHDImageProvider(HDImageProvider provider);
 bool LoadHDImage(const std::string& name, std::vector<u8>& rgba, int& w, int& h);
+// the same, rendered/loaded on a worker thread: 1 = ready (filled in), 0 = still working, -1 = failed
+int LoadHDImageAsync(const std::string& name, std::vector<u8>& rgba, int& w, int& h);
+int LoadCardImageAsync(int card, std::vector<u8>& rgba, int& w, int& h);
 
 }
 }

@@ -25,6 +25,7 @@
 #include "OpenGLSupport.h"
 #include "GPU2D.h"
 #include "WC09Sprites.h"
+#include "WC09Battle.h"
 
 namespace melonDS
 {
@@ -92,8 +93,12 @@ private:
     GLint CompositorHDFallbackULoc[4] {-1, -1, -1, -1};
     GLint CompositorTextSmoothULoc[4] {-1, -1, -1, -1};
     GLuint TextMaskTex {};
+    bool HDLastPending = false;
+    GLuint LastPanelTex[4] {}; int LastPanelImage[4] {-1, -1, -1, -1}; WC09::BGReplacement LastPanelRep[4];
+    std::vector<u8> TextMaskUploaded;
     GLuint HDTileAtlasTex {}; bool HDTileAtlasTried {};
     GLint CompositorHDTilesULoc[4] {-1, -1, -1, -1};
+    GLint CompositorHDNoWinULoc[4] {-1, -1, -1, -1};
     bool HDTileAtlasOK();
     struct HDTexEntry { int Image; GLuint Tex; bool Valid; };
     std::vector<HDTexEntry> HDTextures;     // small LRU of uploaded HD BG images

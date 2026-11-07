@@ -181,6 +181,7 @@ bool GLRenderer2D::InitShaders()
         glUseProgram(CompositorShader);
         glUniform1i(t, 8 + i);
         CompositorHDTilesULoc[i] = glGetUniformLocation(CompositorShader, ("uHDTiles[" + n + "]").c_str());
+        CompositorHDNoWinULoc[i] = glGetUniformLocation(CompositorShader, ("uHDNoWin[" + n + "]").c_str());
     }
     glUniform1i(glGetUniformLocation(CompositorShader, "TextMaskAll"), 12);
     glUniform1i(glGetUniformLocation(CompositorShader, "HDTileAtlas"), 13);
@@ -233,6 +234,7 @@ bool GLRenderer2D::InitShaders(GLRenderer2D& other)
         CompositorHDFallbackULoc[i] = other.CompositorHDFallbackULoc[i];
         CompositorTextSmoothULoc[i] = other.CompositorTextSmoothULoc[i];
         CompositorHDTilesULoc[i] = other.CompositorHDTilesULoc[i];
+        CompositorHDNoWinULoc[i] = other.CompositorHDNoWinULoc[i];
     }
 
     MosaicTex = other.MosaicTex;
@@ -465,7 +467,9 @@ GLuint GLRenderer2D::GetHDTexture(int image)
             for (const WC09::CardSetItem& it : items)
             {
                 std::vector<u8> src; int iw = 0, ih = 0;
-                if (!WC09::LoadCardImage(it.Card, src, iw, ih) || iw < 2 || ih < 2) continue;
+                int r = WC09::LoadCardImageAsync(it.Card, src, iw, ih);
+                if (r == 0) { HDLastPending = true; return 0; }   // still loading: original cards meanwhile
+                if (r < 0 || iw < 2 || ih < 2) continue;
                 loaded = true;
                 const int dw = 88 * K, dh = 128 * K;
                 for (int y = 0; y < dh; y++)
@@ -492,9 +496,25 @@ GLuint GLRenderer2D::GetHDTexture(int image)
         }
     }
     else if (WC09::IsCardImage(image))
-        loaded = WC09::LoadCardImage(image - WC09::kCardImageBase, rgba, w, h);
+    {
+        int r = WC09::LoadCardImageAsync(image - WC09::kCardImageBase, rgba, w, h);
+        if (r == 0) { HDLastPending = true; return 0; }
+        loaded = r > 0;
+    }
     else
-        loaded = WC09::LoadHDImage(WC09::BattleImageName(image), rgba, w, h);
+    {
+        // big text panels take a while to render: done on a worker thread, the layer keeps its
+        // previous panel meanwhile (see the compositor)
+        std::string nm = WC09::BattleImageName(image);
+        if (nm.rfind("decktext/", 0) == 0 || nm.rfind("deckname/", 0) == 0 || nm.rfind("textpanel/", 0) == 0)
+        {
+            int r = WC09::LoadHDImageAsync(nm, rgba, w, h);
+            if (r == 0) { HDLastPending = true; return 0; }
+            loaded = r > 0;
+        }
+        else
+            loaded = WC09::LoadHDImage(nm, rgba, w, h);
+    }
     if (getenv("WC09_DEBUG")) { printf("WC09 2D HD %d %s %s %dx%d\n", image, WC09::BattleImageName(image).c_str(), loaded ? "ok" : "missing", w, h); fflush(stdout); }
     if (loaded && w > 0 && h > 0)
     {
@@ -515,7 +535,7 @@ GLuint GLRenderer2D::GetHDTexture(int image)
         return 0;
     }
     HDTextures.insert(HDTextures.begin(), e);
-    if (HDTextures.size() > 32)
+    if (HDTextures.size() > 160)   // menus use many small images at once: never thrash
     {
         if (HDTextures.back().Valid) glDeleteTextures(1, &HDTextures.back().Tex);
         HDTextures.pop_back();
@@ -1910,7 +1930,7 @@ void GLRenderer2D::DoRenderSprites(int line)
                 hdSize[slot*2] = h.IW; hdSize[slot*2+1] = h.IH;
             }
             if (slot < 0) continue;
-            hdA[i*4] = slot; hdA[i*4+1] = h.OX; hdA[i*4+2] = h.OY; hdA[i*4+3] = (h.HF ? 1 : 0) | (h.VF ? 2 : 0) | (WC09LpEdge[i] ? 8 : 0);
+            hdA[i*4] = slot; hdA[i*4+1] = h.OX; hdA[i*4+2] = h.OY; hdA[i*4+3] = (h.HF ? 1 : 0) | (h.VF ? 2 : 0) | (WC09LpEdge[i] ? 8 : 0) | (h.NoMask ? 16 : 0);
             hdB[i*4] = h.OW; hdB[i*4+1] = h.OH; hdB[i*4+2] = h.DX; hdB[i*4+3] = h.DY;
         }
         for (int k = 0; k < kSprHDSlots; k++)
@@ -2142,8 +2162,16 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
             reps[i] = WC09::GetBGReplacement(GPU2D.Num, i);
             bool isPanel = reps[i].Image >= WC09::kTextPanelBase && reps[i].Image < WC09::kSpriteImageBase;
             bool allowed = isPanel ? WC09::GetHDTextEnabled() : WC09::GetHDCardsEnabled();
+            HDLastPending = false;
             texs[i] = (reps[i].Image >= 0 && allowed) ? GetHDTexture(reps[i].Image) : 0;
-            if (texs[i] && isPanel) WC09::NotePanelRendered();
+            if (texs[i] && isPanel) { WC09::NotePanelRendered(); LastPanelTex[i] = texs[i]; LastPanelRep[i] = reps[i]; LastPanelImage[i] = reps[i].Image; }
+            else if (!texs[i] && HDLastPending && isPanel && LastPanelTex[i] && LastPanelRep[i].OriginX == reps[i].OriginX && LastPanelRep[i].OriginY == reps[i].OriginY)
+            {
+                // the new text is still rendering: keep the previous one (if its texture is still alive)
+                bool alive = false;
+                for (auto& t : HDTextures) if (t.Valid && t.Tex == LastPanelTex[i] && t.Image == LastPanelImage[i]) alive = true;
+                if (alive) { texs[i] = LastPanelTex[i]; reps[i] = LastPanelRep[i]; WC09::NotePanelRendered(); }
+            }
         }
         for (int i = 0; i < 4; i++)
         {
@@ -2154,6 +2182,7 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
             glUniform1i(CompositorHDMirrorULoc[i], reps[i].Mirror ? 1 : 0);
             glUniform1i(CompositorHDScreenULoc[i], reps[i].ScreenSpace ? 1 : 0);
             glUniform1i(CompositorHDFallbackULoc[i], reps[i].Fallback ? 1 : 0);
+            glUniform1i(CompositorHDNoWinULoc[i], texs[i] && reps[i].ScreenSpace && reps[i].NoWindow ? 1 : 0);
             bool textOn = (!texs[i] || reps[i].ScreenSpace) && WC09::GetHDTextEnabled() && WC09::IsTextLayer(GPU2D.Num, i);
             glUniform1i(CompositorTextSmoothULoc[i], 0);
             // per map tile: text mask (r) and HD tile slot (g, b), all four layers in one texture
@@ -2193,8 +2222,12 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 }
                 glBindTexture(GL_TEXTURE_2D, TextMaskTex);
-                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, all.data());
+                if (TextMaskUploaded != all)   // the two engines each have their own copy
+                {
+                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, all.data());
+                    TextMaskUploaded = all;
+                }
                 glActiveTexture(GL_TEXTURE13);
                 glBindTexture(GL_TEXTURE_2D, HDTileAtlasTex);
             }

@@ -301,12 +301,15 @@ void OnPolygon(GPU& gpu, u32 texParam, const Polygon* poly, int nverts)
     Building.push_back(q);
 }
 
+namespace { u64 LatestFlushFrame = 0; }
+
 void OnFlush(bool screenSwap)
 {
     FrameCounter++;
     if (!Active && Building.empty()) return;
     std::lock_guard<std::mutex> lk(Lock);
     Latest.On3DTop = screenSwap;
+    LatestFlushFrame = FrameNum() + 1;
     Latest.Quads.swap(Building);
     Building.clear();
 }
@@ -323,7 +326,9 @@ FrameCards GetLatest(bool all)
     bool gl3d = Cards3DStamp.load() && now + 1 - Cards3DStamp.load() < 120;
     bool gl2d = Cards2DStamp.load() && now + 1 - Cards2DStamp.load() < 120;
     if (all) gl3d = gl2d = false;
-    if (!gl3d)
+    // no 3D frame for a while (a 2D-only menu after a duel): the last 3D cards are long gone
+    bool fresh3d = LatestFlushFrame && now + 1 - LatestFlushFrame < 10;
+    if (!gl3d && fresh3d)
         for (const CardQuad& q : Latest.Quads)
             if (!BattleOnScreen(q.Screen)) out.Quads.push_back(q);
     {

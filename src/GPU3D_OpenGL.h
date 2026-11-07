@@ -117,6 +117,9 @@ private:
     GLuint UploadHD3D(const u8* rgba, int w, int h);
     std::unordered_map<std::string, GLuint> HDNamed;   // position-matched UI pieces
     GLuint GetHDNamed(const char* name);
+    struct TexSlot { u64 Hash = 0; u64 LastChange = 0; int Changes = 0; u64 AnimatedUntil = 0; };
+    std::unordered_map<u32, TexSlot> TexSlots;
+    bool AnimatedTexture(u32 texparam, u64 hash, u32 w, u32 h, u32 textype);
     GLuint CurShaderID = -1;
 
     GLuint FinalPassEdgeShader {};

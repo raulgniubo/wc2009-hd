@@ -10,6 +10,9 @@
 #include <cstring>
 #include <atomic>
 #include <thread>
+#include <memory>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -256,11 +259,145 @@ u16 ReadBG(GPU& gpu, int engine, u32 addr)
 
 void SetHDImageProvider(HDImageProvider provider) { std::lock_guard<std::mutex> lk(Lock); Provider = std::move(provider); }
 
+// Menu screens show many small HD sprite images, first needed the moment the player presses a
+// button; decoding them then (on the emulation thread) makes the sound crackle. The first image
+// of a menu folder starts a background load of the whole folder.
+namespace
+{
+struct PrefetchedImage { std::vector<u8> Rgba; int W = 0, H = 0; };
+std::mutex PrefLock;
+std::unordered_map<std::string, PrefetchedImage> Prefetched;
+std::vector<std::string> PrefQueue;
+std::vector<std::string> AsyncQueue;       // rendered panels asked for right now: first
+std::map<std::string, bool> AsyncPending;
+std::map<std::string, bool> PrefFolders;
+std::condition_variable PrefCV;
+bool PrefStop = false;
+struct PrefetchThread
+{
+    std::thread T;
+    ~PrefetchThread() { { std::lock_guard<std::mutex> lk(PrefLock); PrefStop = true; } PrefCV.notify_all(); if (T.joinable()) T.join(); }
+} Prefetcher;
+
+void PrefetchLoop()
+{
+    for (;;)
+    {
+        std::string name;
+        {
+            std::unique_lock<std::mutex> lk(PrefLock);
+            PrefCV.wait(lk, [] { return PrefStop || !PrefQueue.empty() || !AsyncQueue.empty(); });
+            if (PrefStop) return;
+            if (!AsyncQueue.empty()) { name = AsyncQueue.front(); AsyncQueue.erase(AsyncQueue.begin()); }
+            else { name = PrefQueue.back(); PrefQueue.pop_back(); }
+            if (Prefetched.count(name)) continue;
+        }
+        HDImageProvider p;
+        { std::lock_guard<std::mutex> lk(Lock); p = Provider; }
+        PrefetchedImage im;
+        bool ok;
+        if (name.rfind("cardimg/", 0) == 0) ok = LoadCardImage(atoi(name.c_str() + 8), im.Rgba, im.W, im.H);
+        else ok = p && p(name, im.Rgba, im.W, im.H);
+        std::lock_guard<std::mutex> lk(PrefLock);
+        AsyncPending.erase(name);
+        if (ok) Prefetched[name] = std::move(im);
+        else Prefetched[name] = PrefetchedImage{};   // failed: an empty entry says so
+    }
+}
+
+void PrefetchFolder(const std::string& name)
+{
+    size_t slash = name.find('/');
+    if (slash == std::string::npos) return;
+    std::string folder = name.substr(0, slash + 1);
+    static const char* const kMenus[] = { "trunk/", "MainMenu/", "DCustom/", "janken/", "duel2d/" };
+    bool menu = false;
+    for (const char* m : kMenus) if (folder == m) menu = true;
+    if (!menu) return;
+    {
+        std::lock_guard<std::mutex> lk(PrefLock);
+        if (PrefFolders[folder]) return;
+        PrefFolders[folder] = true;
+    }
+    std::vector<std::string> names = SpriteImageNamesWithPrefix(folder);
+    std::lock_guard<std::mutex> lk(PrefLock);
+    for (auto& n : names) PrefQueue.push_back(n);
+    if (!Prefetcher.T.joinable()) Prefetcher.T = std::thread(PrefetchLoop);
+    PrefCV.notify_all();
+}
+}
+
+int LoadHDImageAsync(const std::string& name, std::vector<u8>& rgba, int& w, int& h)
+{
+    std::lock_guard<std::mutex> lk(PrefLock);
+    auto it = Prefetched.find(name);
+    if (it != Prefetched.end())
+    {
+        bool ok = it->second.W > 0;
+        rgba = std::move(it->second.Rgba); w = it->second.W; h = it->second.H;
+        Prefetched.erase(it);
+        return ok ? 1 : -1;
+    }
+    if (!AsyncPending[name])
+    {
+        AsyncPending[name] = true;
+        AsyncQueue.push_back(name);
+        if (AsyncQueue.size() > 8) { AsyncPending.erase(AsyncQueue.front()); AsyncQueue.erase(AsyncQueue.begin()); }
+        if (!Prefetcher.T.joinable()) Prefetcher.T = std::thread(PrefetchLoop);
+        PrefCV.notify_all();
+    }
+    return 0;
+}
+
+// card art: loaded on the worker thread, the last few kept decoded (lists show the same cards
+// over and over)
+int LoadCardImageAsync(int card, std::vector<u8>& rgba, int& w, int& h)
+{
+    static std::mutex cl;
+    static std::vector<std::pair<int, std::shared_ptr<PrefetchedImage>>> cache;
+    {
+        std::lock_guard<std::mutex> lk(cl);
+        for (size_t i = 0; i < cache.size(); i++)
+            if (cache[i].first == card)
+            {
+                auto e = cache[i]; cache.erase(cache.begin() + i); cache.insert(cache.begin(), e);
+                if (e.second->W <= 0) return -1;
+                rgba = e.second->Rgba; w = e.second->W; h = e.second->H;
+                return 1;
+            }
+    }
+    auto im = std::make_shared<PrefetchedImage>();
+    int r = LoadHDImageAsync("cardimg/" + std::to_string(card), im->Rgba, im->W, im->H);
+    if (r == 0) return 0;
+    if (r < 0) im->W = 0;
+    std::lock_guard<std::mutex> lk(cl);
+    cache.insert(cache.begin(), {card, im});
+    if (cache.size() > 16) cache.pop_back();
+    if (r < 0) return -1;
+    rgba = im->Rgba; w = im->W; h = im->H;
+    return 1;
+}
+
 bool LoadHDImage(const std::string& name, std::vector<u8>& rgba, int& w, int& h)
 {
+    {
+        std::lock_guard<std::mutex> lk(PrefLock);
+        auto it = Prefetched.find(name);
+        if (it != Prefetched.end() && it->second.W > 0)
+        {
+            rgba = std::move(it->second.Rgba); w = it->second.W; h = it->second.H;
+            Prefetched.erase(it);   // the renderer keeps its own texture from here on
+            return true;
+        }
+    }
     HDImageProvider p;
     { std::lock_guard<std::mutex> lk(Lock); p = Provider; }
-    return p && p(name, rgba, w, h);
+    static const bool perf = getenv("WC09_PERF") != nullptr;
+    auto t0 = std::chrono::steady_clock::now();
+    bool ok = p && p(name, rgba, w, h);
+    if (perf) { printf("WC09 sync load %s %.1f ms\n", name.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count()); fflush(stdout); }
+    if (IndexReady) PrefetchFolder(name);
+    return ok;
 }
 
 std::atomic<u64> PanelStamp{0};
@@ -660,6 +797,7 @@ std::atomic<bool> HDTilesReady{false};
 std::vector<u16> HDTileMapV[2][4];
 u32 HDTileGen[2][4];
 bool HDTileAny[2][4];
+u64 HDTileLastKey[2][4];   // what the visible tiles looked like when last scanned
 }
 
 void LoadHDTileKeys()
@@ -688,10 +826,15 @@ void LoadHDTileKeys()
     if (getenv("WC09_DEBUG")) { printf("WC09 HD tiles: %zu\n", HDTileKeys.size()); fflush(stdout); }
 }
 
-// hashes of the visible tiles of a text-mode layer; fills HD tile slots, optionally dumps them
+// hashes of the visible tiles of a text-mode layer; fills HD tile slots, optionally dumps them.
+// Reads the flat VRAM copies the renderer keeps (what it last drew); does nothing when the map,
+// the tiles it uses, the palettes and the scroll are unchanged since the last frame.
 static void UpdateHDTiles(GPU& gpu, int engine, int bg, bool dump)
 {
     GPU2D& u = engine == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+    const u8* vram = engine == 0 ? gpu.VRAMFlat_ABG : gpu.VRAMFlat_BBG;
+    const u32 vmask = engine == 0 ? 0x7FFFF : 0x1FFFF;
+    auto rd16 = [&](u32 a) -> u16 { a &= vmask & ~1u; return (u16)(vram[a] | (vram[a + 1] << 8)); };
     u16 cnt = u.BGCnt[bg];
     bool bpp8 = cnt & 0x80;
     bool ext = bpp8 && (u.DispCnt & (1u << 30));
@@ -701,26 +844,46 @@ static void UpdateHDTiles(GPU& gpu, int engine, int bg, bool dump)
     int sx0 = u.BGXPos[bg] & 0x1FF, sy0 = u.BGYPos[bg] & 0x1FF;
     const u8* pal = &gpu.Palette[engine * 0x400];
     u32 extSlot = (bg < 2 && (cnt & 0x2000)) ? bg + 2 : bg;
-    std::vector<u16> map(64 * 64, 0);
-    bool any = false;
-    static u64 hashes[25][33];
-    static u8 pix[25 * 8][33 * 8][4];
-    std::unordered_map<u32, u64> seen;   // map entry -> hash (this frame)
+    u32 bytes = bpp8 ? 64 : 32;
+
+    static u16 ents[25][33];
+    u32 tmin = 0x3FF, tmax = 0;
     for (int ty = 0; ty < 25; ty++)
         for (int tx = 0; tx < 33; tx++)
         {
             int mx = ((sx0 >> 3) + tx) & (mapW - 1), my = ((sy0 >> 3) + ty) & (mapH - 1);
             u32 block = (mx >> 5) + ((my >> 5) * (mapW >> 5));
-            u16 ent = ReadBG(gpu, engine, scrBase + block * 0x800 + (((my & 31) * 32 + (mx & 31)) * 2));
+            u16 ent = rd16(scrBase + block * 0x800 + (((my & 31) * 32 + (mx & 31)) * 2));
+            ents[ty][tx] = ent;
+            tmin = std::min<u32>(tmin, ent & 0x3FF); tmax = std::max<u32>(tmax, ent & 0x3FF);
+        }
+    // change detection
+    u64 key = XXH64(ents, sizeof(ents), cnt) ^ ((u64)sx0 << 40) ^ ((u64)sy0 << 50) ^ (XXH64(pal, 512, 3) * 31);
+    {
+        u32 a0 = (charBase + tmin * bytes) & vmask, len = (tmax - tmin + 1) * bytes;
+        if (a0 + len <= vmask + 1) key ^= XXH64(vram + a0, len, 5) * 131;
+        else key ^= XXH64(vram, vmask + 1, 5) * 131;
+        if (ext) key ^= XXH64(u.GetBGExtPal(extSlot, 0), 16 * 512, 7) * 17;
+    }
+    if (!dump && key == HDTileLastKey[engine][bg]) return;
+    HDTileLastKey[engine][bg] = key;
+
+    std::vector<u16> map(64 * 64, 0);
+    bool any = false;
+    static u64 hashes[25][33];
+    static u8 pix[25 * 8][33 * 8][4];
+    for (int ty = 0; ty < 25; ty++)
+        for (int tx = 0; tx < 33; tx++)
+        {
+            int mx = ((sx0 >> 3) + tx) & (mapW - 1), my = ((sy0 >> 3) + ty) & (mapH - 1);
+            u16 ent = ents[ty][tx];
             u8 rgba[64][4];
             u32 t = ent & 0x3FF;
-            u32 bytes = bpp8 ? 64 : 32;
-            u8 data[64];
-            for (u32 b = 0; b < bytes; b += 2)
-            {
-                u16 two = ReadBG(gpu, engine, charBase + t * bytes + b);
-                data[b] = two & 0xFF; data[b + 1] = two >> 8;
-            }
+            const u8* data;
+            u8 tmp[64];
+            u32 a0 = (charBase + t * bytes) & vmask;
+            if (a0 + bytes <= vmask + 1) data = vram + a0;
+            else { for (u32 i = 0; i < bytes; i++) tmp[i] = vram[(a0 + i) & vmask]; data = tmp; }
             bool blank = true;
             for (int y = 0; y < 8; y++)
                 for (int x = 0; x < 8; x++)
@@ -1299,6 +1462,7 @@ void OnVBlankBattle(GPU& gpu)
             rep = BGReplacement{};
             rep.Image = id; rep.ScreenSpace = true;
             rep.OriginX = kLpX; rep.OriginY = kLpY; rep.Width = kLpW; rep.Height = kLpH;
+            rep.NoWindow = true;   // the game clips its gauges with windows; the HD panel draws its own
             lpBand[e] = {true, kLpX, kLpY, kLpX + kLpW, kLpY + kLpH};
         }
 
@@ -1334,6 +1498,8 @@ void OnVBlankBattle(GPU& gpu)
         static const char* tdump = getenv("WC09_TILEDUMP");
         bool dumpNow = tdump && (VBlankCount.load() % 60) == 0;
         bool updated[2][4] = {};
+        static const bool perf = getenv("WC09_PERF") != nullptr;
+        auto tp0 = std::chrono::steady_clock::now();
         if ((HDTilesReady || dumpNow) && IsActive() && GetHDCardsEnabled())
             for (int e = 0; e < 2; e++)
             {
@@ -1348,10 +1514,16 @@ void OnVBlankBattle(GPU& gpu)
                     if (on) { UpdateHDTiles(gpu, e, b, dumpNow); updated[e][b] = true; }
                 }
             }
+        if (perf)
+        {
+            static double worst = 0; static int n = 0;
+            worst = std::max(worst, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tp0).count());
+            if (++n == 60) { printf("WC09 HD tiles worst %.2f ms\n", worst); fflush(stdout); worst = 0; n = 0; }
+        }
         // layers not scanned this frame never keep tiles from an earlier screen
         std::lock_guard<std::mutex> lk(Lock);
         for (int e = 0; e < 2; e++) for (int b = 0; b < 4; b++)
-            if (!updated[e][b] && HDTileAny[e][b]) { HDTileAny[e][b] = false; HDTileGen[e][b]++; }
+            if (!updated[e][b]) { HDTileLastKey[e][b] = 0; if (HDTileAny[e][b]) { HDTileAny[e][b] = false; HDTileGen[e][b]++; } }
     }
 
     std::lock_guard<std::mutex> lk(Lock);

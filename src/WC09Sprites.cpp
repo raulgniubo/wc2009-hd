@@ -373,6 +373,7 @@ SpriteHD IdentifySprite(int width, int height, bool bpp8, u32 tileOffset,
         const ImageInfo& im = Images[a.Image - kSpriteImageBase];
         out.Image = a.Image; out.OX = a.OX; out.OY = a.OY; out.OW = a.OW; out.OH = a.OH;
         out.DX = a.DX; out.DY = a.DY; out.HF = a.HF; out.VF = a.VF; out.IW = im.W; out.IH = im.H;
+        out.NoMask = im.Name.rfind("janken/coin_cursor", 0) == 0;
     }
     static const bool spridDbg = getenv("WC09_SPRID") != nullptr;
     if (spridDbg)
@@ -393,6 +394,15 @@ int CardFromThumbTexture(u64 hash)
     std::lock_guard<std::mutex> lk(Lock);
     auto it = ThumbTex.find(hash);
     return it == ThumbTex.end() ? -1 : it->second;
+}
+
+std::vector<std::string> SpriteImageNamesWithPrefix(const std::string& prefix)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    std::vector<std::string> out;
+    for (const ImageInfo& im : Images)
+        if (im.Name.compare(0, prefix.size(), prefix) == 0) out.push_back(im.Name);
+    return out;
 }
 
 std::string SpriteImageName(int image)

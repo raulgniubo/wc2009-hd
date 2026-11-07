@@ -231,6 +231,7 @@ vec4 GetSpritePixel(int sprite, vec2 coord)
         // as selection outlines that the HD picture can't know about)
         bool passthru = h.a > 0.15 && h.a < 0.45;
         if (h.a < 0.5 && !passthru) return vec4(0.0);
+        if ((hda.w & 16) != 0) return passthru ? vec4(0.0) : vec4(h.rgb, 1.0);
         // only where the game actually shows pixels (within 1 px): parts of an image the game
         // leaves blank or cuts off stay blank
         ivec2 base = ivec2((sprite & 0xF) * 64, (sprite >> 4) * 64);

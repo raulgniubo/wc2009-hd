@@ -104,6 +104,27 @@ void GLRenderer3D::UseRenderShader(bool wbuffer)
     HDModeULoc = glGetUniformLocation(RenderShader[flags], "uHDMode");
 }
 
+// Textures the game redraws while they're on screen (scrolling light, flicker, ...) come in many
+// versions; an HD pack only covers some of them, so the picture would jump between the HD and the
+// original one. A texture slot whose contents keep changing gets the original version only.
+bool GLRenderer3D::AnimatedTexture(u32 texparam, u64 hash, u32 w, u32 h, u32 textype)
+{
+    if (textype == 4 || w < 32 || h < 32) return false;          // UI pieces: handled by their own rules
+    u32 key = (texparam & 0xFFFF) | (w << 16) | (h << 24);
+    TexSlot& t = TexSlots[key];
+    if (t.Hash != hash)
+    {
+        if (t.Hash && HD3DFrame - t.LastChange < 30) t.Changes++;
+        else t.Changes = 0;
+        t.Hash = hash; t.LastChange = HD3DFrame;
+        if (t.Changes >= 6) t.AnimatedUntil = HD3DFrame + 1800;
+    }
+    if (TexSlots.size() > 4096) TexSlots.clear();
+    static const bool dbg = getenv("WC09_ANIMDBG") != nullptr;
+    if (dbg && t.AnimatedUntil > HD3DFrame && t.Changes == 6) { printf("WC09 animated texture slot %08x\n", key); fflush(stdout); }
+    return t.AnimatedUntil > HD3DFrame;
+}
+
 GLuint GLRenderer3D::GetHDNamed(const char* name)
 {
     auto it = HDNamed.find(name);
@@ -278,7 +299,9 @@ GLuint GLRenderer3D::GetHDCard(u64 hash, int card, u32 size, const u32* newPixel
     std::vector<u8> src; int sw = 0, sh = 0;
     const bool thumb = card & 0x10000;
     card &= 0xFFFF;
-    if (WC09::LoadCardImage(card, src, sw, sh) && sw > 1 && sh > 1)
+    int lr = WC09::LoadCardImageAsync(card, src, sw, sh);
+    if (lr == 0) return 0;   // loading on the worker thread: the original texture meanwhile
+    if (lr > 0 && sw > 1 && sh > 1)
     {
         const u32* orig = px->second.Px.data();
         const int S = size == 32 ? 8 : 512 / (int)size, W = (int)size * S;
@@ -840,7 +863,7 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
                     }
                     else
                     {
-                        curhd = hdon ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash, Texcache.LastTone, (textype >= 2 && textype <= 4) ? Texcache.LastNewPixels : nullptr, (int)texwidth, (int)TextureHeight(texparam)) : 0;
+                        curhd = hdon && !AnimatedTexture(texparam, Texcache.LastContentHash, texwidth, TextureHeight(texparam), textype) ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash, Texcache.LastTone, (textype >= 2 && textype <= 4) ? Texcache.LastNewPixels : nullptr, (int)texwidth, (int)TextureHeight(texparam)) : 0;
                         curhdmode = (textype == 1 || textype == 6) ? 2 : 1;
                     }
                 }

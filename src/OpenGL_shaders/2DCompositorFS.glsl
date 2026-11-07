@@ -71,6 +71,7 @@ uniform int uTextSmooth[4];  // layer holds anti-aliased game text: 1 = dark out
 uniform sampler2D TextMaskAll; // per map tile (64x64 grid, layer n at rows 64n): r = text tile, g/b = HD tile slot + 1
 uniform sampler2D HDTileAtlas; // 2048x2048, 64x64 per tile, 32 per row
 uniform bool uHDTiles[4];
+uniform bool uHDNoWin[4];   // screen-space HD image ignores the game's windows inside its rect
 
 vec4 HDScreenFetch(int n, vec2 coord, int line, out bool hit)
 {
@@ -637,6 +638,14 @@ vec4 CompositeLayers()
         winsel = winregs >> 16;
     if (inside_win0)
         winsel = winregs >> 24;
+
+    for (int n = 0; n < 4; n++)
+    {
+        if (!uHDNoWin[n]) continue;
+        vec2 sp = vec2(bgcoord.x, float(line) + bgcoord.y);
+        vec2 uv = (sp - uHDRect[n].xy) / uHDRect[n].zw;
+        if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0)))) winsel |= (1u << uint(n));
+    }
 
     for (int prio = 3; prio >= 0; prio--)
     {
