@@ -99,6 +99,8 @@ private:
     GLuint HDTileAtlasTex {}; bool HDTileAtlasTried {};
     GLint CompositorHDTilesULoc[4] {-1, -1, -1, -1};
     GLint CompositorHDNoWinULoc[4] {-1, -1, -1, -1};
+    GLint CompositorScanBaseULoc = -1;
+    int ScanlineChunk = 192;   // scanlines per compositor draw (96 when uniform blocks are small)
     bool HDTileAtlasOK();
     struct HDTexEntry { int Image; GLuint Tex; bool Valid; };
     std::vector<HDTexEntry> HDTextures;     // small LRU of uploaded HD BG images

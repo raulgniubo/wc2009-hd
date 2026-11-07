@@ -19,6 +19,7 @@
 #include "OpenGLSupport.h"
 
 #include <unordered_map>
+#include <cstring>
 #include <vector>
 
 #include <assert.h>
@@ -315,12 +316,105 @@ error:
     return linkingSucess;
 }
 
+#ifdef MELONDS_GLES
+// WC09 fork: the renderer's GLSL 1.40 shaders, adapted to GLSL ES 3.00 (version line, default
+// precisions, explicit output locations instead of glBindFragDataLocation)
+#ifdef MELONDS_GLES_30
+static bool HasFramebufferFetch()
+{
+    static int has = -1;
+    if (has < 0)
+    {
+        has = 0;
+        GLint n = 0;
+        glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+        for (GLint i = 0; i < n; i++)
+        {
+            const char* e = (const char*)glGetStringi(GL_EXTENSIONS, i);
+            if (e && !strcmp(e, "GL_EXT_shader_framebuffer_fetch")) has = 1;
+        }
+        Log(LogLevel::Info, "GLES 3.0: framebuffer fetch %s\n", has ? "available" : "MISSING (attribute masks off)");
+    }
+    return has == 1;
+}
+#endif
+static std::string ToES(const std::string& src, bool fragment, const std::initializer_list<AttributeTarget>& outs)
+{
+    std::string s = src;
+    size_t v = s.find("#version");
+    size_t eol = v == std::string::npos ? std::string::npos : s.find('\n', v);
+    std::string head = "#version 300 es\n"
+        "precision highp float;\nprecision highp int;\n"
+        "precision highp sampler2D;\nprecision highp sampler2DArray;\n"
+        "precision highp isampler2D;\nprecision highp usampler2D;\n"
+        "precision highp isampler2DArray;\nprecision highp usampler2DArray;\n";
+    if (v != std::string::npos) s = s.substr(0, v) + head + s.substr(eol + 1);
+    else s = head + s;
+#ifdef MELONDS_GLES_30
+    // no per-attachment colour masks in ES 3.0: a second output is masked in the shader (it reads
+    // the current value with framebuffer fetch and keeps the masked channels, see GLES_Compat.h)
+    std::string maskOut;
+    if (fragment && HasFramebufferFetch())
+        for (const AttributeTarget& t : outs)
+            if (t.Location == 1) maskOut = t.Name;
+#endif
+    if (fragment)
+        for (const AttributeTarget& t : outs)
+        {
+            // "out <type> <name>;" at global scope
+            std::string nm = t.Name;
+            size_t pos = 0;
+            while ((pos = s.find("out ", pos)) != std::string::npos)
+            {
+                bool lineStart = pos == 0 || s[pos - 1] == '\n';
+                size_t semi = s.find(';', pos);
+                if (lineStart && semi != std::string::npos)
+                {
+                    std::string decl = s.substr(pos, semi - pos);
+                    size_t sp = decl.find_last_of(" \t");
+                    if (sp != std::string::npos && decl.substr(sp + 1) == nm)
+                    {
+                        std::string lay = "layout(location = " + std::to_string(t.Location) + ") ";
+#ifdef MELONDS_GLES_30
+                        if (nm == maskOut) lay += "in";   // "inout"
+#endif
+                        s.insert(pos, lay);
+                        pos += lay.size();
+                        break;
+                    }
+                }
+                pos += 4;
+            }
+        }
+#ifdef MELONDS_GLES_30
+    if (!maskOut.empty())
+    {
+        size_t m = s.find("void main()");
+        if (m != std::string::npos)
+        {
+            s.replace(m, 11, "void wc09_main()");
+            s += "\nuniform vec4 uWC09Mask1;\nvoid main()\n{\n    vec4 wc09prev = " + maskOut + ";\n    wc09_main();\n    "
+                 + maskOut + " = mix(wc09prev, " + maskOut + ", uWC09Mask1);\n}\n";
+            size_t nl = s.find('\n');
+            s.insert(nl + 1, "#extension GL_EXT_shader_framebuffer_fetch : require\n");
+        }
+    }
+#endif
+    return s;
+}
+#endif
+
 bool CompileVertexFragmentProgram(GLuint& result,
-    const std::string& vs, const std::string& fs,
+    const std::string& vs_, const std::string& fs_,
     const std::string& name,
     const std::initializer_list<AttributeTarget>& vertexInAttrs,
     const std::initializer_list<AttributeTarget>& fragmentOutAttrs)
 {
+#ifdef MELONDS_GLES
+    const std::string vs = ToES(vs_, false, fragmentOutAttrs), fs = ToES(fs_, true, fragmentOutAttrs);
+#else
+    const std::string& vs = vs_; const std::string& fs = fs_;
+#endif
     GLuint shaders[2] =
     {
         glCreateShader(GL_VERTEX_SHADER),

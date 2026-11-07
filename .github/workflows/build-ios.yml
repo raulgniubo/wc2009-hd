@@ -1,0 +1,37 @@
+name: iOS
+
+# started by hand (Actions > iOS > Run workflow). The artifact is a ready Xcode project (core
+# library included): open it, pick your Team under Signing & Capabilities, run on the iPhone.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  xcode-project:
+    runs-on: macos-26
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v6
+      - name: Set up CMake
+        uses: lukka/get-cmake@latest
+      - name: Build the core library
+        run: mobile/ios/build_ios_lib.sh
+      - name: Check the app builds (unsigned)
+        run: |
+          xcodebuild -project mobile/ios/WC2009HD.xcodeproj -target WC2009HD -configuration Release \
+            -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -30
+          test -d mobile/ios/build/Release-iphoneos/WC2009HD.app
+      - name: Package the Xcode project
+        run: |
+          D="out/WC2009HD-iOS"
+          mkdir -p "$D"
+          cp -R mobile/ios/WC2009HD mobile/ios/WC2009HD.xcodeproj mobile/ios/lib mobile/ios/include "$D/"
+          cp mobile/ios/README.txt "$D/READ_ME.txt"
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: WC2009HD-iOS-Xcode
+          path: out/

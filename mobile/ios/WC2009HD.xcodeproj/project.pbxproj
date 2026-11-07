@@ -1,0 +1,305 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		E5C5DB0A13693561BBBB3338 /* main.mm */ = {isa = PBXBuildFile; fileRef = F2BC934DF77530F89109EC95 /* main.mm */; };
+		262673F27DBD85E2AEF9A09A /* Assets.xcassets */ = {isa = PBXBuildFile; fileRef = BBE03F3784F40D95E23D8465 /* Assets.xcassets */; };
+		C2234ECC60E7247FF72C9AFD /* Inter-Medium.ttf */ = {isa = PBXBuildFile; fileRef = E4F49D1654B4873E2AA889D4 /* Inter-Medium.ttf */; };
+		D6CBB88375F315E4EF6587DD /* Inter-Bold.ttf */ = {isa = PBXBuildFile; fileRef = 93798B58BC4ED5730EC0FD7A /* Inter-Bold.ttf */; };
+		1CBF955883E83E464C8B5ABD /* OpenGLES.framework */ = {isa = PBXBuildFile; fileRef = DEF3508B87BF86378955DA60 /* OpenGLES.framework */; };
+		64601040547024233E93B7DB /* GLKit.framework */ = {isa = PBXBuildFile; fileRef = 071D806958E72FA34F0E8517 /* GLKit.framework */; };
+		7B590474DD3E432BA4ED33F3 /* AVFoundation.framework */ = {isa = PBXBuildFile; fileRef = 16225A9ADB9095E09FCF4728 /* AVFoundation.framework */; };
+		62F68099BAD4BCA98427909C /* GameController.framework */ = {isa = PBXBuildFile; fileRef = 8BA08EC89D68E007A440D126 /* GameController.framework */; };
+		9406A089ACCE7C0AB9D1B2FC /* UIKit.framework */ = {isa = PBXBuildFile; fileRef = 66FF4E2034343915F34CD206 /* UIKit.framework */; };
+		E4B6A2F4B9D262B55267EC15 /* QuartzCore.framework */ = {isa = PBXBuildFile; fileRef = EDFDA4133F0D395CA22654DD /* QuartzCore.framework */; };
+		0B82586B60C3C8B46ED7BC7A /* CoreGraphics.framework */ = {isa = PBXBuildFile; fileRef = A4F371C4F7EE2340D814A91C /* CoreGraphics.framework */; };
+		A48BE848118E6F61D924AB27 /* AudioToolbox.framework */ = {isa = PBXBuildFile; fileRef = 038412974CD3C477A369F0B8 /* AudioToolbox.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		F2BC934DF77530F89109EC95 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = "main.mm"; sourceTree = "<group>"; };
+		00C6909BACF0CB8349047A8D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
+		BBE03F3784F40D95E23D8465 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>"; };
+		E4F49D1654B4873E2AA889D4 /* Inter-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "fonts/Inter-Medium.ttf"; sourceTree = "<group>"; };
+		93798B58BC4ED5730EC0FD7A /* Inter-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "fonts/Inter-Bold.ttf"; sourceTree = "<group>"; };
+		DEF3508B87BF86378955DA60 /* OpenGLES.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenGLES.framework; path = System/Library/Frameworks/OpenGLES.framework; sourceTree = SDKROOT; };
+		071D806958E72FA34F0E8517 /* GLKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GLKit.framework; path = System/Library/Frameworks/GLKit.framework; sourceTree = SDKROOT; };
+		16225A9ADB9095E09FCF4728 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		8BA08EC89D68E007A440D126 /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
+		66FF4E2034343915F34CD206 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		EDFDA4133F0D395CA22654DD /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		A4F371C4F7EE2340D814A91C /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		038412974CD3C477A369F0B8 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		F5BF48AA40CAD7891EB709FC /* WC2009HD.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WC2009HD.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4FCBC29864E7C7752B7E193F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1CBF955883E83E464C8B5ABD /* OpenGLES.framework */,
+				64601040547024233E93B7DB /* GLKit.framework */,
+				7B590474DD3E432BA4ED33F3 /* AVFoundation.framework */,
+				62F68099BAD4BCA98427909C /* GameController.framework */,
+				9406A089ACCE7C0AB9D1B2FC /* UIKit.framework */,
+				E4B6A2F4B9D262B55267EC15 /* QuartzCore.framework */,
+				0B82586B60C3C8B46ED7BC7A /* CoreGraphics.framework */,
+				A48BE848118E6F61D924AB27 /* AudioToolbox.framework */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2B731CEFC6751AAE0EC69B98 = {
+			isa = PBXGroup;
+			children = (
+				20F4BD606C0F6D1645AE4919 /* WC2009HD */,
+				17D4474801E7FB00E1C94899 /* Frameworks */,
+				A8CBE22D73EBCC4E5F27B59C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		20F4BD606C0F6D1645AE4919 /* WC2009HD */ = {
+			isa = PBXGroup;
+			children = (
+				F2BC934DF77530F89109EC95 /* main.mm */,
+				00C6909BACF0CB8349047A8D /* Info.plist */,
+				BBE03F3784F40D95E23D8465 /* Assets.xcassets */,
+				E4F49D1654B4873E2AA889D4 /* Inter-Medium.ttf */,
+				93798B58BC4ED5730EC0FD7A /* Inter-Bold.ttf */,
+			);
+			path = WC2009HD;
+			sourceTree = "<group>";
+		};
+		17D4474801E7FB00E1C94899 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				DEF3508B87BF86378955DA60 /* OpenGLES.framework */,
+				071D806958E72FA34F0E8517 /* GLKit.framework */,
+				16225A9ADB9095E09FCF4728 /* AVFoundation.framework */,
+				8BA08EC89D68E007A440D126 /* GameController.framework */,
+				66FF4E2034343915F34CD206 /* UIKit.framework */,
+				EDFDA4133F0D395CA22654DD /* QuartzCore.framework */,
+				A4F371C4F7EE2340D814A91C /* CoreGraphics.framework */,
+				038412974CD3C477A369F0B8 /* AudioToolbox.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		A8CBE22D73EBCC4E5F27B59C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F5BF48AA40CAD7891EB709FC /* WC2009HD.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		42AEFBAE01D2DFD981F7DA7D /* WC2009HD */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5EB39897192143D4967C0D30;
+			buildPhases = (
+				B962B35226E1881AB37D0C5B /* Core library */,
+				C197A1D4E0DE673615AC32CB /* Sources */,
+				4FCBC29864E7C7752B7E193F /* Frameworks */,
+				8A6A452CEE30B0908A47D41D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WC2009HD;
+			productName = WC2009HD;
+			productReference = F5BF48AA40CAD7891EB709FC /* WC2009HD.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		46F86FAA6BBF9AC94A7E4595 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					42AEFBAE01D2DFD981F7DA7D = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 32D42B6A09FA42C6EFFC8E0F;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 2B731CEFC6751AAE0EC69B98;
+			productRefGroup = A8CBE22D73EBCC4E5F27B59C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				42AEFBAE01D2DFD981F7DA7D /* WC2009HD */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8A6A452CEE30B0908A47D41D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				262673F27DBD85E2AEF9A09A /* Assets.xcassets */,
+				C2234ECC60E7247FF72C9AFD /* Inter-Medium.ttf */,
+				D6CBB88375F315E4EF6587DD /* Inter-Bold.ttf */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B962B35226E1881AB37D0C5B /* Core library */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Core library";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ ! -f \"$SRCROOT/lib/libwc09.a\" ]; then\n  export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\n  if command -v cmake >/dev/null; then\n    \"$SRCROOT/build_ios_lib.sh\"\n  else\n    echo \"error: lib/libwc09.a is missing. Use the ready-made iOS download, or install cmake (brew install cmake) so Xcode can build it.\"\n    exit 1\n  fi\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C197A1D4E0DE673615AC32CB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5C5DB0A13693561BBBB3338 /* main.mm */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		27215BEB910BA504F03CFB6F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		2FDC84E905F8E643EE1884BD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_OPTIMIZATION_LEVEL = s;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = iphoneos;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		5AF3EE45171718374DFFC705 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = ("GLES_SILENCE_DEPRECATION=1", "$(inherited)");
+				HEADER_SEARCH_PATHS = ("$(SRCROOT)/include", "$(SRCROOT)/../core");
+				INFOPLIST_FILE = WC2009HD/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
+				LIBRARY_SEARCH_PATHS = ("$(SRCROOT)/lib");
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = ("-lwc09", "-lc++");
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.wc2009hd.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5CFA188EA7F352255591A33B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = ("GLES_SILENCE_DEPRECATION=1", "$(inherited)");
+				HEADER_SEARCH_PATHS = ("$(SRCROOT)/include", "$(SRCROOT)/../core");
+				INFOPLIST_FILE = WC2009HD/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
+				LIBRARY_SEARCH_PATHS = ("$(SRCROOT)/lib");
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = ("-lwc09", "-lc++");
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.wc2009hd.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		32D42B6A09FA42C6EFFC8E0F = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				27215BEB910BA504F03CFB6F /* Debug */,
+				2FDC84E905F8E643EE1884BD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5EB39897192143D4967C0D30 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5AF3EE45171718374DFFC705 /* Debug */,
+				5CFA188EA7F352255591A33B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+}

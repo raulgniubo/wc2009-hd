@@ -7,6 +7,10 @@
 // Make sure to include quotes or angle brackets as needed,
 // and that all targets get the same MELONDS_GL_HEADER definition.
 
+#if defined(MELONDS_GLES) && !defined(MELONDS_GL_HEADER)
+#define MELONDS_GL_HEADER "GLES_Compat.h"
+#endif
+
 #ifndef MELONDS_GL_HEADER
 #define MELONDS_GL_HEADER "\"frontend/glad/glad.h\""
 #endif

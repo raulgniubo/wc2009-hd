@@ -84,8 +84,29 @@ bool GLRenderer2D::InitShaders()
                                               {{"oColor", 0}, {"oFlags", 1}}))
         return false;
 
+    // GPUs with the minimum 16 KB uniform block size (iPhones) can't hold all 192 scanlines:
+    // the compositor then gets 96 lines at a time (see RenderScreen)
+    std::string compFS = k2DCompositorFS;
+    {
+        GLint maxBlock = 0;
+        glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &maxBlock);
+        ScanlineChunk = (maxBlock >= (GLint)sizeof(sScanlineConfig) && !getenv("WC09_SPLIT_SCANLINES")) ? 192 : 96;
+        if (ScanlineChunk < 192)
+        {
+            size_t d = compFS.find("sScanline uScanline[192];");
+            if (d != std::string::npos)
+            {
+                compFS.replace(d, 25, "sScanline uScanlineH[96];");
+                size_t at = 0;
+                while ((at = compFS.find("uScanline[", at)) != std::string::npos)
+                { compFS.replace(at, 10, "uScanlineH[-uScanlineBase + "); at += 28; }
+                size_t ub = compFS.find("uniform ");
+                compFS.insert(ub, "uniform int uScanlineBase;\n");
+            }
+        }
+    }
     if (!OpenGL::CompileVertexFragmentProgram(CompositorShader,
-                                              k2DCompositorVS, k2DCompositorFS,
+                                              k2DCompositorVS, compFS,
                                               "2DCompositorShader",
                                               {{"vPosition", 0}},
                                               {{"oColor", 0}}))
@@ -182,6 +203,7 @@ bool GLRenderer2D::InitShaders()
         glUniform1i(t, 8 + i);
         CompositorHDTilesULoc[i] = glGetUniformLocation(CompositorShader, ("uHDTiles[" + n + "]").c_str());
         CompositorHDNoWinULoc[i] = glGetUniformLocation(CompositorShader, ("uHDNoWin[" + n + "]").c_str());
+        if (i == 0) CompositorScanBaseULoc = glGetUniformLocation(CompositorShader, "uScanlineBase");
     }
     glUniform1i(glGetUniformLocation(CompositorShader, "TextMaskAll"), 12);
     glUniform1i(glGetUniformLocation(CompositorShader, "HDTileAtlas"), 13);
@@ -235,6 +257,7 @@ bool GLRenderer2D::InitShaders(GLRenderer2D& other)
         CompositorTextSmoothULoc[i] = other.CompositorTextSmoothULoc[i];
         CompositorHDTilesULoc[i] = other.CompositorHDTilesULoc[i];
         CompositorHDNoWinULoc[i] = other.CompositorHDNoWinULoc[i];
+        if (i == 0) { CompositorScanBaseULoc = other.CompositorScanBaseULoc; ScanlineChunk = other.ScanlineChunk; }
     }
 
     MosaicTex = other.MosaicTex;
@@ -2119,10 +2142,11 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
     glBindBufferBase(GL_UNIFORM_BUFFER, 23, CompositorConfigUBO);
 
     glBindBuffer(GL_UNIFORM_BUFFER, ScanlineConfigUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER,
-                    ystart * sizeof(sScanlineConfig::sScanline),
-                    (yend - ystart) * sizeof(sScanlineConfig::sScanline),
-                    &ScanlineConfig.uScanline[ystart]);
+    if (ScanlineChunk >= 192)
+        glBufferSubData(GL_UNIFORM_BUFFER,
+                        ystart * sizeof(sScanlineConfig::sScanline),
+                        (yend - ystart) * sizeof(sScanlineConfig::sScanline),
+                        &ScanlineConfig.uScanline[ystart]);
 
     UpdateCompositorConfig();
 
@@ -2237,7 +2261,22 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
 
     glBindBuffer(GL_ARRAY_BUFFER, Parent.RectVtxBuffer);
     glBindVertexArray(Parent.RectVtxArray);
-    glDrawArrays(GL_TRIANGLES, 0, 2*3);
+    if (ScanlineChunk >= 192)
+        glDrawArrays(GL_TRIANGLES, 0, 2*3);
+    else
+    {
+        // the scanline block only holds ScanlineChunk lines: draw the range in pieces
+        for (int y0 = ystart; y0 < yend; y0 += ScanlineChunk)
+        {
+            int y1 = std::min(yend, y0 + ScanlineChunk);
+            glBindBuffer(GL_UNIFORM_BUFFER, ScanlineConfigUBO);
+            glBufferSubData(GL_UNIFORM_BUFFER, 0, (y1 - y0) * sizeof(sScanlineConfig::sScanline),
+                            &ScanlineConfig.uScanline[y0]);
+            glUniform1i(CompositorScanBaseULoc, y0);
+            glScissor(0, y0 * ScaleFactor, ScreenW, (y1 - y0) * ScaleFactor);
+            glDrawArrays(GL_TRIANGLES, 0, 2*3);
+        }
+    }
 
     glDisable(GL_SCISSOR_TEST);
 }

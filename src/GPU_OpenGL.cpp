@@ -44,9 +44,13 @@ GLRenderer::GLRenderer(melonDS::NDS& nds, bool compute)
 
     // TODO, eventually: figure out a nicer way to support different 3D renderers?
     IsCompute = compute;
+#ifndef MELONDS_GLES
     if (IsCompute)
         Rend3D = std::make_unique<ComputeRenderer3D>(GPU.GPU3D, *this);
     else
+#else
+    IsCompute = false;
+#endif
         Rend3D = std::make_unique<GLRenderer3D>(GPU.GPU3D, *this);
 
     ScaleFactor = 0;
@@ -329,12 +333,14 @@ void GLRenderer::SetRenderSettings(RendererSettings& settings)
     rend2d = dynamic_cast<GLRenderer2D*>(Rend2D_B.get());
     rend2d->SetScaleFactor(settings.ScaleFactor);
 
+#ifndef MELONDS_GLES
     if (IsCompute)
     {
         auto rend3d = dynamic_cast<ComputeRenderer3D *>(Rend3D.get());
         rend3d->SetRenderSettings(settings.ScaleFactor, settings.HiresCoordinates);
     }
     else
+#endif
     {
         auto rend3d = dynamic_cast<GLRenderer3D *>(Rend3D.get());
         rend3d->SetRenderSettings(settings.ScaleFactor, settings.BetterPolygons);

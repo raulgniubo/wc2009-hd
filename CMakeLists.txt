@@ -105,7 +105,17 @@ endif()
 
 option(BUILD_QT_SDL "Build Qt/SDL frontend" ON)
 
+option(MELONDS_GLES "Build the OpenGL renderer for OpenGL ES (mobile)" OFF)
+option(MELONDS_GLES_30 "OpenGL ES 3.0 only (iOS): emulate the ES 3.2 features the renderer uses" OFF)
+option(BUILD_WC09_MOBILE "Build the WC2009 HD mobile core" OFF)
+option(BUILD_WC09_TEST "Build the GLES test harness (Linux)" OFF)
 add_subdirectory(src)
+if (BUILD_WC09_MOBILE)
+    add_subdirectory(mobile/core)
+    if (BUILD_WC09_TEST)
+        add_subdirectory(mobile/linux_test)
+    endif()
+endif()
 
 if (BUILD_QT_SDL)
     add_subdirectory(src/frontend/qt_sdl)

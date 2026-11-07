@@ -1,0 +1,41 @@
+name: Android
+
+# started by hand (Actions > Android > Run workflow); the APK is in the run's artifacts
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v6
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+      - name: Pick the NDK and CMake
+        run: |
+          echo "ANDROID_NDK_VERSION=$(basename "$ANDROID_NDK_LATEST_HOME")" >> "$GITHUB_ENV"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "cmake;3.31.6" > /dev/null
+      - name: Build the APK
+        working-directory: mobile/android
+        run: gradle --no-daemon assembleRelease
+      - name: Collect
+        run: |
+          mkdir -p out
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk "out/Yu-Gi-Oh 5Ds WC2009 HD.apk"
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: WC2009HD-Android
+          path: out/

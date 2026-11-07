@@ -1,0 +1,62 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.wc2009hd'
+    compileSdk 35
+    ndkVersion System.getenv("ANDROID_NDK_VERSION") ?: "27.2.12479018"
+
+    defaultConfig {
+        applicationId "io.github.wc2009hd"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+        ndk { abiFilters 'arm64-v8a' }
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_static", "-DANDROID_ARM_NEON=TRUE"
+                cppFlags "-std=c++17"
+            }
+        }
+    }
+
+    signingConfigs {
+        // fixed key, so a newer APK installs over the older one (keeps the app's settings)
+        wc09 {
+            storeFile file("wc09.keystore")
+            storePassword "wc2009hd"
+            keyAlias "wc09"
+            keyPassword "wc2009hd"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.wc09
+        }
+        debug {
+            signingConfig signingConfigs.wc09
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.31.6+"
+        }
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs = ['../../assets']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

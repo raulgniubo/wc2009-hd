@@ -103,12 +103,18 @@ if (ENABLE_OGLRENDERER)
         GPU_OpenGL.cpp
         GPU2D_OpenGL.cpp
         GPU3D_OpenGL.cpp
-        GPU3D_Compute.cpp
+        $<$<NOT:$<BOOL:${MELONDS_GLES}>>:GPU3D_Compute.cpp>
         GPU3D_TexcacheOpenGL.cpp
         GPU3D_TexcacheOpenGL.h
         OpenGLSupport.cpp)
 
     target_compile_definitions(core PUBLIC OGLRENDERER_ENABLED)
+    if (MELONDS_GLES)
+        target_compile_definitions(core PUBLIC MELONDS_GLES)
+        if (MELONDS_GLES_30)
+            target_compile_definitions(core PUBLIC MELONDS_GLES_30)
+        endif()
+    endif()
 endif()
 
 if (ENABLE_JIT)
