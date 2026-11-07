@@ -74,6 +74,7 @@ private:
     GLint SpriteRenderTransULoc {};
     GLint SpriteSmoothULoc {-1};
     GLint SprHDAULoc {-1}, SprHDBULoc {-1}, SprHDSizeULoc {-1};
+    GLuint SprHDUBO {};   // uSprHDA/uSprHDB
     WC09::SpriteHD WC09Spr[128];
     bool WC09LpEdge[128] {};   // sprite crosses the edge columns of the HD life-point panel
     struct WC09SprKey { u16 A0, A1, A2; u32 TileOffset; u64 Frame; } WC09SprCache[128] {};

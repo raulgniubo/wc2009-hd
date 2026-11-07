@@ -154,8 +154,8 @@ bool GLRenderer2D::InitShaders()
 
     SpriteRenderTransULoc = glGetUniformLocation(SpriteShader, "uRenderTransparent");
     SpriteSmoothULoc = glGetUniformLocation(SpriteShader, "uSmoothScale");
-    SprHDAULoc = glGetUniformLocation(SpriteShader, "uSprHDA");
-    SprHDBULoc = glGetUniformLocation(SpriteShader, "uSprHDB");
+    uniloc = glGetUniformBlockIndex(SpriteShader, "ubSprHD");
+    glUniformBlockBinding(SpriteShader, uniloc, 25);
     SprHDSizeULoc = glGetUniformLocation(SpriteShader, "uSprHDSize");
     for (int i = 0; i < kSprHDSlots; i++)   // units 8..15, then the free units 3..7
         glUniform1i(glGetUniformLocation(SpriteShader, ("SprHDTex[" + std::to_string(i) + "]").c_str()), i < 8 ? 8 + i : 3 + (i - 8));
@@ -410,6 +410,10 @@ bool GLRenderer2D::Init()
     static_assert((sizeof(sScanlineConfig) & 15) == 0);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(sScanlineConfig), nullptr, GL_STREAM_DRAW);
 
+    glGenBuffers(1, &SprHDUBO);
+    glBindBuffer(GL_UNIFORM_BUFFER, SprHDUBO);
+    glBufferData(GL_UNIFORM_BUFFER, 2 * 128 * 4 * sizeof(GLint), nullptr, GL_STREAM_DRAW);
+
     glGenBuffers(1, &SpriteScanlineConfigUBO);
     glBindBuffer(GL_UNIFORM_BUFFER, SpriteScanlineConfigUBO);
     static_assert((sizeof(sSpriteScanlineConfig) & 15) == 0);
@@ -600,6 +604,7 @@ GLRenderer2D::~GLRenderer2D()
 
     glDeleteBuffers(1, &ScanlineConfigUBO);
     glDeleteBuffers(1, &SpriteScanlineConfigUBO);
+    glDeleteBuffers(1, &SprHDUBO);
     glDeleteBuffers(1, &CompositorConfigUBO);
 }
 
@@ -1962,8 +1967,10 @@ void GLRenderer2D::DoRenderSprites(int line)
             glBindTexture(GL_TEXTURE_2D, k < numSlots ? slotTex[k] : 0);
         }
         glActiveTexture(GL_TEXTURE0);
-        glUniform4iv(SprHDAULoc, 128, hdA);
-        glUniform4iv(SprHDBULoc, 128, hdB);
+        glBindBuffer(GL_UNIFORM_BUFFER, SprHDUBO);
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(hdA), hdA);
+        glBufferSubData(GL_UNIFORM_BUFFER, sizeof(hdA), sizeof(hdB), hdB);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 25, SprHDUBO);
         glUniform2fv(SprHDSizeULoc, kSprHDSlots, hdSize);
     }
 

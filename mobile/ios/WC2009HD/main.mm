@@ -1157,7 +1157,15 @@ static std::atomic<bool> gMuted{false};
         CGFloat v = MAX(safe.top, safe.bottom), h = MAX(safe.left, safe.right);
         safe = UIEdgeInsetsMake(v, h, v, h);
     }
-    _layout.compute(self.view.bounds.size, safe, [Prefs() boolForKey:@"buttons"]);
+    BOOL buttons = [Prefs() boolForKey:@"buttons"];
+    if (!buttons)
+    {
+        // full screen really is the whole display: only the menu button keeps out of the system's areas
+        _layout.compute(self.view.bounds.size, UIEdgeInsetsZero, false);
+        CGFloat mb = 34, pad = 8, W = self.view.bounds.size.width;
+        _layout.menu = CGRectMake(W - safe.right - pad - mb, safe.top + pad, mb, mb);
+    }
+    else _layout.compute(self.view.bounds.size, safe, true);
     [_controls setNeedsDisplay];
 }
 

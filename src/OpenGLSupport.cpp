@@ -388,6 +388,12 @@ static std::string ToES(const std::string& src, bool fragment, const std::initia
                 pos += 4;
             }
         }
+    // "smooth" is the default anyway, and Apple's ES compiler rejects it as a qualifier
+    for (size_t at = 0; (at = s.find("smooth ", at)) != std::string::npos; )
+    {
+        bool word = at == 0 || s[at - 1] == ' ' || s[at - 1] == '\n' || s[at - 1] == '\t';
+        if (word) s.erase(at, 7); else at += 7;
+    }
 #ifdef MELONDS_GLES_30
     if (!maskOut.empty())
     {

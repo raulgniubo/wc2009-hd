@@ -79,8 +79,8 @@ inline void glesTexSubImage3D(GLenum t, GLint l, GLint x, GLint y, GLint z, GLsi
 #define glTexImage3D glesTexImage3D
 #define glTexSubImage3D glesTexSubImage3D
 
-// uniform buffer binding points: the renderer uses 0, 20-24 and 30-31; GLES only guarantees 24
-inline GLuint UBOBinding(GLuint b) { return b >= 30 ? b - 24 : (b >= 20 ? b - 19 : b); }
+// uniform buffer binding points: the renderer uses 0, 20-25 and 30-31; GLES only guarantees 24
+inline GLuint UBOBinding(GLuint b) { return b >= 30 ? b - 23 : (b >= 20 ? b - 19 : b); }
 inline void glesUniformBlockBinding(GLuint p, GLuint idx, GLuint b) { glUniformBlockBinding(p, idx, UBOBinding(b)); }
 inline void glesBindBufferBase(GLenum t, GLuint i, GLuint buf) { glBindBufferBase(t, t == GL_UNIFORM_BUFFER ? UBOBinding(i) : i, buf); }
 #define glUniformBlockBinding glesUniformBlockBinding

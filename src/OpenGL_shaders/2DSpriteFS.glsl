@@ -160,8 +160,12 @@ vec4 XbrFetchSprite(int sprite, vec2 coord)
 }
 
 // ---- WC09: HD sprite images (portraits, character figures, menu objects) ----
-uniform ivec4 uSprHDA[128];     // slot (-1 = none), image x/y of the matched OAM, flags (1 = hflip, 2 = vflip)
-uniform ivec4 uSprHDB[128];     // matched OAM w/h, tile-space offset x/y
+// a uniform block: 256 vectors would be over the 224 plain uniform vectors some GPUs allow (iPhone)
+layout(std140) uniform ubSprHD
+{
+    ivec4 uSprHDA[128];     // slot (-1 = none), image x/y of the matched OAM, flags (1 = hflip, 2 = vflip)
+    ivec4 uSprHDB[128];     // matched OAM w/h, tile-space offset x/y
+};
 uniform vec2 uSprHDSize[13];     // image size in original pixels
 uniform sampler2D SprHDTex[13];
 
