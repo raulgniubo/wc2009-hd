@@ -7,6 +7,7 @@
 #include <cstring>
 #include <algorithm>
 #include <mutex>
+#include <atomic>
 
 #define CANVAS_ITY_IMPLEMENTATION
 #include "third_party/canvas_ity.hpp"
@@ -388,6 +389,11 @@ bool LoadImageFile(const std::string& base, std::vector<u8>& rgba, int& w, int& 
 std::mutex RenderLock;   // canvas_ity is reentrant, but the fonts are shared
 }
 
+// panels are drawn at the screen's resolution (8x for everything was up to 16 times the pixels
+// at 2x, drawn on the CPU)
+static std::atomic<float> PanelK{4.f};
+void SetPanelScale(int scale) { PanelK = (float)std::max(3, std::min(8, scale)); }
+
 void SetupHDProvider(const std::string& folder, const std::string& fontDir)
 {
     if (FontMedium.empty()) FontMedium = ReadAll(fontDir + "/Inter-Medium.ttf");
@@ -400,7 +406,7 @@ void SetupHDProvider(const std::string& folder, const std::string& fontDir)
             int lp0, lp1, turn, phase; bool right;
             if (!WC09::GetLpPanel(atoi(name.c_str() + 8), lp0, lp1, turn, phase, right)) return false;
             std::lock_guard<std::mutex> lk(RenderLock);
-            rgba = LpPanel(lp0, lp1, turn, phase, right, 8.f, w, h);
+            rgba = LpPanel(lp0, lp1, turn, phase, right, PanelK, w, h);
             return !rgba.empty();
         }
         if (starts("statpanel/"))
@@ -408,13 +414,13 @@ void SetupHDProvider(const std::string& folder, const std::string& fontDir)
             WC09::StatPanelInfo info;
             if (!WC09::GetStatPanel(atoi(name.c_str() + 10), info)) return false;
             std::lock_guard<std::mutex> lk(RenderLock);
-            rgba = StatPanel(info, 8.f, w, h);
+            rgba = StatPanel(info, PanelK, w, h);
             return !rgba.empty();
         }
         if (starts("decktext/") || starts("deckname/"))
         {
             std::lock_guard<std::mutex> lk(RenderLock);
-            rgba = DeckText(atoi(name.c_str() + 9), 8.f, starts("deckname/"), w, h);
+            rgba = DeckText(atoi(name.c_str() + 9), PanelK, starts("deckname/"), w, h);
             return !rgba.empty();
         }
         if (starts("textpanel/"))
@@ -423,7 +429,7 @@ void SetupHDProvider(const std::string& folder, const std::string& fontDir)
             bool shortVer = !id.empty() && id.back() == 's';
             if (shortVer) id.pop_back();
             std::lock_guard<std::mutex> lk(RenderLock);
-            rgba = TextPanel(atoi(id.c_str()), 8.f, shortVer ? WC09::kPanelShortH : WC09::kPanelH, w, h);
+            rgba = TextPanel(atoi(id.c_str()), PanelK, shortVer ? WC09::kPanelShortH : WC09::kPanelH, w, h);
             return !rgba.empty();
         }
         if (f.empty()) return false;

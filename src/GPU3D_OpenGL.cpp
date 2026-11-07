@@ -233,33 +233,35 @@ GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone, co
     std::vector<u8> rgba; int w = 0, h = 0;
     // redesigned pictures first (they apply to every colour variant): tex3d/s_<structure hash>,
     // tex3d/h_<structure hash of the top half>; then the exact texture: tex3d/<content hash>
-    bool ok = false;
+    std::vector<std::string> names;
     if (alphaHash)
     {
         // colour states first: s_<hash>_<hue><brightness>, s_<hash>_<hue>, then any colour
         char an[48];
         if (tone)
         {
-            snprintf(an, sizeof(an), "tex3d/s_%016llx_%c%c", (unsigned long long)alphaHash, tone >> 8, tone & 0xFF);
-            ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
-            if (!ok)
-            {
-                snprintf(an, sizeof(an), "tex3d/s_%016llx_%c", (unsigned long long)alphaHash, tone >> 8);
-                ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
-            }
+            snprintf(an, sizeof(an), "tex3d/s_%016llx_%c%c", (unsigned long long)alphaHash, tone >> 8, tone & 0xFF); names.push_back(an);
+            snprintf(an, sizeof(an), "tex3d/s_%016llx_%c", (unsigned long long)alphaHash, tone >> 8); names.push_back(an);
         }
-        if (!ok)
-        {
-            snprintf(an, sizeof(an), "tex3d/s_%016llx", (unsigned long long)alphaHash);
-            ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
-        }
+        snprintf(an, sizeof(an), "tex3d/s_%016llx", (unsigned long long)alphaHash); names.push_back(an);
     }
-    if (!ok && halfHash)
+    if (halfHash)
     {
-        char an[40]; snprintf(an, sizeof(an), "tex3d/h_%016llx", (unsigned long long)halfHash);
-        ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
+        char an[40]; snprintf(an, sizeof(an), "tex3d/h_%016llx", (unsigned long long)halfHash); names.push_back(an);
     }
-    if (!ok) ok = WC09::LoadHDImage(name, rgba, w, h) && w > 0 && h > 0;
+    names.push_back(name);
+    // the pictures are decoded on the worker thread (big PNGs would stall the game for a moment):
+    // the original texture shows until the HD one is ready
+    int& stage = HD3DStage[hash];
+    bool ok = false;
+    while (stage < (int)names.size())
+    {
+        int r = WC09::LoadHDImageAsync(names[stage], rgba, w, h);
+        if (r == 0) return 0;              // still loading
+        if (r > 0 && w > 0 && h > 0) { ok = true; break; }
+        stage++;                           // not there: next name
+    }
+    HD3DStage.erase(hash);
     if (!ok && px && pw * ph <= 64 * 32 && SmoothTextTexture(px, pw, ph, rgba))
     {
         // small text textures (names under cards in lists...): redrawn with smooth edges

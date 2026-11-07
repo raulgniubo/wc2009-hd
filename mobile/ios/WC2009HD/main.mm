@@ -1152,6 +1152,18 @@ static std::atomic<bool> gMuted{false};
     [self start];
 }
 
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    UIApplication.sharedApplication.idleTimerDisabled = YES;   // no dimming or locking while playing
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    UIApplication.sharedApplication.idleTimerDisabled = NO;
+}
+
 - (BOOL)prefersStatusBarHidden { return YES; }
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskAll; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }

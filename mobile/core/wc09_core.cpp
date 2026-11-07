@@ -81,7 +81,7 @@ void NoteLog(bool error, const char* text)
 }
 std::string Report;
 
-u64 PerfFrames = 0, PerfUs = 0, PerfStart = 0;
+u64 PerfFrames = 0, PerfUs = 0, PerfStart = 0, PerfMaxUs = 0;
 char PerfText[256] = "";
 
 // software renderer fallback: the RAM framebuffers go into this texture
@@ -186,6 +186,7 @@ void InitScreenProgram()
 void ApplyRenderSettings()
 {
     if (!Nds) return;
+    SetPanelScale(Scale);
     RendererSettings s { .ScaleFactor = Scale, .Threaded = false, .HiresCoordinates = true, .BetterPolygons = false };
     Nds->GetRenderer().SetRenderSettings(s);
 }
@@ -336,17 +337,19 @@ void wc09_run_frame(void)
     FlushSave(false);
     // performance numbers, averaged over about a second
     PerfFrames++;
-    PerfUs += Platform::GetUSCount() - t0;
+    u64 took = Platform::GetUSCount() - t0;
+    PerfUs += took;
+    PerfMaxUs = std::max(PerfMaxUs, took);
     u64 now = Platform::GetMSCount();
     if (now - PerfStart >= 1000)
     {
         auto& st = melonDS::GLES::St();
         double n = std::max<u64>(1, PerfFrames), secs = (now - PerfStart) / 1000.0;
-        snprintf(PerfText, sizeof(PerfText), "%.0f fps  ·  %.1f ms/frame  ·  %.0f draws  ·  %.0f+%.0f KB up  ·  %.1f reads",
-                 PerfFrames / secs, PerfUs / n / 1000.0, st.draws / n, st.bufBytes / n / 1024.0, st.texBytes / n / 1024.0, st.readbacks / n);
+        snprintf(PerfText, sizeof(PerfText), "%.0f fps  ·  %.1f ms/frame (max %.0f)  ·  %.0f draws  ·  %.0f+%.0f KB up  ·  %.1f reads",
+                 PerfFrames / secs, PerfUs / n / 1000.0, PerfMaxUs / 1000.0, st.draws / n, st.bufBytes / n / 1024.0, st.texBytes / n / 1024.0, st.readbacks / n);
         if (getenv("WC09_GLSTATS")) fprintf(stderr, "perf: %s (buf uploads %.0f, tex uploads %.0f)\n", PerfText, st.bufUploads / n, st.texUploads / n);
         st = melonDS::GLES::Stats{};
-        PerfFrames = 0; PerfUs = 0; PerfStart = now;
+        PerfFrames = 0; PerfUs = 0; PerfMaxUs = 0; PerfStart = now;
     }
 }
 

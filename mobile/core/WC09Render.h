@@ -9,4 +9,5 @@ namespace wc09m
 {
 // folder = the HDCards folder; fontDir holds Inter-Medium.ttf / Inter-Bold.ttf
 void SetupHDProvider(const std::string& folder, const std::string& fontDir);
+void SetPanelScale(int scale);   // the renderer scale (2-8): HD panels are drawn at it
 }
