@@ -2017,6 +2017,18 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
 {
     [super viewDidLoad];
     self.title = @"Nintendo DS";
+    // the app's name under the big title (iOS 26+), or as a small label in the bar before that
+    if ([self.navigationItem respondsToSelector:NSSelectorFromString(@"setSubtitle:")])
+        [self.navigationItem setValue:@"Dual HD" forKey:@"subtitle"];
+    else
+    {
+        UILabel* brand = [UILabel new];
+        brand.attributedText = [[NSAttributedString alloc] initWithString:@"DUAL HD" attributes:@{
+            NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightHeavy], NSKernAttributeName: @2.5,
+            NSForegroundColorAttributeName: Accent()}];
+        [brand sizeToFit];
+        self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:brand];
+    }
     self.view.backgroundColor = AppBackground();
     self.collectionView = [[UICollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:_grid];
     self.collectionView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;

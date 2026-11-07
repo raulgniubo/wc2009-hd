@@ -69,8 +69,14 @@ final class LibraryView extends LinearLayout {
         bar.setOrientation(HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(Ui.dp(c, 20), Ui.dp(c, 18), Ui.dp(c, 12), Ui.dp(c, 8));
+        LinearLayout titles = new LinearLayout(c);
+        titles.setOrientation(VERTICAL);
+        TextView brand = Ui.text(c, "DUAL HD", 12, Ui.ACCENT, true);
+        brand.setLetterSpacing(0.22f);
+        titles.addView(brand);
         TextView title = Ui.text(c, "Nintendo DS", 28, Ui.TEXT, true);
-        bar.addView(title, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
+        titles.addView(title);
+        bar.addView(titles, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
         TextView sortB = Ui.text(c, "⇅", 17, Ui.ACCENT, true);
         sortB.setPadding(Ui.dp(c, 14), Ui.dp(c, 6), Ui.dp(c, 14), Ui.dp(c, 6));
         sortB.setBackground(Ui.pressable(c, Ui.CARD, 18));
