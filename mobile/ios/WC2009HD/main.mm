@@ -652,6 +652,8 @@ static std::atomic<bool> gMuted{false};
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
+    UIScreen* screen = self.view.window.windowScene.screen;
+    if (screen && self.view.contentScaleFactor != screen.nativeScale) self.view.contentScaleFactor = screen.nativeScale;
     _layout.compute(self.view.bounds.size, self.view.safeAreaInsets, [Prefs() boolForKey:@"buttons"]);
     [_controls setNeedsDisplay];
 }
