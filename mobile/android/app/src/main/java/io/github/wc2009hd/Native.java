@@ -37,6 +37,7 @@ final class Native {
     static native boolean isHdGame();
     /** "renderer: OpenGL" / "renderer: SOFTWARE (OpenGL failed)" + GL info and startup errors */
     static native String rendererReport();
+    static native String perfText();
     /** 4-letter game code from the ROM header ("" if unreadable) */
     static native String romCode(String path);
 

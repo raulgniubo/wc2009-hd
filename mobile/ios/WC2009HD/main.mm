@@ -445,7 +445,7 @@ static void PostChange(NSString* key) { [NSNotificationCenter.defaultCenter post
 static void RegisterDefaults()
 {
     [Prefs() registerDefaults:@{
-        @"boxart": @YES, @"sort": @"recent", @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
+        @"boxart": @YES, @"sort": @"recent", @"perf": @NO, @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
         @"buttons": @YES, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
     }];
 }
@@ -924,7 +924,9 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
                       @{@"title": @"Smooth", @"detail": @"Blends the picture to fit your screen", @"value": @YES},
                       @{@"title": @"Sharp", @"detail": @"Keeps hard pixel edges", @"value": @NO}]},
                 @{@"type": @"switch", @"key": @"smooth2d", @"title": @"Smooth 2D Graphics", @"symbol": @"wand.and.stars", @"color": RGB(0x14B8A6),
-                  @"detail": @"Upscales menus and sprites with smooth edges instead of blocky pixels."}]},
+                  @"detail": @"Upscales menus and sprites with smooth edges instead of blocky pixels."},
+                @{@"type": @"switch", @"key": @"perf", @"title": @"Show Performance", @"symbol": @"speedometer", @"color": RGB(0x64748B),
+                  @"detail": @"Frame rate and timing in a corner of the game screen."}]},
             @{@"title": @"Controls", @"rows": @[
                 @{@"type": @"switch", @"key": @"buttons", @"title": @"On-Screen Buttons", @"symbol": @"gamecontroller.fill", @"color": RGB(0xF97316),
                   @"detail": @"Turn off for full screen: just the DS screens and a small menu button."},
@@ -1090,6 +1092,9 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
     Layout _layout;
     NSString* _rom;
     BOOL _fresh, _started, _paused, _ffwd, _flipped;
+    UILabel* _perf;
+    CFTimeInterval _perfShown, _drawSum;
+    int _drawCount;
     CFTimeInterval _base;
     long _framesRun;
     AVAudioEngine* _engine;
@@ -1127,6 +1132,13 @@ static std::atomic<bool> gMuted{false};
     _controls.opacity = [Prefs() floatForKey:@"opacity"];
     _controls.haptics = [Prefs() boolForKey:@"haptics"];
     [self.view addSubview:_controls];
+    _perf = [[UILabel alloc] initWithFrame:CGRectMake(8, 8, 600, 16)];
+    _perf.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
+    _perf.textColor = UIColor.whiteColor;
+    _perf.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
+    _perf.hidden = ![Prefs() boolForKey:@"perf"];
+    _perf.userInteractionEnabled = NO;
+    [self.view addSubview:_perf];
 
     NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
     [nc addObserver:self selector:@selector(willResign) name:UISceneWillDeactivateNotification object:nil];
@@ -1253,6 +1265,7 @@ static std::atomic<bool> gMuted{false};
     else if ([key isEqualToString:@"opacity"]) { _controls.opacity = [Prefs() floatForKey:@"opacity"]; [_controls setNeedsDisplay]; }
     else if ([key isEqualToString:@"haptics"]) _controls.haptics = [Prefs() boolForKey:@"haptics"];
     else if ([key isEqualToString:@"sound"]) gMuted = ![Prefs() boolForKey:@"sound"];
+    else if ([key isEqualToString:@"perf"]) _perf.hidden = ![Prefs() boolForKey:@"perf"];
 }
 
 // ---- audio ----
@@ -1311,6 +1324,23 @@ static std::atomic<bool> gMuted{false};
 }
 
 - (void)glkView:(GLKView*)view drawInRect:(CGRect)rect
+{
+    CFTimeInterval t0 = CACurrentMediaTime();
+    [self drawScreens:view];
+    _drawSum += CACurrentMediaTime() - t0; _drawCount++;
+    if (!_perf.hidden && t0 - _perfShown > 0.5)
+    {
+        _perfShown = t0;
+        _perf.text = [NSString stringWithFormat:@" %s  ·  draw %.1f ms ", wc09_perf_text(), _drawCount ? _drawSum / _drawCount * 1000 : 0];
+        [_perf sizeToFit];
+        CGRect f = _perf.frame;
+        f.origin = CGPointMake(self.view.safeAreaInsets.left + 8, self.view.safeAreaInsets.top + 6);
+        _perf.frame = f;
+        _drawSum = 0; _drawCount = 0;
+    }
+}
+
+- (void)drawScreens:(GLKView*)view
 {
     [view bindDrawable];
     glClearColor(0, 0, 0, 1);

@@ -81,6 +81,9 @@ void NoteLog(bool error, const char* text)
 }
 std::string Report;
 
+u64 PerfFrames = 0, PerfUs = 0, PerfStart = 0;
+char PerfText[256] = "";
+
 // software renderer fallback: the RAM framebuffers go into this texture
 GLuint SoftTex = 0;
 
@@ -324,12 +327,27 @@ void wc09_run_frame(void)
         do { r.ShaderCompileStep(cur, count); } while (cur < count);
         return;
     }
+    u64 t0 = Platform::GetUSCount();
     {
         std::lock_guard<std::mutex> lk(AudioLock);
         Nds->RunFrame();
         PushAudio();
     }
     FlushSave(false);
+    // performance numbers, averaged over about a second
+    PerfFrames++;
+    PerfUs += Platform::GetUSCount() - t0;
+    u64 now = Platform::GetMSCount();
+    if (now - PerfStart >= 1000)
+    {
+        auto& st = melonDS::GLES::St();
+        double n = std::max<u64>(1, PerfFrames), secs = (now - PerfStart) / 1000.0;
+        snprintf(PerfText, sizeof(PerfText), "%.0f fps  ·  %.1f ms/frame  ·  %.0f draws  ·  %.0f+%.0f KB up  ·  %.1f reads",
+                 PerfFrames / secs, PerfUs / n / 1000.0, st.draws / n, st.bufBytes / n / 1024.0, st.texBytes / n / 1024.0, st.readbacks / n);
+        if (getenv("WC09_GLSTATS")) fprintf(stderr, "perf: %s (buf uploads %.0f, tex uploads %.0f)\n", PerfText, st.bufUploads / n, st.texUploads / n);
+        st = melonDS::GLES::Stats{};
+        PerfFrames = 0; PerfUs = 0; PerfStart = now;
+    }
 }
 
 void wc09_draw_screen(int screen, int x, int y, int w, int h, int fbWidth, int fbHeight)
@@ -487,6 +505,8 @@ void wc09_set_option(int option, int value)
     }
     ApplyHdOptions();
 }
+
+const char* wc09_perf_text(void) { return PerfText; }
 
 const char* wc09_renderer_report(int* software)
 {

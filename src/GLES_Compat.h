@@ -33,6 +33,12 @@
 #define GL_BGRA 0x80E1
 #endif
 
+// per-frame GL statistics (Settings > Show performance, and WC09_GLSTATS in the test harness)
+namespace melonDS { namespace GLES {
+struct Stats { unsigned draws, bufUploads, bufBytes, texUploads, texBytes, readbacks; };
+inline Stats& St() { static Stats s{}; return s; }
+}}
+
 namespace melonDS { namespace GLES {
 // RGB5_A1 data in the desktop "1_5_5_5_REV" layout (DS colour: bits 0-4 red, 15 alpha) -> RGBA8
 inline const void* Convert5551(const void* src, size_t count)
@@ -56,11 +62,13 @@ inline GLenum Internal(GLenum internal) { return internal == GL_RGB5_A1 ? GL_RGB
 // texture uploads: the 15-bit DS formats become RGBA8
 inline void glesTexImage2D(GLenum t, GLint l, GLint ifmt, GLsizei w, GLsizei h, GLint b, GLenum f, GLenum ty, const void* d)
 {
+    if (d) { melonDS::GLES::St().texUploads++; melonDS::GLES::St().texBytes += w * h * 4; }
     if (ty == GL_UNSIGNED_SHORT_1_5_5_5_REV) { d = melonDS::GLES::Convert5551(d, (size_t)w * h); ty = GL_UNSIGNED_BYTE; ifmt = GL_RGBA8; f = GL_RGBA; }
     glTexImage2D(t, l, ifmt, w, h, b, f, ty, d);
 }
 inline void glesTexSubImage2D(GLenum t, GLint l, GLint x, GLint y, GLsizei w, GLsizei h, GLenum f, GLenum ty, const void* d)
 {
+    melonDS::GLES::St().texUploads++; melonDS::GLES::St().texBytes += w * h * 4;
     if (ty == GL_UNSIGNED_SHORT_1_5_5_5_REV) { d = melonDS::GLES::Convert5551(d, (size_t)w * h); ty = GL_UNSIGNED_BYTE; f = GL_RGBA; }
     glTexSubImage2D(t, l, x, y, w, h, f, ty, d);
 }
@@ -71,6 +79,7 @@ inline void glesTexImage3D(GLenum t, GLint l, GLint ifmt, GLsizei w, GLsizei h, 
 }
 inline void glesTexSubImage3D(GLenum t, GLint l, GLint x, GLint y, GLint z, GLsizei w, GLsizei h, GLsizei dp, GLenum f, GLenum ty, const void* d)
 {
+    melonDS::GLES::St().texUploads++; melonDS::GLES::St().texBytes += w * h * dp * 4;
     if (ty == GL_UNSIGNED_SHORT_1_5_5_5_REV) { d = melonDS::GLES::Convert5551(d, (size_t)w * h * dp); ty = GL_UNSIGNED_BYTE; f = GL_RGBA; }
     glTexSubImage3D(t, l, x, y, z, w, h, dp, f, ty, d);
 }
@@ -82,8 +91,76 @@ inline void glesTexSubImage3D(GLenum t, GLint l, GLint x, GLint y, GLint z, GLsi
 // uniform buffer binding points: the renderer uses 0, 20-25 and 30-31; GLES only guarantees 24
 inline GLuint UBOBinding(GLuint b) { return b >= 30 ? b - 23 : (b >= 20 ? b - 19 : b); }
 inline void glesUniformBlockBinding(GLuint p, GLuint idx, GLuint b) { glUniformBlockBinding(p, idx, UBOBinding(b)); }
-inline void glesBindBufferBase(GLenum t, GLuint i, GLuint buf) { glBindBufferBase(t, t == GL_UNIFORM_BUFFER ? UBOBinding(i) : i, buf); }
+inline void glesBindBufferBase(GLenum t, GLuint i, GLuint buf);
 #define glUniformBlockBinding glesUniformBlockBinding
+// Buffer updates never touch storage the GPU may still be reading: every update re-specifies the
+// whole buffer from a CPU copy ("orphaning"), so the driver hands out fresh memory instead of
+// making the CPU wait. GL-on-Metal (iPhone) otherwise stalls on each of the ~100 updates a frame.
+namespace melonDS { namespace GLES {
+struct BufInfo { std::vector<uint8_t> shadow; GLenum usage = GL_STREAM_DRAW; bool valid = false; };
+inline std::unordered_map<GLuint, BufInfo>& Bufs() { static std::unordered_map<GLuint, BufInfo> m; return m; }
+inline GLuint& Bound(GLenum t)
+{
+    static GLuint arr = 0, elem = 0, uni = 0, other = 0;
+    return t == GL_ARRAY_BUFFER ? arr : t == GL_ELEMENT_ARRAY_BUFFER ? elem : t == GL_UNIFORM_BUFFER ? uni : other;
+}
+}}
+inline void glesBindBuffer(GLenum t, GLuint b) { melonDS::GLES::Bound(t) = b; glBindBuffer(t, b); }
+inline void glesBufferData(GLenum t, GLsizeiptr n, const void* d, GLenum u)
+{
+    GLuint b = melonDS::GLES::Bound(t);
+    if (b)
+    {
+        auto& bi = melonDS::GLES::Bufs()[b];
+        bi.usage = u;
+        bi.valid = true;
+        if (d) bi.shadow.assign((const uint8_t*)d, (const uint8_t*)d + n);
+        else bi.shadow.assign((size_t)n, 0);
+    }
+    glBufferData(t, n, d, u);
+}
+inline void glesBufferSubData(GLenum t, GLintptr o, GLsizeiptr n, const void* d)
+{
+    melonDS::GLES::St().bufUploads++; melonDS::GLES::St().bufBytes += (unsigned)n;
+    auto& m = melonDS::GLES::Bufs();
+    auto it = m.find(melonDS::GLES::Bound(t));
+    if (it != m.end() && it->second.valid && o >= 0 && (size_t)(o + n) <= it->second.shadow.size())
+    {
+        memcpy(&it->second.shadow[o], d, (size_t)n);
+        glBufferData(t, (GLsizeiptr)it->second.shadow.size(), it->second.shadow.data(), it->second.usage);
+        return;
+    }
+    glBufferSubData(t, o, n, d);
+}
+inline void glesDeleteBuffers(GLsizei n, const GLuint* ids)
+{
+    for (GLsizei i = 0; i < n; i++) melonDS::GLES::Bufs().erase(ids[i]);
+    glDeleteBuffers(n, ids);
+}
+#define glBindBuffer glesBindBuffer
+#define glBufferData glesBufferData
+#define glBufferSubData glesBufferSubData
+#define glDeleteBuffers glesDeleteBuffers
+inline void glesBindBufferBase(GLenum t, GLuint i, GLuint buf)
+{
+    melonDS::GLES::Bound(t) = buf;   // also binds the generic target
+    glBindBufferBase(t, t == GL_UNIFORM_BUFFER ? UBOBinding(i) : i, buf);
+}
+inline void glesReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum f, GLenum ty, void* d)
+{
+    melonDS::GLES::St().readbacks++;
+    if (ty != GL_UNSIGNED_SHORT_1_5_5_5_REV) { glReadPixels(x, y, w, h, f, ty, d); return; }
+    static thread_local std::vector<uint8_t> tmp;
+    tmp.resize((size_t)w * h * 4);
+    glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, tmp.data());
+    uint16_t* o = (uint16_t*)d;
+    for (size_t i = 0; i < (size_t)w * h; i++)
+    {
+        const uint8_t* p = &tmp[i * 4];
+        o[i] = (uint16_t)((p[0] >> 3) | ((p[1] >> 3) << 5) | ((p[2] >> 3) << 10) | (p[3] ? 0x8000 : 0));
+    }
+}
+#define glReadPixels glesReadPixels
 #define glBindBufferBase glesBindBufferBase
 
 #ifdef MELONDS_GLES_30
@@ -205,12 +282,14 @@ inline void gles30Clear(GLbitfield m)
 }
 inline void gles30DrawArrays(GLenum mode, GLint first, GLsizei count)
 {
+    melonDS::GLES::St().draws++;
     bool r = melonDS::GLES30::PrepareDraw();
     glDrawArrays(mode, first, count);
     melonDS::GLES30::FinishDraw(r);
 }
 inline void gles30DrawElements(GLenum mode, GLsizei count, GLenum type, const void* idx)
 {
+    melonDS::GLES::St().draws++;
     bool r = melonDS::GLES30::PrepareDraw();
     glDrawElements(mode, count, type, idx);
     melonDS::GLES30::FinishDraw(r);
@@ -224,6 +303,11 @@ inline void gles30DrawElements(GLenum mode, GLsizei count, GLenum type, const vo
 #define glClear gles30Clear
 #define glDrawArrays gles30DrawArrays
 #define glDrawElements gles30DrawElements
+#else
+inline void glesDrawArrays(GLenum m, GLint f, GLsizei c) { melonDS::GLES::St().draws++; glDrawArrays(m, f, c); }
+inline void glesDrawElements(GLenum m, GLsizei c, GLenum t, const void* i) { melonDS::GLES::St().draws++; glDrawElements(m, c, t, i); }
+#define glDrawArrays glesDrawArrays
+#define glDrawElements glesDrawElements
 #endif
 
 inline void glClearDepth(double d) { glClearDepthf((float)d); }
@@ -231,6 +315,7 @@ inline void glDepthRange(double n, double f) { glDepthRangef((float)n, (float)f)
 inline void glDrawBuffer(GLenum b) { glDrawBuffers(1, &b); }
 inline void* glMapBuffer(GLenum target, GLenum)
 {
+    { auto it = melonDS::GLES::Bufs().find(melonDS::GLES::Bound(target)); if (it != melonDS::GLES::Bufs().end()) it->second.valid = false; }
     GLint size = 0; glGetBufferParameteriv(target, GL_BUFFER_SIZE, &size);
     return glMapBufferRange(target, 0, size, GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
 }

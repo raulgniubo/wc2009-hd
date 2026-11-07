@@ -54,6 +54,15 @@ public final class MainActivity extends Activity
     private GameView game;
     private ControlsView controls;
     private File currentRom;
+    private TextView perfView;
+    private final android.os.Handler perfHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable perfTick = new Runnable() {
+        @Override public void run() {
+            if (game == null || perfView == null) return;
+            if (perfView.getVisibility() == View.VISIBLE) perfView.setText(Native.perfText());
+            perfHandler.postDelayed(this, 500);
+        }
+    };
     private boolean freshStart;
 
     // ================================================================ lifecycle
@@ -565,6 +574,7 @@ public final class MainActivity extends Activity
             case "haptics": controls.setHaptics(SettingsView.on(prefs, "haptics")); break;
             case "sound": Native.setMuted(!SettingsView.on(prefs, "sound")); break;
             case "ffSpeed": game.setFastForwardSpeed(SettingsView.ffSpeed(prefs)); break;
+            case "perf": if (perfView != null) perfView.setVisibility(SettingsView.on(prefs, "perf") ? View.VISIBLE : View.GONE); break;
         }
     }
 
@@ -591,6 +601,14 @@ public final class MainActivity extends Activity
         root.setBackgroundColor(Color.BLACK);
         root.addView(game, new FrameLayout.LayoutParams(-1, -1));
         root.addView(controls, new FrameLayout.LayoutParams(-1, -1));
+        perfView = Ui.text(this, "", 11, 0xFFFFFFFF, true);
+        perfView.setBackgroundColor(0x8C000000);
+        perfView.setPadding(Ui.dp(this, 6), Ui.dp(this, 2), Ui.dp(this, 6), Ui.dp(this, 2));
+        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(-2, -2);
+        plp.leftMargin = Ui.dp(this, 8); plp.topMargin = Ui.dp(this, 8);
+        root.addView(perfView, plp);
+        perfView.setVisibility(SettingsView.on(prefs, "perf") ? View.VISIBLE : View.GONE);
+        perfTick.run();
         root.addOnLayoutChangeListener(relayoutListener);
         relayout();
         Native.setMuted(!SettingsView.on(prefs, "sound"));
