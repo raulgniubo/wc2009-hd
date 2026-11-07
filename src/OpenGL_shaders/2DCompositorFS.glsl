@@ -68,7 +68,9 @@ uniform bool uHDMirror[4];
 uniform bool uHDScreen[4];   // rect is in screen space (text panels)
 uniform bool uHDFallback[4]; // transparent HD pixels fall back to the original (card sets)
 uniform int uTextSmooth[4];  // layer holds anti-aliased game text: 1 = dark outline + bright fill, 2 = other
-uniform sampler2D TextMask[4]; // per map tile (64x64 grid): 1 = text tile
+uniform sampler2D TextMaskAll; // per map tile (64x64 grid, layer n at rows 64n): r = text tile, g/b = HD tile slot + 1
+uniform sampler2D HDTileAtlas; // 2048x2048, 64x64 per tile, 32 per row
+uniform bool uHDTiles[4];
 
 vec4 HDScreenFetch(int n, vec2 coord, int line, out bool hit)
 {
@@ -181,12 +183,28 @@ vec4 XbrResolve(vec4 A1, vec4 B1, vec4 C1, vec4 A, vec4 B, vec4 C, vec4 D, vec4 
 // interpolated with a cubic filter and cut with smooth thresholds, which gives clean curved
 // letters at any resolution while keeping the game's exact text and colours.
 
-int TextTile(sampler2D mask, ivec2 size, vec2 uv, int mode)
+int TextTile(int layer, ivec2 size, vec2 uv, int mode)
 {
     // 0 = not text, else the mode for this tile (mixed text+icon tiles use the generic mode)
     ivec2 t = ivec2(floor(uv * vec2(size))) >> 3;
-    float m = texelFetch(mask, ivec2(t.x & 63, t.y & 63), 0).r;
+    float m = texelFetch(TextMaskAll, ivec2(t.x & 63, (t.y & 63) + layer * 64), 0).r;
     return m > 0.75 ? mode : (m > 0.25 ? 2 : 0);
+}
+
+// WC09: HD tile pack (menu digits, icons...): true when this map tile has an HD replacement
+bool HDTileFetch(int layer, ivec2 size, vec2 uv, out vec4 col)
+{
+    vec2 pos = uv * vec2(size);
+    ivec2 t = ivec2(floor(pos)) >> 3;
+    vec4 m = texelFetch(TextMaskAll, ivec2(t.x & 63, (t.y & 63) + layer * 64), 0);
+    int slot = int(m.g * 255.0 + 0.5) + int(m.b * 255.0 + 0.5) * 256;
+    if (slot == 0) return false;
+    slot -= 1;
+    vec2 local = fract(pos / 8.0);
+    vec2 apx = vec2(float(slot & 31), float(slot >> 5)) * 64.0 + 0.5 + local * 63.0;
+    vec4 h = texture(HDTileAtlas, apx / 2048.0);
+    col = h.a >= 0.5 ? vec4(h.rgb, 1.0) : vec4(0.0);
+    return true;
 }
 
 vec4 CatmullRom(float t)
@@ -280,9 +298,14 @@ vec4 BG0Fetch(vec2 coord)
             if (!uHDFallback[0]) return vec4(0.0);
         }
     }
+    if (uHDTiles[0] && uBGConfig[0].Type < 2)
+    {
+        vec4 ht;
+        if (HDTileFetch(0, uBGConfig[0].Size, coord, ht)) return ht;
+    }
     if (uTextSmooth[0] != 0 && uScaleFactor > 1 && uBGConfig[0].Type < 7)
     {
-        int tm = TextTile(TextMask[0], uBGConfig[0].Size, coord, uTextSmooth[0]);
+        int tm = TextTile(0, uBGConfig[0].Size, coord, uTextSmooth[0]);
         if (tm != 0) return TextFetch(BGLayerTex[0], uBGConfig[0].Size, coord, tm);
     }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[0].Type < 7 && !uEnable3D)   // BG0 may be the hi-res 3D layer
@@ -304,9 +327,14 @@ vec4 BG1Fetch(vec2 coord)
             if (!uHDFallback[1]) return vec4(0.0);
         }
     }
+    if (uHDTiles[1] && uBGConfig[1].Type < 2)
+    {
+        vec4 ht;
+        if (HDTileFetch(1, uBGConfig[1].Size, coord, ht)) return ht;
+    }
     if (uTextSmooth[1] != 0 && uScaleFactor > 1 && uBGConfig[1].Type < 7)
     {
-        int tm = TextTile(TextMask[1], uBGConfig[1].Size, coord, uTextSmooth[1]);
+        int tm = TextTile(1, uBGConfig[1].Size, coord, uTextSmooth[1]);
         if (tm != 0) return TextFetch(BGLayerTex[1], uBGConfig[1].Size, coord, tm);
     }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[1].Type < 7)
@@ -328,9 +356,14 @@ vec4 BG2Fetch(vec2 coord)
             if (!uHDFallback[2]) return vec4(0.0);
         }
     }
+    if (uHDTiles[2] && uBGConfig[2].Type < 2)
+    {
+        vec4 ht;
+        if (HDTileFetch(2, uBGConfig[2].Size, coord, ht)) return ht;
+    }
     if (uTextSmooth[2] != 0 && uScaleFactor > 1 && uBGConfig[2].Type < 7)
     {
-        int tm = TextTile(TextMask[2], uBGConfig[2].Size, coord, uTextSmooth[2]);
+        int tm = TextTile(2, uBGConfig[2].Size, coord, uTextSmooth[2]);
         if (tm != 0) return TextFetch(BGLayerTex[2], uBGConfig[2].Size, coord, tm);
     }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[2].Type < 7)
@@ -352,9 +385,14 @@ vec4 BG3Fetch(vec2 coord)
             if (!uHDFallback[3]) return vec4(0.0);
         }
     }
+    if (uHDTiles[3] && uBGConfig[3].Type < 2)
+    {
+        vec4 ht;
+        if (HDTileFetch(3, uBGConfig[3].Size, coord, ht)) return ht;
+    }
     if (uTextSmooth[3] != 0 && uScaleFactor > 1 && uBGConfig[3].Type < 7)
     {
-        int tm = TextTile(TextMask[3], uBGConfig[3].Size, coord, uTextSmooth[3]);
+        int tm = TextTile(3, uBGConfig[3].Size, coord, uTextSmooth[3]);
         if (tm != 0) return TextFetch(BGLayerTex[3], uBGConfig[3].Size, coord, tm);
     }
     if (uSmooth2D && uScaleFactor > 1 && uBGConfig[3].Type < 7)

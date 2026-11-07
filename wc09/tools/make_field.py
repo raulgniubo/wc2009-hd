@@ -31,14 +31,14 @@ def zone(b, tint, light):
 
 BLUE, RED = (0, 165, 238), (238, 85, 101)       # the game's own zone colours
 DBLUE, DRED = (0, 117, 165), (190, 68, 85)
-zone((0, 0, 31, 31), BLUE, True)
-zone((32, 0, 63, 31), RED, True)
+zone((0, 0, 30, 30), BLUE, True)    # the game's zone cells are 30x30
+zone((32, 0, 62, 30), RED, True)
 # the dark tiles are drawn under the zones, slightly offset, as their thickness/shadow:
 # soft dark silhouettes without rims or marks
 def shadow(b, tint):
     c.rrect(b, 3.2, fill=lerp(tint, (0, 0, 0), .45))
-shadow((64, 0, 95, 31), DBLUE)
-shadow((96, 0, 127, 31), DRED)
+shadow((64, 0, 94, 30), DBLUE)
+shadow((96, 0, 126, 30), DRED)
 
 def slot(b, kind, plain):
     """special zones (22x28) in the game's own colours, redrawn sharp; plain = empty-state version"""
@@ -87,8 +87,8 @@ def slot(b, kind, plain):
 
 for i, kind in enumerate(['field', 'extra', 'grave', 'deck', 'banish']):
     x = i * 24
-    slot((x, 32, x + 22, 60), kind, False)
-    slot((x, 61, x + 22, 89), kind, True)
+    slot((x, 32, x + 20, 60), kind, False)     # 20x28 cells, as in the game's atlas
+    slot((x, 63, x + 20, 91), kind, True)
 c.finish(f'{OUT}/eed9528b68475e5d.png')
 
 # ---------------------------------------------------------------- arena floor & walls (128x128)

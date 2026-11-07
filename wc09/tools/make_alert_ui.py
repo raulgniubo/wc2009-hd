@@ -29,7 +29,7 @@ d.line([S(22), S(2.6), S(234), S(2.6)], fill=HI, width=int(S(0.6)))   # soft top
 finish(im, 'ef42d746f513ab21')
 
 # buttons: 32x64 textures, the button face is rows 0..24; rows 24..64 keep a plain face
-def button(label, letter, name):
+def button(label, letter, name, size=8.6):
     im = canvas(32, 64); d = ImageDraw.Draw(im)
     for y0 in (0, 24):
         rrect(d, (0.5, y0 + 0.5, 31.5, y0 + 23.5), 4, fill=(90, 140, 220, 255))
@@ -43,7 +43,7 @@ def button(label, letter, name):
         mask = Image.new('L', face.size, 0)
         ImageDraw.Draw(mask).rounded_rectangle([0, 0, face.width - 1, face.height - 1], radius=S(3.2), fill=255)
         im.paste(face, (S(1), S(y0 + 1.5)), mask)
-        f = ImageFont.truetype(FB, S(8.6))
+        f = ImageFont.truetype(FB, S(size))
         tw = d.textlength(label, font=f)
         d.text((S(12.5) - tw / 2, S(y0 + 10.5)), label, font=f, fill=(255, 255, 255, 255), anchor='lm')
         # controller-style badge
@@ -55,6 +55,9 @@ def button(label, letter, name):
 
 button('YES', 'A', 'c76b23565af043b7')
 button('NO', 'B', '54fe4b2f58dc7f53')
+button('YES', 'A', 'f73494f3511e3ded')
+button('NO', 'B', 'f503e4e8112cb246')
+button('BACK', 'B', 'f18c53ddf656c144', 6.6)
 
 # selection frame: 64x32 texture, 34x26 outline at the top left, drawn 1 px around the button
 im = canvas(64, 32); d = ImageDraw.Draw(im)

@@ -30,6 +30,7 @@
 
 namespace melonDS
 {
+constexpr int kSprHDSlots = 13;
 using Platform::Log;
 using Platform::LogLevel;
 
@@ -135,8 +136,8 @@ bool GLRenderer2D::InitShaders()
     SprHDAULoc = glGetUniformLocation(SpriteShader, "uSprHDA");
     SprHDBULoc = glGetUniformLocation(SpriteShader, "uSprHDB");
     SprHDSizeULoc = glGetUniformLocation(SpriteShader, "uSprHDSize");
-    for (int i = 0; i < 8; i++)
-        glUniform1i(glGetUniformLocation(SpriteShader, ("SprHDTex[" + std::to_string(i) + "]").c_str()), 8 + i);
+    for (int i = 0; i < kSprHDSlots; i++)   // units 8..15, then the free units 3..7
+        glUniform1i(glGetUniformLocation(SpriteShader, ("SprHDTex[" + std::to_string(i) + "]").c_str()), i < 8 ? 8 + i : 3 + (i - 8));
 
 
     glUseProgram(CompositorShader);
@@ -179,8 +180,10 @@ bool GLRenderer2D::InitShaders()
         GLint t = glGetUniformLocation(CompositorShader, ("HDTex[" + n + "]").c_str());
         glUseProgram(CompositorShader);
         glUniform1i(t, 8 + i);
-        glUniform1i(glGetUniformLocation(CompositorShader, ("TextMask[" + n + "]").c_str()), 12 + i);
+        CompositorHDTilesULoc[i] = glGetUniformLocation(CompositorShader, ("uHDTiles[" + n + "]").c_str());
     }
+    glUniform1i(glGetUniformLocation(CompositorShader, "TextMaskAll"), 12);
+    glUniform1i(glGetUniformLocation(CompositorShader, "HDTileAtlas"), 13);
 
     // generate mosaic lookup texture
 
@@ -229,6 +232,7 @@ bool GLRenderer2D::InitShaders(GLRenderer2D& other)
         CompositorHDScreenULoc[i] = other.CompositorHDScreenULoc[i];
         CompositorHDFallbackULoc[i] = other.CompositorHDFallbackULoc[i];
         CompositorTextSmoothULoc[i] = other.CompositorTextSmoothULoc[i];
+        CompositorHDTilesULoc[i] = other.CompositorHDTilesULoc[i];
     }
 
     MosaicTex = other.MosaicTex;
@@ -404,6 +408,31 @@ void GLRenderer2D::DeleteShaders()
     glDeleteTextures(1, &MosaicTex);
 }
 
+bool GLRenderer2D::HDTileAtlasOK()
+{
+    if (HDTileAtlasTex) return true;
+    if (HDTileAtlasTried || !WC09::HDTilesAvailable()) return false;
+    HDTileAtlasTried = true;
+    std::vector<u8> rgba; int w = 0, h = 0;
+    bool ok = WC09::LoadHDImage("tiles/atlas", rgba, w, h);
+    if (getenv("WC09_DEBUG")) { printf("WC09 HD tile atlas: %d %dx%d\n", ok, w, h); fflush(stdout); }
+    if (!ok || w != 2048 || h < 64) return false;
+    GLint prev; glGetIntegerv(GL_ACTIVE_TEXTURE, &prev);
+    glActiveTexture(GL_TEXTURE13);
+    glGenTextures(1, &HDTileAtlasTex);
+    glBindTexture(GL_TEXTURE_2D, HDTileAtlasTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    std::vector<u8> full(2048 * 2048 * 4, 0);
+    memcpy(full.data(), rgba.data(), std::min<size_t>(rgba.size(), full.size()));
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2048, 2048, 0, GL_RGBA, GL_UNSIGNED_BYTE, full.data());
+    glActiveTexture(prev);
+    return true;
+}
+
 GLuint GLRenderer2D::GetHDTexture(int image)
 {
     for (size_t i = 0; i < HDTextures.size(); i++)
@@ -497,7 +526,8 @@ GLuint GLRenderer2D::GetHDTexture(int image)
 GLRenderer2D::~GLRenderer2D()
 {
     for (auto& e : HDTextures) if (e.Valid) glDeleteTextures(1, &e.Tex);
-    for (GLuint t : TextMaskTex) if (t) glDeleteTextures(1, &t);
+    if (TextMaskTex) glDeleteTextures(1, &TextMaskTex);
+    if (HDTileAtlasTex) glDeleteTextures(1, &HDTileAtlasTex);
     glDeleteBuffers(1, &SpritePreVtxBuffer);
     glDeleteVertexArrays(1, &SpritePreVtxArray);
 
@@ -1483,7 +1513,11 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
 
         if (xpos <= -boundwidth)
             continue;
-        if (WC09::IsActive() && WC09::GetHDCardsEnabled() && WC09::HideSprite(GPU2D.Num, xpos, ypos & 0xFF, width, height))
+        static const bool sprdbg = getenv("WC09_SPRDBG") != nullptr;
+        if (sprdbg && (ypos & 0xFF) >= 130 && (ypos & 0xFF) < 192)
+        { static u64 lastf = 0; u64 f = WC09::FrameNum(); if (f % 60 == 0) { if (lastf != f) { printf("--- spr frame %llu\n", (unsigned long long)f); lastf = f; }
+          printf("spr e%d #%d %d,%d %dx%d tile%d pal%d prio%d\n", GPU2D.Num, sprnum, xpos, ypos & 0xFF, width, height, attrib[2] & 0x3FF, attrib[2] >> 12, (attrib[2] >> 10) & 3); fflush(stdout); } }
+        if (WC09::IsActive() && WC09::GetHDCardsEnabled() && WC09::HideSprite(GPU2D.Num, xpos, ypos & 0xFF, width, height, (sprtype & 1) != 0))
             continue;
 
         bool yc0 = ((ypos + boundheight) > ystart) && (ypos < yend);
@@ -1509,6 +1543,12 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
         // add this sprite to the OAM array
 
         auto& sprcfg = cfg.uOAM[NumSprites];
+        // WC09: the portraits beside the life-point panel have a 1 px coloured edge that belonged
+        // to the original panel; it's cut away where the HD panel now sits
+        WC09LpEdge[NumSprites] = WC09::IsActive() && WC09::GetHDCardsEnabled() && WC09::LpPanelShown(GPU2D.Num) &&
+            (ypos & 0xFF) + height > WC09::kLpY && (ypos & 0xFF) < WC09::kLpY + WC09::kLpH &&
+            ((xpos <= WC09::kLpX && xpos + width > WC09::kLpX) || (xpos <= WC09::kLpX + WC09::kLpW - 1 && xpos + width > WC09::kLpX + WC09::kLpW - 1));
+        if (sprdbg && WC09LpEdge[NumSprites] && WC09::FrameNum() % 60 == 0) { printf("lpedge #%d %d,%d %dx%d\n", sprnum, xpos, ypos & 0xFF, width, height); fflush(stdout); }
 
         sprcfg.Position[0] = (u32)xpos;
         sprcfg.Position[1] = (u32)ypos;
@@ -1846,21 +1886,22 @@ void GLRenderer2D::DoRenderSprites(int line)
     glUseProgram(SpriteShader);
     glUniform1i(SpriteSmoothULoc, WC09::GetSmooth2D() ? ScaleFactor : 0);
 
-    // WC09: HD sprite images, up to 8 different images at once
+    // WC09: HD sprite images, up to kSprHDSlots different images at once
     {
         static GLint hdA[128 * 4], hdB[128 * 4];
-        GLfloat hdSize[8 * 2] = {};
-        int slotImage[8]; GLuint slotTex[8] = {}; int numSlots = 0;
+        GLfloat hdSize[kSprHDSlots * 2] = {};
+        int slotImage[kSprHDSlots]; GLuint slotTex[kSprHDSlots] = {}; int numSlots = 0;
         for (int i = 0; i < 128; i++)
         {
             hdA[i*4] = -1; hdA[i*4+1] = hdA[i*4+2] = hdA[i*4+3] = 0;
             hdB[i*4] = hdB[i*4+1] = hdB[i*4+2] = hdB[i*4+3] = 0;
             if (i < NumSprites && WC09Spr[i].Image < 0 && WC09Spr[i].Text) hdA[i*4+3] = 4;
+            if (i < NumSprites && WC09LpEdge[i]) hdA[i*4+3] |= 8;
             if (i >= NumSprites || WC09Spr[i].Image < 0) continue;
             const WC09::SpriteHD& h = WC09Spr[i];
             int slot = -1;
             for (int k = 0; k < numSlots; k++) if (slotImage[k] == h.Image) slot = k;
-            if (slot < 0 && numSlots < 8)
+            if (slot < 0 && numSlots < kSprHDSlots)
             {
                 GLuint tex = GetHDTexture(h.Image);
                 if (!tex) continue;
@@ -1869,18 +1910,18 @@ void GLRenderer2D::DoRenderSprites(int line)
                 hdSize[slot*2] = h.IW; hdSize[slot*2+1] = h.IH;
             }
             if (slot < 0) continue;
-            hdA[i*4] = slot; hdA[i*4+1] = h.OX; hdA[i*4+2] = h.OY; hdA[i*4+3] = (h.HF ? 1 : 0) | (h.VF ? 2 : 0);
+            hdA[i*4] = slot; hdA[i*4+1] = h.OX; hdA[i*4+2] = h.OY; hdA[i*4+3] = (h.HF ? 1 : 0) | (h.VF ? 2 : 0) | (WC09LpEdge[i] ? 8 : 0);
             hdB[i*4] = h.OW; hdB[i*4+1] = h.OH; hdB[i*4+2] = h.DX; hdB[i*4+3] = h.DY;
         }
-        for (int k = 0; k < 8; k++)
+        for (int k = 0; k < kSprHDSlots; k++)
         {
-            glActiveTexture(GL_TEXTURE8 + k);
+            glActiveTexture(k < 8 ? GL_TEXTURE8 + k : GL_TEXTURE3 + (k - 8));
             glBindTexture(GL_TEXTURE_2D, k < numSlots ? slotTex[k] : 0);
         }
         glActiveTexture(GL_TEXTURE0);
         glUniform4iv(SprHDAULoc, 128, hdA);
         glUniform4iv(SprHDBULoc, 128, hdB);
-        glUniform2fv(SprHDSizeULoc, 8, hdSize);
+        glUniform2fv(SprHDSizeULoc, kSprHDSlots, hdSize);
     }
 
     glDisable(GL_DEPTH_TEST);
@@ -2114,31 +2155,48 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
             glUniform1i(CompositorHDScreenULoc[i], reps[i].ScreenSpace ? 1 : 0);
             glUniform1i(CompositorHDFallbackULoc[i], reps[i].Fallback ? 1 : 0);
             bool textOn = (!texs[i] || reps[i].ScreenSpace) && WC09::GetHDTextEnabled() && WC09::IsTextLayer(GPU2D.Num, i);
-            if (!textOn) glUniform1i(CompositorTextSmoothULoc[i], 0);
+            glUniform1i(CompositorTextSmoothULoc[i], 0);
+            // per map tile: text mask (r) and HD tile slot (g, b), all four layers in one texture
+            static std::vector<u8> all(64 * 256 * 4);
+            u8* rows = &all[i * 64 * 64 * 4];
+            memset(rows, 0, 64 * 64 * 4);
             if (textOn)
             {
-                // which map tiles hold text (64x64, BG tile units)
                 static std::vector<u8> mask;
                 bool outlined = false;
-                u32 gen = WC09::GetTextMask(GPU2D.Num, i, mask, &outlined);
+                WC09::GetTextMask(GPU2D.Num, i, mask, &outlined);
                 glUniform1i(CompositorTextSmoothULoc[i], outlined ? 1 : 2);
-                glActiveTexture(GL_TEXTURE12 + i);
-                if (!TextMaskTex[i])
+                if (mask.size() == 64 * 64) for (int k = 0; k < 64 * 64; k++) rows[k * 4] = mask[k];
+            }
+            bool tilesAny = false;
+            if (!texs[i] || reps[i].ScreenSpace)
+            {
+                static std::vector<u16> tmap;
+                WC09::GetHDTileMap(GPU2D.Num, i, tmap, tilesAny);
+                if (tilesAny && tmap.size() == 64 * 64)
+                    for (int k = 0; k < 64 * 64; k++) { rows[k * 4 + 1] = tmap[k] & 0xFF; rows[k * 4 + 2] = tmap[k] >> 8; }
+                else tilesAny = false;
+            }
+            glUniform1i(CompositorHDTilesULoc[i], tilesAny && HDTileAtlasOK() ? 1 : 0);
+            static const bool tiledbg = getenv("WC09_TILEDBG") != nullptr;
+            if (tiledbg && tilesAny && (WC09::FrameNum() % 60) == 0) { printf("GL tiles e%d b%d on %d loc %d\n", GPU2D.Num, i, (int)HDTileAtlasOK(), CompositorHDTilesULoc[i]); fflush(stdout); }
+            if (i == 3)
+            {
+                glActiveTexture(GL_TEXTURE12);
+                if (!TextMaskTex)
                 {
-                    glGenTextures(1, &TextMaskTex[i]);
-                    glBindTexture(GL_TEXTURE_2D, TextMaskTex[i]);
+                    glGenTextures(1, &TextMaskTex);
+                    glBindTexture(GL_TEXTURE_2D, TextMaskTex);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 }
-                glBindTexture(GL_TEXTURE_2D, TextMaskTex[i]);
-                if (gen != TextMaskGen[i] && mask.size() == 64 * 64)
-                {
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 64, 64, 0, GL_RED, GL_UNSIGNED_BYTE, mask.data());
-                    TextMaskGen[i] = gen;
-                }
+                glBindTexture(GL_TEXTURE_2D, TextMaskTex);
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, all.data());
+                glActiveTexture(GL_TEXTURE13);
+                glBindTexture(GL_TEXTURE_2D, HDTileAtlasTex);
             }
         }
     }

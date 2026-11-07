@@ -50,12 +50,13 @@ bool GetStatPanel(int image, StatPanelInfo& out);
 
 // Duel life point panel redrawn in HD (ids from kLpPanelBase), screen rect in DS pixels.
 constexpr int kLpPanelBase = 2600000;
-constexpr int kLpX = 46, kLpY = 151, kLpW = 161, kLpH = 41;
+constexpr int kLpX = 45, kLpY = 151, kLpW = 163, kLpH = 41;
 bool GetLpPanel(int image, int& lp0, int& lp1, int& turn, int& phase, bool& turnRight);   // turn/phase -1 = unknown
 
 // Sprites hidden because the HD card already shows them (the level badge on the card view).
 struct RectHide { bool On = false; int X0 = 0, Y0 = 0, X1 = 0, Y1 = 0; };
-bool HideSprite(int engine, int x, int y, int w, int h);
+bool LpPanelShown(int engine);
+bool HideSprite(int engine, int x, int y, int w, int h, bool affine = false);
 
 // Background layers holding anti-aliased game text (colour ramps from a dark outline to a bright
 // fill): the compositor redraws them as smooth shapes instead of upscaled pixels.
@@ -63,6 +64,10 @@ bool IsTextLayer(int engine, int bg);
 // Per map tile (64x64 grid, BG tile units) 255 where the tile is text; returns a generation
 // number that changes whenever the mask does.
 u32 GetTextMask(int engine, int bg, std::vector<u8>& mask, bool* outlined = nullptr);
+// HD tile pack: per map tile (64x64) atlas slot + 1 (0 = none); any = layer uses HD tiles
+u32 GetHDTileMap(int engine, int bg, std::vector<u16>& map, bool& any);
+void LoadHDTileKeys();
+bool HDTilesAvailable();
 
 // Deck editor / card lists: HD description (id = base + card*2) and name (+1) on the top screen.
 constexpr int kDeckTextBase = 1500000;

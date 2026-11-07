@@ -162,8 +162,8 @@ vec4 XbrFetchSprite(int sprite, vec2 coord)
 // ---- WC09: HD sprite images (portraits, character figures, menu objects) ----
 uniform ivec4 uSprHDA[128];     // slot (-1 = none), image x/y of the matched OAM, flags (1 = hflip, 2 = vflip)
 uniform ivec4 uSprHDB[128];     // matched OAM w/h, tile-space offset x/y
-uniform vec2 uSprHDSize[8];     // image size in original pixels
-uniform sampler2D SprHDTex[8];
+uniform vec2 uSprHDSize[13];     // image size in original pixels
+uniform sampler2D SprHDTex[13];
 
 vec4 SprHDSample(int slot, vec2 uv)
 {
@@ -174,7 +174,12 @@ vec4 SprHDSample(int slot, vec2 uv)
     if (slot == 4) return texture(SprHDTex[4], uv);
     if (slot == 5) return texture(SprHDTex[5], uv);
     if (slot == 6) return texture(SprHDTex[6], uv);
-    return texture(SprHDTex[7], uv);
+    if (slot == 7) return texture(SprHDTex[7], uv);
+    if (slot == 8) return texture(SprHDTex[8], uv);
+    if (slot == 9) return texture(SprHDTex[9], uv);
+    if (slot == 10) return texture(SprHDTex[10], uv);
+    if (slot == 11) return texture(SprHDTex[11], uv);
+    return texture(SprHDTex[12], uv);
 }
 
 
@@ -222,7 +227,10 @@ vec4 GetSpritePixel(int sprite, vec2 coord)
                       ((hda.w & 2) != 0) ? float(hdb.y) - s.y : s.y);
         vec2 uv = (vec2(hda.yz) + c) / uSprHDSize[hda.x];
         vec4 h = SprHDSample(hda.x, uv);
-        if (h.a < 0.5) return vec4(0.0);
+        // alpha ~0.3 in an HD image = "show the game's own pixels here" (palette-driven parts such
+        // as selection outlines that the HD picture can't know about)
+        bool passthru = h.a > 0.15 && h.a < 0.45;
+        if (h.a < 0.5 && !passthru) return vec4(0.0);
         // only where the game actually shows pixels (within 1 px): parts of an image the game
         // leaves blank or cuts off stay blank
         ivec2 base = ivec2((sprite & 0xF) * 64, (sprite >> 4) * 64);
@@ -232,9 +240,9 @@ vec4 GetSpritePixel(int sprite, vec2 coord)
             {
                 ivec2 p = ic + ivec2(dx, dy);
                 if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, sz))) continue;
-                if (texelFetch(SpriteTex, base + p, 0).a > 0.0) return vec4(h.rgb, 1.0);
+                if (texelFetch(SpriteTex, base + p, 0).a > 0.0) { if (!passthru) return vec4(h.rgb, 1.0); dy = 2; break; }
             }
-        return vec4(0.0);
+        if (!passthru) return vec4(0.0);
     }
 
     if (uSmoothScale > 1 && (hda.w & 4) != 0)
@@ -250,6 +258,11 @@ void main()
 {
     vec4 col, flags = vec4(0);
     vec2 coord = fTexcoord;
+
+    // WC09: portrait edge columns under the HD life-point panel (WC09Battle.h kLpX/kLpY/kLpW)
+    if ((uSprHDA[fSpriteIndex].w & 8) != 0 && fPosition.y >= 151.0 && fPosition.y < 192.0 &&
+        (int(floor(fPosition.x)) == 45 || int(floor(fPosition.x)) == 207))
+        discard;
 
     if (uOAM[fSpriteIndex].Mosaic)
     {

@@ -34,6 +34,7 @@ constexpr size_t kMaxPlaces = 48;
 std::unordered_map<u64, SpriteHD> Cache;
 std::unordered_map<u64, int> Thumbs;   // card thumbnail sprite chars (32x32, 8bpp) -> card
 std::unordered_map<u64, int> ThumbTex; // the same thumbnails as linear 32x32 8-bit textures -> card
+std::unordered_map<u64, int> ThumbTiles; // single 8x8 tiles of the thumbnails -> card * 16 + tile (4x4 grid)
 std::mutex Lock;
 
 bool Blank(const u8* t, u32 n) { for (u32 i = 0; i < n; i++) if (t[i]) return false; return true; }
@@ -201,6 +202,12 @@ void BuildSpriteIndex(const u8* rom, u32 len)
                     for (int i = 0; i < 64; i++)
                         lin[((t / 4) * 8 + i / 8) * 32 + (t % 4) * 8 + i % 8] = ch[t * 64 + i];
                 ThumbTex[XXH64(lin, 1024, 0)] = (int)c;
+                for (int t = 0; t < 16; t++)
+                {
+                    u64 th = XXH64(ch + t * 64, 64, 64);
+                    if (!ThumbTiles.count(th)) ThumbTiles[th] = (int)c * 16 + t;
+                    else ThumbTiles[th] = -1;   // shared by several cards: says nothing
+                }
             }
         }
     }
@@ -293,6 +300,26 @@ SpriteHD IdentifySprite(int width, int height, bool bpp8, u32 tileOffset,
             return out;
         }
     }
+    if (width == 16 && height == 16 && bpp8)
+    {
+        // a quarter of a card thumbnail (some screens build the 32x32 picture from 16x16 sprites)
+        int card = -1, base = -1; bool ok = true;
+        for (u32 t = 0; t < 4 && ok; t++)
+        {
+            auto it = ThumbTiles.find(XXH64(data + t * 64, 64, 64));
+            if (it == ThumbTiles.end() || it->second < 0) { ok = false; break; }
+            int c = it->second / 16, ti = it->second % 16;
+            int want = base < 0 ? ti : base + (t & 1) + (t >> 1) * 4;
+            if (t == 0) { card = c; base = ti; }
+            else if (c != card || ti != want) ok = false;
+        }
+        if (ok && card > 0)
+        {
+            out.Image = kCardThumbBase + card;
+            out.OX = -6 + (base % 4) * 8; out.OY = -3 + (base / 4) * 8; out.OW = 16; out.OH = 16; out.IW = 20; out.IH = 26;
+            return out;
+        }
+    }
     if (Tiles.empty()) return out;
     u64 key = XXH64(data, n * tb, ((u64)width << 40) | ((u64)height << 32) | tb);
     auto c = Cache.find(key);
@@ -346,6 +373,15 @@ SpriteHD IdentifySprite(int width, int height, bool bpp8, u32 tileOffset,
         const ImageInfo& im = Images[a.Image - kSpriteImageBase];
         out.Image = a.Image; out.OX = a.OX; out.OY = a.OY; out.OW = a.OW; out.OH = a.OH;
         out.DX = a.DX; out.DY = a.DY; out.HF = a.HF; out.VF = a.VF; out.IW = im.W; out.IH = im.H;
+    }
+    static const bool spridDbg = getenv("WC09_SPRID") != nullptr;
+    if (spridDbg)
+    {
+        int nonBlank = 0, known = 0;
+        for (u32 t = 0; t < n; t++) { const u8* tile = data + t * tb; if (Blank(tile, tb)) continue; nonBlank++; if (Tiles.count(XXH64(tile, tb, tb))) known++; }
+        printf("sprid %dx%d bpp%d tiles %d/%d -> %s +%d,%d (oam %d,%d %dx%d)\n", width, height, bpp8 ? 8 : 4, known, nonBlank,
+               out.Image >= 0 ? Images[out.Image - kSpriteImageBase].Name.c_str() : "none", out.DX, out.DY, out.OX, out.OY, out.OW, out.OH);
+        fflush(stdout);
     }
     if (Cache.size() > 8192) Cache.clear();
     Cache[key] = out;

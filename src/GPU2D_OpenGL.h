@@ -74,6 +74,7 @@ private:
     GLint SpriteSmoothULoc {-1};
     GLint SprHDAULoc {-1}, SprHDBULoc {-1}, SprHDSizeULoc {-1};
     WC09::SpriteHD WC09Spr[128];
+    bool WC09LpEdge[128] {};   // sprite crosses the edge columns of the HD life-point panel
     struct WC09SprKey { u16 A0, A1, A2; u32 TileOffset; u64 Frame; } WC09SprCache[128] {};
     WC09::SpriteHD WC09SprCached[128];
     GLuint SpriteVtxBuffer {};
@@ -90,7 +91,10 @@ private:
     GLint CompositorHDScreenULoc[4] {-1, -1, -1, -1};
     GLint CompositorHDFallbackULoc[4] {-1, -1, -1, -1};
     GLint CompositorTextSmoothULoc[4] {-1, -1, -1, -1};
-    GLuint TextMaskTex[4] {}; u32 TextMaskGen[4] {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+    GLuint TextMaskTex {};
+    GLuint HDTileAtlasTex {}; bool HDTileAtlasTried {};
+    GLint CompositorHDTilesULoc[4] {-1, -1, -1, -1};
+    bool HDTileAtlasOK();
     struct HDTexEntry { int Image; GLuint Tex; bool Valid; };
     std::vector<HDTexEntry> HDTextures;     // small LRU of uploaded HD BG images
     std::unordered_map<int, u64> HDMissing; // image -> frame of the last failed lookup

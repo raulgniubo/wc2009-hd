@@ -62,57 +62,121 @@ c.rrect((0.5, 0.5, 255.5, 15.5), 4, fill=(24, 40, 84), outline=(120, 175, 255), 
 c.finish(f'{OUT}/bg_tag_name.png', binary=False)
 
 # ---------------------------------------------------------------- coins (48x48 cells)
-def coin_face(c, cx, cy, r, glyph):
-    # rim, face gradient, inner ring, emblem
-    c.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(150, 98, 10))
-    c.ellipse((cx - r * .94, cy - r * .94, cx + r * .94, cy + r * .94), fill=(255, 214, 90))
-    # radial-ish shading: stacked ellipses
-    for i in range(10):
-        t = i / 9; rr = r * (.86 - .5 * t)
-        c.ellipse((cx - rr - r * .05 * t, cy - rr - r * .08 * t, cx + rr - r * .05 * t, cy + rr - r * .08 * t),
-                  fill=lerp((236, 170, 30), (255, 236, 150), t))
-    c.ellipse((cx - r * .8, cy - r * .8, cx + r * .8, cy + r * .8), outline=(190, 128, 20), width=r * .05)
-    dark = (120, 70, 0)
-    if glyph == '?':
-        c.text((cx, cy + r * .04), '?', r * 1.15, fill=(150, 90, 0), font=FONT)
-    elif glyph == 'rock':
-        # rounded fist: knuckles + thumb
-        c.rrect((cx - r * .46, cy - r * .30, cx + r * .46, cy + r * .44), r * .22, fill=dark)
-        for k in range(4):
-            x = cx - r * .42 + k * r * .23
-            c.ellipse((x, cy - r * .42, x + r * .24, cy - r * .12), fill=dark)
-        c.rrect((cx - r * .5, cy + r * .02, cx + r * .1, cy + r * .24), r * .1, fill=(205, 150, 40))
-    elif glyph == 'scissors':
-        c.line([(cx - r * .05, cy + r * .45), (cx - r * .36, cy - r * .55)], fill=dark, width=r * .22)
-        c.line([(cx + r * .05, cy + r * .45), (cx + r * .34, cy - r * .55)], fill=dark, width=r * .22)
-        c.rrect((cx - r * .34, cy + r * .05, cx + r * .34, cy + r * .58), r * .18, fill=dark)
-    elif glyph == 'paper':
-        c.rrect((cx - r * .36, cy - r * .05, cx + r * .30, cy + r * .58), r * .2, fill=dark)
-        for k, (ang, ln) in enumerate([(-100, .55), (-82, .66), (-64, .62), (-46, .52)]):
-            a = math.radians(ang + 8)
-            x0 = cx - r * .26 + k * r * .17
-            c.line([(x0, cy), (x0 + math.cos(a) * r * ln * .35, cy + math.sin(a) * r * ln)], fill=dark, width=r * .15)
-        c.line([(cx - r * .32, cy + r * .2), (cx - r * .62, cy - r * .02)], fill=dark, width=r * .15)
+# clean vector coin; the hand / "?" emblem is traced from the game's own art (smooth outline +
+# lighter relief fill) so the shapes stay exactly the game's
+import numpy as np
+def _mask_up(m, K, blur, th):
+    im = Image.fromarray((m * 255).astype(np.uint8)).resize((m.shape[1] * K, m.shape[0] * K), Image.BICUBIC)
+    v = np.array(im.filter(ImageFilter.GaussianBlur(blur))).astype(float) / 255
+    return np.clip((v - th) * 7 + 0.5, 0, 1)
 
-for k, glyph in enumerate(['?', 'rock', 'scissors', 'paper']):
-    c = Canvas(48, 48, 8); coin_face(c, 24, 24, 22.5, glyph); c.finish(f'{OUT}/coin_obj_c{k}.png')
+def coin(k):
+    K = 10; S = 48 * K
+    src = np.array(Image.open(f'{NAT}/coin_obj_c{k}.png').convert('RGBA')).astype(float)
+    yy, xx = np.mgrid[0:48, 0:48]
+    inside = ((xx - 23.5) ** 2 + (yy - 23.5) ** 2) < 17.8 ** 2
+    ssum = src[..., :3].sum(-1)
+    dark = (ssum < 350) & (src[..., 3] > 0) & inside
+    light = (ssum > 600) & (src[..., 3] > 0) & inside
+    D = _mask_up(dark.astype(float), K, K * .62, .36)
+    L = _mask_up(light.astype(float), K, K * .7, .45)
+    c = Canvas(48, 48, K)
+    cx = cy = 24; r = 23.4
+    c.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(132, 80, 6))
+    c.ellipse((cx - r * .955, cy - r * .955, cx + r * .955, cy + r * .955), fill=(250, 206, 70))
+    for i in range(14):                 # face: soft light from the top left
+        t = i / 13; rr = r * (.9 - .55 * t)
+        c.ellipse((cx - rr - r * .1 * t, cy - rr - r * .12 * t, cx + rr - r * .1 * t, cy + rr - r * .12 * t),
+                  fill=lerp((226, 160, 22), (255, 232, 130), t))
+    c.ellipse((cx - r * .81, cy - r * .81, cx + r * .81, cy + r * .81), outline=(176, 112, 12), width=1.1)
+    c.ellipse((cx - r * .77, cy - r * .77, cx + r * .77, cy + r * .77), outline=(255, 238, 160), width=.5)
+    return c, D, L
+
+# emblem pieces, drawn back to front: each piece = dark outline (grown by OW) then the relief fill,
+# so overlapping fingers get clean separation lines automatically
+OW = 1.25
+EDGE, FILL_T, FILL_B = (104, 56, 0), (255, 242, 178), (238, 182, 60)
+ES = 0.84
+def _t(x, y): return (24 + (x - 24) * ES, 24.6 + (y - 24) * ES)
+def piece(c, kind, *g):
+    if kind == 'cap':
+        g = (_t(*g[0]), _t(*g[1]), g[2] * ES)
+    else:
+        (x0, y0, x1, y1), r = g
+        g = ((*_t(x0, y0), *_t(x1, y1)), r * ES)
+    for grow, col in ((OW, EDGE), (0, None)):
+        if kind == 'cap':                     # capsule (p0, p1, radius)
+            (x0, y0), (x1, y1), r = g
+            r += grow
+            pts = []
+            ang = math.atan2(y1 - y0, x1 - x0)
+            for i in range(19):
+                t = ang + math.pi / 2 + i * math.pi / 18
+                pts.append((x0 + r * math.cos(t), y0 + r * math.sin(t)))
+            for i in range(19):
+                t = ang - math.pi / 2 + i * math.pi / 18
+                pts.append((x1 + r * math.cos(t), y1 + r * math.sin(t)))
+            if col: c.poly(pts, fill=col)
+            else:
+                ymin = min(p[1] for p in pts); ymax = max(p[1] for p in pts)
+                c.poly(pts, fill=lerp(FILL_T, FILL_B, ((y0 + y1) / 2 - 8) / 34))
+        else:                                 # rounded box (box, radius)
+            (x0, y0, x1, y1), r = g
+            b = (x0 - grow, y0 - grow, x1 + grow, y1 + grow)
+            if col: c.rrect(b, r + grow, fill=col)
+            else: c.grad_rrect(b, r, lerp(FILL_T, FILL_B, (y0 - 8) / 34), lerp(FILL_T, FILL_B, (y1 - 8) / 34))
+
+def emblem(c, k):
+    if k == 0:
+        c.text((24.6, 25.4), '?', 24, fill=EDGE, font=FONT_B)
+        c.text((24, 24.6), '?', 24, fill=FILL_T, font=FONT_B, stroke=1.3, stroke_fill=EDGE)
+    elif k == 1:      # rock: fist seen from the front, thumb across the fingers
+        piece(c, 'box', (13.5, 18, 34.5, 37.5), 6)
+        for x in (16.8, 21.6, 26.4, 31.2):
+            piece(c, 'cap', (x, 17.5), (x, 24), 3.3)
+        piece(c, 'cap', (13.5, 29), (25.5, 26.2), 3.2)
+    elif k == 2:      # scissors: index and middle finger up, the others curled under the thumb
+        piece(c, 'cap', (21, 22), (16.5, 8.5), 3.1)
+        piece(c, 'cap', (27, 22), (31.5, 8.5), 3.1)
+        piece(c, 'box', (15, 21.5, 33.5, 39), 6)
+        for x in (26.5, 31):
+            piece(c, 'cap', (x, 22.5), (x, 26), 2.8)
+        piece(c, 'cap', (15, 33), (25, 28.5), 3.0)
+    elif k == 3:      # paper: open hand
+        for (x0, y0, x1, y1, r) in ((18.6, 25, 14.2, 10.5, 2.6), (23, 24, 21.8, 7.2, 2.8),
+                                    (27.6, 24, 29.6, 8, 2.8), (31.4, 26, 35.6, 13.2, 2.5)):
+            piece(c, 'cap', (x0, y0), (x1, y1), r)
+        piece(c, 'cap', (18, 34), (9.5, 27), 2.7)
+        piece(c, 'box', (15.5, 22, 34, 40), 6.5)
+
+for k in range(4):
+    c, _, _ = coin(k)
+    sh = Canvas(48, 48, c.k)                  # soft engraved shadow
+    emblem(sh, k)
+    sim = sh.im.split()[3].filter(ImageFilter.GaussianBlur(sh.S(0.8)))
+    shadow = Image.new('RGBA', sh.im.size, (120, 70, 0, 0)); shadow.putalpha(sim.point(lambda v: v * 45 // 100))
+    c.im.alpha_composite(shadow, (int(sh.S(0.9)), int(sh.S(1.1))))
+    emblem(c, k)
+    c.finish(f'{OUT}/coin_obj_c{k}.png')
+
 # flip frames: the coin seen at an angle (32x48), and edge-on
 for k, sq in ((4, .55), (5, .22)):
     c = Canvas(32, 48, 8)
-    c.ellipse((16 - 15 * sq - 1.2, 1.5, 16 + 15 * sq + 1.2, 46.5), fill=(150, 98, 10))
-    c.ellipse((16 - 15 * sq, 2.5, 16 + 15 * sq, 45.5), fill=(255, 214, 90))
-    if sq > .3: c.text((16, 24.5), '?', 22, fill=(150, 90, 0))
+    c.ellipse((16 - 15 * sq - 1.2, 1.2, 16 + 15 * sq + 1.2, 46.8), fill=(132, 80, 6))
+    c.ellipse((16 - 15 * sq, 2.4, 16 + 15 * sq, 45.6), fill=(250, 206, 70))
+    c.ellipse((16 - 15 * sq * .8, 6, 16 + 15 * sq * .8, 42), outline=(176, 112, 12), width=1)
+    if sq > .3: c.text((16, 24.5), '?', 20, fill=(110, 60, 0))
     c.finish(f'{OUT}/coin_obj_c{k}.png')
 
-# selection rings (52x52): red set for the opponent (c0-c3), blue for you (c4-c7), pulsing
+# selection rings (52x52): red for the opponent (c0-c3), blue for you (c4-c7), pulsing; solid
+# bands only (no hairlines: the sprite's own outline masks them into dashes)
 for k in range(8):
-    base = (255, 90, 120) if k < 4 else (80, 200, 255)
+    base = (255, 70, 110) if k < 4 else (60, 190, 255)
     t = (k % 4) / 3
-    col = lerp(lerp(base, WHITE, .45), base, t)
+    col = lerp(lerp(base, WHITE, .5), base, t)
     c = Canvas(52, 52, 8)
-    c.ellipse((2, 2, 50, 50), outline=lerp(base, (0, 0, 0), .4), width=3.6)
-    c.ellipse((2.6, 2.6, 49.4, 49.4), outline=col, width=2.4)
-    c.ellipse((3.6, 3.6, 48.4, 48.4), outline=WHITE, width=0.6)
+    c.ellipse((1.6, 1.6, 50.4, 50.4), outline=lerp(base, (0, 0, 0), .35), width=3.4)
+    c.ellipse((2.3, 2.3, 49.7, 49.7), outline=col, width=2.0)
     c.finish(f'{OUT}/coin_cursor_c{k}.png')
 
 # FIRST / SECOND TO GO plates (112x16): normal and selected (text is drawn by the game on top)

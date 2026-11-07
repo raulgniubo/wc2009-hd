@@ -165,8 +165,8 @@ def main():
     c = Canvas(16, 176, 8)
     for i, (_, kind, cat) in enumerate(ICONS):
         y = i * 16
-        tile(c, (0.3, y + 0.3, 15.7, y + 15.7), cat)
-        icon(c, kind, (2.6, y + 2.6, 13.4, y + 13.4))
+        tile(c, (0.1, y + 0.1, 11.9, y + 11.9), cat, r=2.6)   # the game's cells are 12x12
+        icon(c, kind, (1.9, y + 1.9, 10.1, y + 10.1))
     c.finish(f'{OUT}/duel2d/cmd_icon_s.png')
 
     # big icons: 32x64, normal (top) and selected (bottom), tile at (4,4)-(29,28)
@@ -246,21 +246,22 @@ def main():
     c = Canvas(32, 32, 8); sword(c, (9, 4, 23, 29), ghost=True); c.finish(f'{OUT}/tex3d/d1cb6ec352ae0746.png')
 
     # ---------------------------------------------------------------- highlight frames
-    def frame(c, b, col, t):
-        """rounded selection outline: bright line with a white inner edge"""
+    def frame(c, b, col, t, r=None):
+        """selection outline: bright line with a white inner edge; corner radius matches the zones"""
         x0, y0, x1, y1 = b
-        c.rrect(b, t * 2.2, outline=lerp(col, (0, 0, 0), .35), width=t)
-        c.rrect((x0 + t * .25, y0 + t * .25, x1 - t * .25, y1 - t * .25), t * 2, outline=col, width=t * .7)
-        c.rrect((x0 + t * .75, y0 + t * .75, x1 - t * .75, y1 - t * .75), t * 1.6, outline=WHITE, width=t * .22)
+        r = t * 1.1 if r is None else r
+        c.rrect(b, r, outline=lerp(col, (0, 0, 0), .35), width=t)
+        c.rrect((x0 + t * .25, y0 + t * .25, x1 - t * .25, y1 - t * .25), max(r - t * .25, .5), outline=col, width=t * .7)
+        c.rrect((x0 + t * .75, y0 + t * .75, x1 - t * .75, y1 - t * .75), max(r - t * .75, .4), outline=WHITE, width=t * .22)
 
     # 3D card highlight (stretched over the card): cyan (yours), pink (opponent), 32x32, 3 px line
-    c = Canvas(32, 32, 8); frame(c, (0, 0, 32, 32), (80, 200, 255), 3); c.finish(f'{OUT}/tex3d/dcaa698f0ad22196.png')
-    c = Canvas(32, 32, 8); frame(c, (0, 0, 32, 32), (255, 100, 170), 3); c.finish(f'{OUT}/tex3d/e1033ddba20cb76d.png')
+    c = Canvas(32, 32, 8); frame(c, (0, 0, 32, 32), (80, 200, 255), 2.2, 3.2); c.finish(f'{OUT}/tex3d/dcaa698f0ad22196.png')
+    c = Canvas(32, 32, 8); frame(c, (0, 0, 32, 32), (255, 100, 170), 2.2, 3.2); c.finish(f'{OUT}/tex3d/e1033ddba20cb76d.png')
 
     # the same frame in the game's other colours (structure hash + hue class): green = can attack...
     for hue, col in [('b', (80, 200, 255)), ('c', (80, 220, 255)), ('m', (255, 100, 170)), ('r', (255, 90, 110)),
                      ('g', (90, 235, 140)), ('y', (255, 215, 80)), ('n', (220, 230, 245))]:
-        c = Canvas(32, 32, 8); frame(c, (0, 0, 32, 32), col, 3); c.finish(f'{OUT}/tex3d/s_8700bf6b0612758e_{hue}.png')
+        c = Canvas(32, 32, 8); frame(c, (0, 0, 32, 32), col, 2.2, 3.2); c.finish(f'{OUT}/tex3d/s_8700bf6b0612758e_{hue}.png')
 
     # 2D cursors (32x64: two frames)
     c = Canvas(32, 64, 8)
@@ -331,6 +332,14 @@ def main():
         if not h: print('no full hash for', key); continue
         phase_button(label, state).finish(f'{OUT}/tex3d/{h}.png')
 
+    # position-matched fallbacks (any animation frame without its own image): slot index x hue class
+    HUE_STATE = {'n': 'off', 'b': 'blue', 'c': 'blue', 'r': 'red', 'm': 'red', 'g': 'ready', 'y': 'hover'}
+    for i, label in enumerate(['DP', 'SP', 'M1', 'BP', 'M2', 'EP']):
+        for hue, state in HUE_STATE.items():
+            phase_button(label, state).finish(f'{OUT}/tex3d/phase_{i}_{hue}.png')
+    for name, kind, badge in [('select', 'select', None), ('page', 'page', 'Y'), ('chain', 'chain', 'A')]:
+        c = Canvas(32, 32, 8); corner_button(c, 0, kind, badge=badge); c.finish(f'{OUT}/tex3d/corner_{name}.png')
+
     # corner buttons, 3D versions: B back, SELECT, Y (24x22 in 32x32)
     for h, kind, badge in [('b3d4d1eb92faa1e8', 'back', 'B'), ('81c119b4c7a46a36', 'select', None), ('e69eacc649684b34', 'page', 'Y')]:
         c = Canvas(32, 32, 8); corner_button(c, 0, kind, badge=badge); c.finish(f'{OUT}/tex3d/{h}.png')
@@ -339,18 +348,15 @@ def main():
         c = Canvas(32, 32, 8); corner_button(c, 0, kind, badge=badge); c.finish(f'{OUT}/tex3d/{h}.png')
 
     # phase cursor corner piece (64x32 texture, L of 34x17 at the top left; mirrored by the game)
-    c = Canvas(64, 32, 8)
-    c.line([(0.8, 17), (0.8, 4.5)], fill=(200, 240, 255), width=1.4)
-    c.arc((0.1, 0.1, 9, 9), 180, 270, fill=(200, 240, 255), width=1.4)
-    c.line([(4.5, 0.8), (34, 0.8)], fill=(200, 240, 255), width=1.4)
-    c.finish(f'{OUT}/tex3d/49f74b1ef4e93e52.png')
+    c = Canvas(64, 32, 1)
+    c.finish(f'{OUT}/tex3d/49f74b1ef4e93e52.png')   # fully transparent: the lit pill shows the selection
 
     # small digits (deck/graveyard counts): mini_num8x8 glyphs by structure hash, any colour
     DIGITS = ['2138da2186ab0a24', '9524e1c83ff2675e', '2656996fa4b89126', '3dca63f2b8d6ab31', '91583d6552d9488e',
               '7140bdbd737b63df', 'af2c3042f1c6e077', '0e1bf16364e782d5', '89d6a4884775f462', '48373df271f28f8a']
     for dgt, sh in enumerate(DIGITS):
         c = Canvas(8, 8, 32)
-        c.text((4, 4.3), str(dgt), 8.4, fill=WHITE, stroke=1.1, stroke_fill=(12, 18, 40))
+        c.text((4, 4.2), str(dgt), 7.0, fill=WHITE, stroke=0.8, stroke_fill=(12, 18, 40))
         c.finish(f'{OUT}/tex3d/s_{sh}.png')
 
     # "Draw" button (3D, 32x32: hand pulling a card, label underneath)
@@ -358,7 +364,7 @@ def main():
         c = Canvas(32, 32, 8)
         c.rrect((9, 1, 23, 19), 2, fill=(12, 18, 40))
         c.paste(CARDBACK, (10, 2, 22, 18))
-        c.poly([(26, 4), (30, 9), (27.5, 9), (27.5, 15), (24.5, 15), (24.5, 9), (22, 9)], fill=(255, 225, 90))
+        c.poly([(26, 16), (30, 11), (27.5, 11), (27.5, 4), (24.5, 4), (24.5, 11), (22, 11)], fill=(255, 225, 90))
         top, bot = ((80, 160, 255), (34, 90, 210)) if lit else ((44, 70, 130), (20, 34, 74))
         c.rrect((1, 20, 31, 31), 4, fill=(200, 235, 255) if lit else (110, 140, 200))
         c.grad_rrect((1.8, 20.8, 30.2, 30.2), 3.4, top, bot)

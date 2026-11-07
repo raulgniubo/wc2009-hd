@@ -416,9 +416,12 @@ QImage WC09Overlay::renderLpPanel(int lp0, int lp1, int turn, int phase, bool tu
     p.fillPath(panel, bg);
     p.setPen(QPen(QColor(120, 175, 255, 230), 0.8)); p.drawPath(panel);
 
-    auto bar = [&](QRectF track, float ratio, bool fromLeft) {
+    // you = cyan/blue (top row, left portrait), opponent = red (bottom row, right portrait)
+    const QColor youC[3] = {QColor(0, 96, 220), QColor(40, 180, 255), QColor(150, 235, 255)};
+    const QColor oppC[3] = {QColor(170, 16, 48), QColor(240, 64, 90), QColor(255, 160, 172)};
+    auto bar = [&](QRectF track, float ratio, bool fromLeft, const QColor* cs) {
         QPainterPath tp; tp.addRoundedRect(track, track.height() / 2, track.height() / 2);
-        p.fillPath(tp, QColor(8, 14, 34));
+        p.fillPath(tp, QColor(6, 10, 26));
         ratio = std::clamp(ratio, 0.f, 1.f);
         if (ratio > 0)
         {
@@ -426,14 +429,22 @@ QImage WC09Overlay::renderLpPanel(int lp0, int lp1, int turn, int phase, bool tu
             QRectF f = fromLeft ? QRectF(track.x(), track.y(), fw, track.height())
                                 : QRectF(track.right() - fw, track.y(), fw, track.height());
             QLinearGradient g(fromLeft ? track.left() : track.right(), 0, fromLeft ? track.right() : track.left(), 0);
-            g.setColorAt(0, QColor(255, 70, 40)); g.setColorAt(0.45, QColor(255, 170, 40)); g.setColorAt(1, QColor(255, 236, 120));
+            g.setColorAt(0, cs[0]); g.setColorAt(0.55, cs[1]); g.setColorAt(1, cs[2]);
             QPainterPath fp; fp.addRoundedRect(f, track.height() / 2, track.height() / 2);
             p.fillPath(fp, g);
             QLinearGradient gl(0, f.top(), 0, f.bottom());
-            gl.setColorAt(0, QColor(255, 255, 255, 110)); gl.setColorAt(0.5, QColor(255, 255, 255, 0));
+            gl.setColorAt(0, QColor(255, 255, 255, 120)); gl.setColorAt(0.5, QColor(255, 255, 255, 0));
             p.fillPath(fp, gl);
         }
-        p.setPen(QPen(QColor(120, 175, 255, 160), 0.5)); p.setBrush(Qt::NoBrush); p.drawPath(tp);
+        QColor e = cs[1]; e.setAlpha(170);
+        p.setPen(QPen(e, 0.5)); p.setBrush(Qt::NoBrush); p.drawPath(tp);
+    };
+    auto plate = [&](QRectF r, const QColor* cs) {
+        QPainterPath pp; pp.addRoundedRect(r, 3.5, 3.5);
+        QLinearGradient g(0, r.top(), 0, r.bottom());
+        g.setColorAt(0, cs[0].darker(250)); g.setColorAt(1, QColor(6, 10, 26));
+        p.fillPath(pp, g);
+        p.setPen(QPen(cs[1], 0.7)); p.setBrush(Qt::NoBrush); p.drawPath(pp);
     };
     auto text = [&](QRectF r, const QString& t, float px, int flags, QColor col = QColor(255, 255, 255)) {
         QFont f = QFontDatabase::systemFont(QFontDatabase::GeneralFont); f.setBold(true);
@@ -451,11 +462,17 @@ QImage WC09Overlay::renderLpPanel(int lp0, int lp1, int turn, int phase, bool tu
         p.setPen(Qt::NoPen); p.setBrush(col); p.drawPath(path);
         p.restore();
     };
-    // player 1: top row, bar from the left; player 2: bottom row, bar from the right
-    bar(QRectF(21, 3, W - 24, 10), lp0 / 8000.f, true);
-    bar(QRectF(3, H - 13, W - 24, 10), lp1 / 8000.f, false);
-    text(QRectF(23, 2, 60, 12), QString::number(lp0), 10.f, Qt::AlignLeft);
-    text(QRectF(W - 84, H - 14, 60, 12), QString::number(lp1), 10.f, Qt::AlignRight);
+    // player 1 (you): top row, number plate then bar from the left;
+    // player 2 (opponent): bottom row, bar from the right then number plate
+    const QRectF p0(19.5, 2.5, 37, 12), p1(W - 56.5, H - 14.5, 37, 12);
+    plate(p0, youC); plate(p1, oppC);
+    bar(QRectF(p0.right() + 3, 4.5, W - 3 - (p0.right() + 3), 8), lp0 / 8000.f, true, youC);
+    bar(QRectF(3, H - 12.5, p1.left() - 3 - 3, 8), lp1 / 8000.f, false, oppC);
+    text(p0, QString::number(lp0), 9.5f, Qt::AlignHCenter);
+    text(p1, QString::number(lp1), 9.5f, Qt::AlignHCenter);
+    // owner tags in the middle row, on each player's side
+    text(QRectF(5, 15, 36, 11), "YOU", 6.6f, Qt::AlignLeft, youC[2]);
+    text(QRectF(W - 41, 15, 36, 11), "OPPONENT", 6.6f, Qt::AlignRight, oppC[2]);
     // turn chip
     if (turn >= 0)
     {

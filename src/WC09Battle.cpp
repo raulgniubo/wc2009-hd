@@ -451,14 +451,17 @@ std::atomic<u64> BadgeSeen[2];             // frame + 1 when the badge was last 
 std::atomic<int> BadgeX0[2], BadgeY0[2], BadgeX1[2], BadgeY1[2];
 }
 
-bool HideSprite(int engine, int x, int y, int w, int h)
+bool LpPanelShown(int engine) { return LpBand[engine & 1].On; }
+
+bool HideSprite(int engine, int x, int y, int w, int h, bool affine)
 {
     {
         const RectHide& b = LpBand[engine & 1];
         if (b.On && x >= b.X0 && x + w <= b.X1 + 1 && y >= b.Y0 && y < b.Y1) return true;
     }
     const RectHide& r = DetailBadge[engine & 1];
-    if (!r.On || w > 16 || h > 16) return false;
+    // scaled sprites are never the badge (e.g. the big current-ATK digits drawn over the card)
+    if (!r.On || w > 16 || h > 16 || affine) return false;
     // the level badge the game puts on the card's top-right corner: redrawn in HD by the panel
     if (!(x >= r.X0 + 50 && x + w <= r.X1 + 6 && y >= r.Y0 + 4 && y + h <= r.Y0 + 34)) return false;
     int e = engine & 1;
@@ -643,6 +646,134 @@ u32 GetTextMask(int engine, int bg, std::vector<u8>& mask, bool* outlined)
     mask = TextMask[engine & 1][bg & 3];
     if (outlined) *outlined = TextOutlined[engine & 1][bg & 3];
     return TextMaskGen[engine & 1][bg & 3];
+}
+
+// ---- HD tile pack -----------------------------------------------------------------------------
+// Background tiles replaced one by one (menu digits, icons, list rows...): key = hash of the 8x8
+// tile as shown (colours after the palette, flips applied).  HDCards/tiles/keys.png lists the
+// keys (3 pixels per key, 24 bits each, alpha 255); HDCards/tiles/atlas.png holds the tiles,
+// 64x64 each, 32 per row, in the same order.
+namespace
+{
+std::unordered_map<u64, u16> HDTileKeys;     // key -> slot + 1
+std::atomic<bool> HDTilesReady{false};
+std::vector<u16> HDTileMapV[2][4];
+u32 HDTileGen[2][4];
+bool HDTileAny[2][4];
+}
+
+void LoadHDTileKeys()
+{
+    std::vector<u8> rgba; int w = 0, h = 0;
+    std::unordered_map<u64, u16> keys;
+    if (LoadHDImage("tiles/keys", rgba, w, h) && w > 0)
+    {
+        int n = (w * h) / 3;
+        for (int i = 0; i < n && i < 1024; i++)
+        {
+            u64 k = 0;
+            for (int j = 0; j < 3; j++)
+            {
+                const u8* px = &rgba[(i * 3 + j) * 4];
+                k |= (u64)(px[0] | (px[1] << 8) | (px[2] << 16)) << (24 * j);
+            }
+            if (k) keys[k] = (u16)(i + 1);
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lk(Lock);
+        HDTileKeys.swap(keys);
+    }
+    HDTilesReady = !HDTileKeys.empty();
+    if (getenv("WC09_DEBUG")) { printf("WC09 HD tiles: %zu\n", HDTileKeys.size()); fflush(stdout); }
+}
+
+// hashes of the visible tiles of a text-mode layer; fills HD tile slots, optionally dumps them
+static void UpdateHDTiles(GPU& gpu, int engine, int bg, bool dump)
+{
+    GPU2D& u = engine == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+    u16 cnt = u.BGCnt[bg];
+    bool bpp8 = cnt & 0x80;
+    bool ext = bpp8 && (u.DispCnt & (1u << 30));
+    u32 charBase = ((cnt >> 2) & 0xF) * 0x4000, scrBase = ((cnt >> 8) & 0x1F) * 0x800;
+    if (engine == 0) { charBase += ((u.DispCnt >> 24) & 7) * 0x10000; scrBase += ((u.DispCnt >> 27) & 7) * 0x10000; }
+    int mapW = (cnt >> 14) & 1 ? 64 : 32, mapH = (cnt >> 14) & 2 ? 64 : 32;
+    int sx0 = u.BGXPos[bg] & 0x1FF, sy0 = u.BGYPos[bg] & 0x1FF;
+    const u8* pal = &gpu.Palette[engine * 0x400];
+    u32 extSlot = (bg < 2 && (cnt & 0x2000)) ? bg + 2 : bg;
+    std::vector<u16> map(64 * 64, 0);
+    bool any = false;
+    static u64 hashes[25][33];
+    static u8 pix[25 * 8][33 * 8][4];
+    std::unordered_map<u32, u64> seen;   // map entry -> hash (this frame)
+    for (int ty = 0; ty < 25; ty++)
+        for (int tx = 0; tx < 33; tx++)
+        {
+            int mx = ((sx0 >> 3) + tx) & (mapW - 1), my = ((sy0 >> 3) + ty) & (mapH - 1);
+            u32 block = (mx >> 5) + ((my >> 5) * (mapW >> 5));
+            u16 ent = ReadBG(gpu, engine, scrBase + block * 0x800 + (((my & 31) * 32 + (mx & 31)) * 2));
+            u8 rgba[64][4];
+            u32 t = ent & 0x3FF;
+            u32 bytes = bpp8 ? 64 : 32;
+            u8 data[64];
+            for (u32 b = 0; b < bytes; b += 2)
+            {
+                u16 two = ReadBG(gpu, engine, charBase + t * bytes + b);
+                data[b] = two & 0xFF; data[b + 1] = two >> 8;
+            }
+            bool blank = true;
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                {
+                    int sxp = (ent & 0x400) ? 7 - x : x, syp = (ent & 0x800) ? 7 - y : y;
+                    u32 idx = bpp8 ? data[syp * 8 + sxp] : ((data[syp * 4 + (sxp >> 1)] >> ((sxp & 1) * 4)) & 0xF);
+                    u8* o = rgba[y * 8 + x];
+                    if (!idx) { o[0] = o[1] = o[2] = o[3] = 0; continue; }
+                    blank = false;
+                    u16 col;
+                    if (ext) col = u.GetBGExtPal(extSlot, ent >> 12)[idx];
+                    else if (bpp8) col = pal[idx * 2] | (pal[idx * 2 + 1] << 8);
+                    else { u32 i = (ent >> 12) * 16 + idx; col = pal[i * 2] | (pal[i * 2 + 1] << 8); }
+                    o[0] = (col & 31) << 3; o[1] = ((col >> 5) & 31) << 3; o[2] = ((col >> 10) & 31) << 3; o[3] = 255;
+                }
+            u64 h = blank ? 0 : XXH64(rgba, sizeof(rgba), 0x7117);
+            if (dump) { hashes[ty][tx] = h; for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) memcpy(pix[ty * 8 + y][tx * 8 + x], rgba[y * 8 + x], 4); }
+            if (!h) continue;
+            auto it = HDTileKeys.find(h);
+            if (it != HDTileKeys.end()) { map[my * 64 + mx] = it->second; any = true; }
+        }
+    if (dump)
+    {
+        static int n = 0;
+        char path[512];
+        snprintf(path, sizeof(path), "%s/L%d%d_%04d.bin", getenv("WC09_TILEDUMP"), engine, bg, n++);
+        if (FILE* f = fopen(path, "wb"))
+        {
+            fwrite(hashes, sizeof(hashes), 1, f); fwrite(pix, sizeof(pix), 1, f);
+            int hdr[4] = {sx0 & 7, sy0 & 7, engine, bg}; fwrite(hdr, sizeof(hdr), 1, f);
+            fclose(f);
+        }
+    }
+    std::lock_guard<std::mutex> lk(Lock);
+    if (any || HDTileAny[engine][bg])
+    {
+        if (map != HDTileMapV[engine][bg])
+        {
+            if (getenv("WC09_DEBUG")) { int c = 0; for (u16 v : map) c += v != 0; printf("WC09 HD tiles e%d b%d: %d tiles\n", engine, bg, c); fflush(stdout); }
+            HDTileMapV[engine][bg].swap(map); HDTileGen[engine][bg]++;
+        }
+    }
+    HDTileAny[engine][bg] = any;
+}
+
+bool HDTilesAvailable() { return HDTilesReady.load(); }
+
+u32 GetHDTileMap(int engine, int bg, std::vector<u16>& map, bool& any)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    any = HDTileAny[engine & 1][bg & 3];
+    if (any) map = HDTileMapV[engine & 1][bg & 3];
+    return HDTileGen[engine & 1][bg & 3];
 }
 
 
@@ -859,6 +990,7 @@ void OnVBlankBattle(GPU& gpu)
                 BuildSpriteIndex(rom, len);
                 LoadCardText(rom, len);
                 LoadLpGlyphs(rom, len);
+                LoadHDTileKeys();
                 SetCardROM(rom, len);
                 PrepareCardFingerprints();
                 IndexReady = true;
@@ -1196,6 +1328,31 @@ void OnVBlankBattle(GPU& gpu)
         }
     }
     for (int e = 0; e < 2; e++) for (int b = 0; b < 4; b++) lastText[e][b] = textLayer[e][b];
+
+    // HD tiles: every visible text-mode layer, every frame (lists scroll and change quickly)
+    {
+        static const char* tdump = getenv("WC09_TILEDUMP");
+        bool dumpNow = tdump && (VBlankCount.load() % 60) == 0;
+        bool updated[2][4] = {};
+        if ((HDTilesReady || dumpNow) && IsActive() && GetHDCardsEnabled())
+            for (int e = 0; e < 2; e++)
+            {
+                const GPU2D& u = e == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+                if (((u.DispCnt >> 16) & 3) != 1) continue;
+                u32 mode = u.DispCnt & 7;
+                for (int b = 0; b < 4; b++)
+                {
+                    bool on = (u.DispCnt & (1 << (8 + b))) && !(found[e][b].Image >= 0 && !found[e][b].ScreenSpace) &&
+                              !(e == 0 && b == 0 && (u.DispCnt & (1 << 3))) &&
+                              (b < 2 || (b == 2 && mode <= 1) || (b == 3 && mode == 0));
+                    if (on) { UpdateHDTiles(gpu, e, b, dumpNow); updated[e][b] = true; }
+                }
+            }
+        // layers not scanned this frame never keep tiles from an earlier screen
+        std::lock_guard<std::mutex> lk(Lock);
+        for (int e = 0; e < 2; e++) for (int b = 0; b < 4; b++)
+            if (!updated[e][b] && HDTileAny[e][b]) { HDTileAny[e][b] = false; HDTileGen[e][b]++; }
+    }
 
     std::lock_guard<std::mutex> lk(Lock);
     OnScreen[0] = onScreen[0]; OnScreen[1] = onScreen[1];

@@ -18,6 +18,7 @@
 
 #pragma once
 #include <unordered_map>
+#include <string>
 
 #ifdef OGLRENDERER_ENABLED
 #include "GPU3D.h"
@@ -114,6 +115,8 @@ private:
     std::unordered_map<u64, CardPx> CardPixels;
     GLuint GetHDCard(u64 hash, int card, u32 size, const u32* newPixels);
     GLuint UploadHD3D(const u8* rgba, int w, int h);
+    std::unordered_map<std::string, GLuint> HDNamed;   // position-matched UI pieces
+    GLuint GetHDNamed(const char* name);
     GLuint CurShaderID = -1;
 
     GLuint FinalPassEdgeShader {};

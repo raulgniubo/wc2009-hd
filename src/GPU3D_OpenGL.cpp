@@ -104,6 +104,17 @@ void GLRenderer3D::UseRenderShader(bool wbuffer)
     HDModeULoc = glGetUniformLocation(RenderShader[flags], "uHDMode");
 }
 
+GLuint GLRenderer3D::GetHDNamed(const char* name)
+{
+    auto it = HDNamed.find(name);
+    if (it != HDNamed.end()) return it->second;
+    std::vector<u8> rgba; int w = 0, h = 0;
+    GLuint t = 0;
+    if (WC09::LoadHDImage(name, rgba, w, h) && w > 0 && h > 0) t = UploadHD3D(rgba.data(), w, h);
+    HDNamed[name] = t;
+    return t;
+}
+
 GLuint GLRenderer3D::UploadHD3D(const u8* rgba, int w, int h)
 {
     GLuint tex;
@@ -848,6 +859,50 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
         rp->TexID = curtexid;
         rp->HDTex = (curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF) ? curhd : 0;
         rp->HDMode = curhdmode;
+        // WC09: duel UI pieces the game animates (phase bar, corner buttons) come in many
+        // colour/lighting frames; anything without its own HD image is matched by where it sits
+        if (hdon && !rp->HDTex && curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF && ((poly->TexParam >> 26) & 7) == 4)
+        {
+            u32 tw = TextureWidth(poly->TexParam), th = TextureHeight(poly->TexParam);
+            if (tw == 32 && (th == 16 || th == 32))
+            {
+                int x0 = 999, y0 = 999, x1 = -999, y1 = -999;
+                for (u32 v = 0; v < poly->NumVertices; v++)
+                {
+                    x0 = std::min<int>(x0, poly->Vertices[v]->FinalPosition[0]); x1 = std::max<int>(x1, poly->Vertices[v]->FinalPosition[0]);
+                    y0 = std::min<int>(y0, poly->Vertices[v]->FinalPosition[1]); y1 = std::max<int>(y1, poly->Vertices[v]->FinalPosition[1]);
+                }
+                char name[48] = {};
+                char hue = Texcache.LastTone ? (char)(Texcache.LastTone >> 8) : 'n';
+                if (th == 16 && y0 == 0 && y1 == 16 && x1 - x0 == 32 && (x0 - 27) % 34 == 0 && x0 >= 27 && x0 <= 197)
+                    snprintf(name, sizeof(name), "tex3d/phase_%d_%c", (x0 - 27) / 34, hue);
+                else if (th == 32 && x0 == 232 && x1 == 256 && y0 == 0)
+                    snprintf(name, sizeof(name), "tex3d/corner_select");
+                else if (th == 32 && x0 == 232 && x1 == 256 && y0 == 20)
+                    snprintf(name, sizeof(name), "tex3d/corner_page");
+                else if (th == 32 && x0 == 0 && x1 == 32 && y0 == 22)
+                    snprintf(name, sizeof(name), "tex3d/corner_chain");
+                if (name[0])
+                {
+                    rp->HDTex = GetHDNamed(name);
+                    rp->HDMode = 1;
+                }
+            }
+        }
+        if (static const bool posdbg = getenv("WC09_POSDBG") != nullptr; posdbg && curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF)
+        {
+            u32 tw = TextureWidth(poly->TexParam), th = TextureHeight(poly->TexParam), tt = (poly->TexParam >> 26) & 7;
+            if (tw * th <= 64 * 32)
+            {
+                int x0 = 999, y0 = 999, x1 = -999, y1 = -999;
+                for (u32 v = 0; v < poly->NumVertices; v++)
+                {
+                    x0 = std::min<int>(x0, poly->Vertices[v]->FinalPosition[0]); x1 = std::max<int>(x1, poly->Vertices[v]->FinalPosition[0]);
+                    y0 = std::min<int>(y0, poly->Vertices[v]->FinalPosition[1]); y1 = std::max<int>(y1, poly->Vertices[v]->FinalPosition[1]);
+                }
+                printf("POS %016llx %ux%u f%u %d,%d-%d,%d hd%d\n", (unsigned long long)Texcache.LastContentHash, tw, th, tt, x0, y0, x1, y1, rp->HDTex ? 1 : 0);
+            }
+        }
         if (static const char* dbg = getenv("WC09_TEXDBG"); dbg && *dbg && curtexlayer != (u32)-1 &&
             (curtexlayer >> 16) == 0xFFFF && Texcache.LastContentHash == strtoull(dbg, nullptr, 16))
         {
