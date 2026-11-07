@@ -15,6 +15,7 @@ final class SettingsView extends LinearLayout {
         void settingChanged(String key);
         void closeSettings();
         void changeFolder();
+        void openEnhancements(Packs.Pack pack);
     }
 
     // keys and defaults
@@ -64,7 +65,7 @@ final class SettingsView extends LinearLayout {
         addView(sv, new LayoutParams(-1, 0, 1));
 
         // ---- graphics
-        LinearLayout g = section("Graphics");
+        LinearLayout g = section("Display");
         final int[] scales = {2, 3, 4, 5, 6, 8};
         int sel = 2;
         for (int i = 0; i < scales.length; i++) if (scales[i] == scale(prefs)) sel = i;
@@ -81,16 +82,32 @@ final class SettingsView extends LinearLayout {
         g.addView(toggle("smooth2d", "Smooth 2D graphics", "Upscales menus and sprites with smooth edges instead of blocky pixels."));
 
         // ---- WC2009
-        LinearLayout w = section("Yu-Gi-Oh! 5D's WC2009 HD");
-        w.addView(toggle("hdAll", "HD improvements", "Off plays the game exactly like the original DS. You can also switch it from the in-game menu to compare."));
-        w.addView(Ui.divider(c));
-        w.addView(toggle("hdCards", "HD card art", "Real card images instead of the DS's small pictures (needs the HDCards folder)."));
-        w.addView(Ui.divider(c));
-        w.addView(toggle("hdText", "HD text and menus", "Card text, descriptions and panels redrawn in a clean font."));
+        LinearLayout w = section("Game enhancements");
+        for (int i = 0; i < Packs.ALL.length; i++) {
+            Packs.Pack p = Packs.ALL[i];
+            if (i > 0) w.addView(Ui.divider(c));
+            LinearLayout row = new LinearLayout(c);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(Ui.dp(c, 16), Ui.dp(c, 16), Ui.dp(c, 16), Ui.dp(c, 16));
+            row.setBackground(Ui.pressable(c, Ui.CARD, 16));
+            TextView star = Ui.text(c, "✦", 16, 0xFF06111F, true);
+            star.setGravity(Gravity.CENTER);
+            star.setBackground(Ui.rounded(0xFFF2A93B, Ui.dp(c, 8)));
+            row.addView(star, new LayoutParams(Ui.dp(c, 30), Ui.dp(c, 30)));
+            TextView t = Ui.text(c, p.shortTitle, 16, Ui.TEXT, false);
+            t.setPadding(Ui.dp(c, 14), 0, 0, 0);
+            row.addView(t, new LayoutParams(0, -2, 1));
+            row.addView(Ui.text(c, (prefs.getBoolean(p.master, true) ? "On" : "Off") + "   ›", 15, Ui.TEXT_DIM, false));
+            row.setOnClickListener(v -> listener.openEnhancements(p));
+            w.addView(row);
+        }
+        TextView wn = Ui.text(c, "Extra improvements made for specific games. They switch on by themselves when you play that game.", 13, Ui.TEXT_DIM, false);
+        wn.setPadding(Ui.dp(c, 6), Ui.dp(c, 8), Ui.dp(c, 6), 0);
+        list.addView(wn);
 
         // ---- controls
         LinearLayout ct = section("Controls");
-        ct.addView(toggle("buttons", "On-screen buttons", "Off = full screen: the DS screens as big as they fit, with just a small menu button in the corner. Play with touch or a controller. Also in the in-game menu."));
+        ct.addView(toggle("buttons", "On-screen buttons", "Turn off for full screen: just the DS screens and a small menu button. Also in the in-game menu."));
         ct.addView(Ui.divider(c));
         final float[] ops = {0.25f, 0.4f, 0.55f, 0.75f, 0.95f};
         int os = 2;

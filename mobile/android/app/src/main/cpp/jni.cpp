@@ -133,3 +133,9 @@ FN(jstring, romInfo)(JNIEnv* env, jclass, jstring path, jintArray argb)
     }
     return env->NewStringUTF(title);
 }
+FN(jstring, romCode)(JNIEnv* env, jclass, jstring path)
+{
+    char code[5] = {0};
+    wc09_rom_code(JStr(env, path).c_str(), code);
+    return env->NewStringUTF(code);
+}

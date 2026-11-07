@@ -36,6 +36,7 @@ final class LibraryView extends LinearLayout {
         void play(Game g, boolean fresh);
         void gameOptions(Game g);
         void openSettings();
+        void chooseFolder();
     }
 
     static final class Game {
@@ -43,7 +44,7 @@ final class LibraryView extends LinearLayout {
         String title, publisher, base;
         Bitmap icon, cover;
         int tint = 0xFF2A3346;
-        boolean resume;
+        boolean resume, favorite, enhanced;
         long lastPlayed;
     }
 
@@ -51,7 +52,7 @@ final class LibraryView extends LinearLayout {
     private final Listener listener;
     private final List<Game> games = new ArrayList<>();
     private final GridView grid;
-    private final TextView empty;
+    private final View empty;
     private final Adapter adapter = new Adapter();
     private String dir = "";
 
@@ -89,12 +90,60 @@ final class LibraryView extends LinearLayout {
         grid.setOnItemClickListener((p, v, pos, id) -> listener.play(games.get(pos), false));
         grid.setOnItemLongClickListener((p, v, pos, id) -> { listener.gameOptions(games.get(pos)); return true; });
         body.addView(grid);
-        empty = Ui.text(c, "", 16, Ui.TEXT_DIM, false);
-        empty.setGravity(Gravity.CENTER);
-        empty.setLineSpacing(0, 1.3f);
-        empty.setPadding(Ui.dp(c, 32), 0, Ui.dp(c, 32), 0);
+        empty = emptyState(c);
+        empty.setVisibility(GONE);
         body.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         addView(body, new LayoutParams(-1, 0, 1));
+    }
+
+    private TextView folderLabel;
+
+    /** Welcome screen when the folder has no games yet. */
+    private View emptyState(Context c) {
+        android.widget.ScrollView sv = new android.widget.ScrollView(c);
+        LinearLayout col = new LinearLayout(c);
+        col.setOrientation(VERTICAL);
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setPadding(Ui.dp(c, 28), Ui.dp(c, 30), Ui.dp(c, 28), Ui.dp(c, 30));
+        sv.addView(col);
+
+        ImageView art = new ImageView(c);
+        art.setImageResource(R.mipmap.ic_launcher);
+        col.addView(art, new LayoutParams(Ui.dp(c, 112), Ui.dp(c, 112)));
+
+        TextView title = Ui.text(c, "Add your games", 28, Ui.TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, Ui.dp(c, 18), 0, Ui.dp(c, 6));
+        col.addView(title, new LayoutParams(-1, -2));
+        TextView sub = Ui.text(c, "Dual HD plays DS games (.nds files) with sharp HD upscaling, save states and controller support.", 16, Ui.TEXT_DIM, false);
+        sub.setGravity(Gravity.CENTER);
+        sub.setLineSpacing(0, 1.2f);
+        col.addView(sub, new LayoutParams(-1, -2));
+
+        LinearLayout card = new LinearLayout(c);
+        card.setOrientation(VERTICAL);
+        card.setPadding(Ui.dp(c, 18), Ui.dp(c, 16), Ui.dp(c, 18), Ui.dp(c, 16));
+        card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(c, 16)));
+        card.addView(Ui.text(c, "Copy your .nds files into your games folder:", 15, Ui.TEXT, true));
+        folderLabel = Ui.text(c, "", 14, Ui.ACCENT, false);
+        folderLabel.setPadding(0, Ui.dp(c, 6), 0, Ui.dp(c, 6));
+        card.addView(folderLabel);
+        TextView hint = Ui.text(c, "Then come back here; they show up on their own. Some games get extra improvements, like Yu-Gi-Oh! 5D's WC2009 with HD cards (keep its HDCards folder next to the game).", 13.5f, Ui.TEXT_DIM, false);
+        hint.setLineSpacing(0, 1.2f);
+        card.addView(hint);
+        LayoutParams lp = new LayoutParams(-1, -2);
+        lp.topMargin = Ui.dp(c, 26);
+        col.addView(card, lp);
+
+        TextView choose = Ui.text(c, "Use another folder", 16, 0xFF06111F, true);
+        choose.setGravity(Gravity.CENTER);
+        choose.setPadding(0, Ui.dp(c, 15), 0, Ui.dp(c, 15));
+        choose.setBackground(Ui.pressable(c, Ui.ACCENT, 14));
+        choose.setOnClickListener(v -> listener.chooseFolder());
+        LayoutParams bp = new LayoutParams(-1, -2);
+        bp.topMargin = Ui.dp(c, 16);
+        col.addView(choose, bp);
+        return sv;
     }
 
     /** Rescans the folder (call after playing, to update the order and the resume badges). */
@@ -106,8 +155,7 @@ final class LibraryView extends LinearLayout {
             ui.post(() -> {
                 games.clear(); games.addAll(found);
                 adapter.notifyDataSetChanged();
-                empty.setText(found.isEmpty() ? "No games yet.\n\nPut .nds files in\n" + folder
-                        + "\n\nTo use your own cover art, add a picture with the same name as the game (.png or .jpg)." : "");
+                folderLabel.setText(folder);
                 empty.setVisibility(found.isEmpty() ? VISIBLE : GONE);
             });
         }).start();
@@ -134,6 +182,10 @@ final class LibraryView extends LinearLayout {
                 g.publisher = "";
             }
             g.title = prettyTitle(g.title);
+            String custom = prefs.getString("name:" + n, "");
+            if (!custom.isEmpty()) g.title = custom;
+            g.favorite = prefs.getBoolean("fav:" + n, false);
+            g.enhanced = Packs.forCode(Native.romCode(f.getAbsolutePath())) != null;
             g.icon = Bitmap.createBitmap(px, 32, 32, Bitmap.Config.ARGB_8888);
             g.tint = averageColor(px);
             g.cover = loadCover(folder, g.base);
@@ -141,7 +193,7 @@ final class LibraryView extends LinearLayout {
             g.lastPlayed = prefs.getLong("played:" + n, 0);
             out.add(g);
         }
-        Collections.sort(out, (a, b) -> a.lastPlayed != b.lastPlayed ? Long.compare(b.lastPlayed, a.lastPlayed)
+        Collections.sort(out, (a, b) -> a.favorite != b.favorite ? (a.favorite ? -1 : 1) : a.lastPlayed != b.lastPlayed ? Long.compare(b.lastPlayed, a.lastPlayed)
                 : a.title.compareToIgnoreCase(b.title));
         return out;
     }
@@ -158,7 +210,7 @@ final class LibraryView extends LinearLayout {
     }
 
     private static Bitmap loadCover(String folder, String base) {
-        for (String d : new String[] {folder, folder + "/Covers"})
+        for (String d : new String[] {folder + "/Covers", folder})
             for (String ext : new String[] {".png", ".jpg", ".jpeg", ".webp"}) {
                 File f = new File(d, base + ext);
                 if (f.exists()) {
@@ -274,6 +326,27 @@ final class LibraryView extends LinearLayout {
                 c.drawBitmap(game.icon, new Rect(0, 0, 32, 32), new Rect(x, y, x + s, y + s), pix);
             }
             c.restore();
+            float bh = Ui.dp(getContext(), 22), bm = Ui.dp(getContext(), 8);
+            paint.setTextSize(Ui.dp(getContext(), 11));
+            paint.setFakeBoldText(true);
+            paint.setTextAlign(Paint.Align.CENTER);
+            if (game.favorite) {
+                RectF sr = new RectF(bm, bm, bm + bh, bm + bh);
+                paint.setColor(0xD90A0E16);
+                c.drawRoundRect(sr, bh / 2, bh / 2, paint);
+                paint.setColor(0xFFFACC15);
+                paint.setTextSize(Ui.dp(getContext(), 13));
+                c.drawText("★", sr.centerX(), sr.centerY() - (paint.descent() + paint.ascent()) / 2, paint);
+                paint.setTextSize(Ui.dp(getContext(), 11));
+            }
+            if (game.enhanced) {
+                float bw = Ui.dp(getContext(), 42);
+                RectF hr = new RectF(bm, h - bm - bh, bm + bw, h - bm);
+                paint.setColor(0xD90A0E16);
+                c.drawRoundRect(hr, bh / 2, bh / 2, paint);
+                paint.setColor(0xFFF2C14E);
+                c.drawText("✦ HD", hr.centerX(), hr.centerY() - (paint.descent() + paint.ascent()) / 2, paint);
+            }
             if (game.resume) {
                 paint.setColor(0xE60A0E16);
                 float ph = Ui.dp(getContext(), 22), pw = Ui.dp(getContext(), 64), m = Ui.dp(getContext(), 8);

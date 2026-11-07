@@ -36,8 +36,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 public final class MainActivity extends Activity
-        implements GameView.Host, ControlsView.Listener, LibraryView.Listener, SettingsView.Listener {
-    private static final int REQ_FOLDER = 1, REQ_PERMS = 2;
+        implements GameView.Host, ControlsView.Listener, LibraryView.Listener, SettingsView.Listener, EnhancementsView.Listener {
+    private static final int REQ_FOLDER = 1, REQ_PERMS = 2, REQ_COVER = 3;
+    private LibraryView.Game coverTarget;
+    private EnhancementsView enhancements;
     private static final int AUTO_SLOT = 0;   // the resume point
 
     private SharedPreferences prefs;
@@ -135,7 +137,8 @@ public final class MainActivity extends Activity
 
     @Override
     public void onBackPressed() {
-        if (settings != null) closeSettings();
+        if (enhancements != null) closeEnhancements();
+        else if (settings != null) closeSettings();
         else if (game != null) onMenu();
         else super.onBackPressed();
     }
@@ -245,6 +248,10 @@ public final class MainActivity extends Activity
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_COVER) {
+            if (res == RESULT_OK && data != null && data.getData() != null && coverTarget != null) saveCover(coverTarget, data.getData());
+            return;
+        }
         if (req != REQ_FOLDER || res != RESULT_OK || data == null || data.getData() == null) return;
         String path = treeToPath(data.getData());
         if (path == null || !new File(path).isDirectory()) {
@@ -292,18 +299,110 @@ public final class MainActivity extends Activity
 
     @Override
     public void gameOptions(LibraryView.Game g) {
-        String[] items = g.resume ? new String[] {"Play", "Start from the in-game save", "Remove resume point"} : new String[] {"Play"};
+        java.util.List<String> items = new java.util.ArrayList<>();
+        java.util.List<Runnable> acts = new java.util.ArrayList<>();
+        items.add("Play"); acts.add(() -> play(g, false));
+        if (g.resume) { items.add("Start from in-game save"); acts.add(() -> play(g, true)); }
+        items.add(g.favorite ? "Remove from favorites" : "Add to favorites");
+        acts.add(() -> { prefs.edit().putBoolean("fav:" + g.rom.getName(), !g.favorite).apply(); library.load(gameDir()); });
+        items.add("Change cover…"); acts.add(() -> pickCover(g));
+        if (g.cover != null) { items.add("Use game icon"); acts.add(() -> { removeCovers(g); library.load(gameDir()); }); }
+        items.add("Rename…"); acts.add(() -> rename(g));
+        if (g.resume) {
+            items.add("Remove resume point");
+            acts.add(() -> { new File(gameDir() + "/Saves/" + g.base + ".ml0").delete(); library.load(gameDir()); });
+        }
+        items.add("Delete game…"); acts.add(() -> confirmDelete(g));
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(g.title)
-                .setItems(items, (d, which) -> {
-                    if (which == 0) play(g, false);
-                    else if (which == 1) play(g, true);
-                    else {
-                        new File(gameDir() + "/Saves/" + g.base + ".ml0").delete();
-                        library.load(gameDir());
-                    }
-                })
+                .setItems(items.toArray(new String[0]), (d, which) -> acts.get(which).run())
                 .show();
+    }
+
+    @Override
+    public void chooseFolder() { pickFolder(); }
+
+    private void pickCover(LibraryView.Game g) {
+        coverTarget = g;
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("image/*");
+        startActivityForResult(i, REQ_COVER);
+    }
+
+    private void removeCovers(LibraryView.Game g) {
+        for (String d : new String[] {gameDir() + "/Covers", gameDir()})
+            for (String ext : new String[] {".png", ".jpg", ".jpeg", ".webp"})
+                new File(d, g.base + ext).delete();
+    }
+
+    private void saveCover(LibraryView.Game g, Uri uri) {
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeStream(in);
+            if (bm == null) { toast("That picture can't be used."); return; }
+            float k = 1024f / Math.max(bm.getWidth(), bm.getHeight());
+            if (k < 1) bm = android.graphics.Bitmap.createScaledBitmap(bm, Math.round(bm.getWidth() * k), Math.round(bm.getHeight() * k), true);
+            removeCovers(g);
+            File dir = new File(gameDir(), "Covers");
+            dir.mkdirs();
+            try (OutputStream os = new FileOutputStream(new File(dir, g.base + ".jpg"))) {
+                bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, os);
+            }
+            library.load(gameDir());
+        } catch (Exception e) {
+            toast("Couldn't save the cover.");
+        }
+    }
+
+    private void rename(LibraryView.Game g) {
+        android.widget.EditText et = new android.widget.EditText(this);
+        et.setText(g.title);
+        et.setSelectAllOnFocus(true);
+        et.setSingleLine(true);
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(Ui.dp(this, 20), Ui.dp(this, 8), Ui.dp(this, 20), 0);
+        box.addView(et);
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Rename")
+                .setView(box)
+                .setPositiveButton("Save", (d, w) -> {
+                    String t = et.getText().toString().trim();
+                    if (t.isEmpty()) prefs.edit().remove("name:" + g.rom.getName()).apply();
+                    else prefs.edit().putString("name:" + g.rom.getName(), t).apply();
+                    library.load(gameDir());
+                })
+                .setNeutralButton("Reset", (d, w) -> { prefs.edit().remove("name:" + g.rom.getName()).apply(); library.load(gameDir()); })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void confirmDelete(LibraryView.Game g) {
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Delete " + g.title + "?")
+                .setMessage("The game file is removed from this phone. Your saves stay in the Saves folder.")
+                .setPositiveButton("Delete", (d, w) -> { g.rom.delete(); library.load(gameDir()); })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    @Override
+    public void openEnhancements(Packs.Pack pack) {
+        enhancements = new EnhancementsView(this, prefs, pack, this);
+        root.addView(enhancements, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    @Override
+    public void closeEnhancements() {
+        if (enhancements == null) return;
+        root.removeView(enhancements);
+        enhancements = null;
+        // refresh the On/Off value on the settings page
+        if (settings != null) {
+            int idx = root.indexOfChild(settings);
+            root.removeView(settings);
+            settings = new SettingsView(this, prefs, this, gameDir());
+            root.addView(settings, idx, new FrameLayout.LayoutParams(-1, -1));
+        }
     }
 
     // ================================================================ settings
@@ -323,6 +422,7 @@ public final class MainActivity extends Activity
 
     @Override
     public void closeSettings() {
+        if (enhancements != null) { root.removeView(enhancements); enhancements = null; }
         if (game != null) {
             root.removeView(settings);
             settings = null;
