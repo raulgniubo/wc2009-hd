@@ -31,7 +31,7 @@ def render_bg(e, bg):
             if ent & 0x800: yy = 7 - yy
             if bpp8:
                 ci = v[(cb + t*64 + yy*8 + xx) & mask]
-                if ci: px[x, y] = (ci, ci, ci, 255)
+                if ci: px[x, y] = col(pal(e, ci)) + (255,)
             else:
                 b = v[(cb + t*32 + yy*4 + xx//2) & mask]; ci = (b >> 4) if xx & 1 else b & 15
                 if ci: px[x, y] = col(pal(e, (ent >> 12)*16 + ci)) + (255,)

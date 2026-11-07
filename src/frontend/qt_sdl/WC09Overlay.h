@@ -51,6 +51,8 @@ public:
     // deck editor detail view: description (or the name) as outlined text on transparent
     static QImage renderDeckText(int card, float scale, bool nameOnly);
     // duel card view panel plus the ATK/DEF row under the card
+    // duel life point panel (top screen, under the card view)
+    static QImage renderLpPanel(int lp0, int lp1, int turn, int phase, bool turnRight, float scale);
     static QImage renderStatPanel(const melonDS::WC09::StatPanelInfo& info, float scale);
 
 private:

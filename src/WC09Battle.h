@@ -48,6 +48,11 @@ constexpr int kStatsY = 137, kStatsH = 12;
 struct StatPanelInfo { int Card, Atk, Def; bool Bubble; int Level, BadgeRight, BadgeMidY; };   // Atk -1: unknown, Level 0: no badge
 bool GetStatPanel(int image, StatPanelInfo& out);
 
+// Duel life point panel redrawn in HD (ids from kLpPanelBase), screen rect in DS pixels.
+constexpr int kLpPanelBase = 2600000;
+constexpr int kLpX = 46, kLpY = 151, kLpW = 161, kLpH = 41;
+bool GetLpPanel(int image, int& lp0, int& lp1, int& turn, int& phase, bool& turnRight);   // turn/phase -1 = unknown
+
 // Sprites hidden because the HD card already shows them (the level badge on the card view).
 struct RectHide { bool On = false; int X0 = 0, Y0 = 0, X1 = 0, Y1 = 0; };
 bool HideSprite(int engine, int x, int y, int w, int h);

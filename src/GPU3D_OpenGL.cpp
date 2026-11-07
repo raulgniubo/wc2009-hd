@@ -132,7 +132,67 @@ GLuint GLRenderer3D::UploadHD3D(const u8* rgba, int w, int h)
     return tex;
 }
 
-GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone)
+
+// WC09: a small texture is text when it shows dark outline + bright fill with only a few
+// colours on a transparent background. Rebuilt 8x larger: the bright fill is cut from a cubic
+// interpolation of brightness, the outline from a cubic interpolation of coverage.
+static bool SmoothTextTexture(const u32* px, int w, int h, std::vector<u8>& out)
+{
+    int opaque = 0, bright = 0, dark = 0; u32 cols[24]; int nc = 0;
+    for (int i = 0; i < w * h; i++)
+    {
+        u32 c = px[i];
+        if (!(c >> 24)) continue;
+        opaque++;
+        int r = c & 0x3F, g = (c >> 8) & 0x3F, b = (c >> 16) & 0x3F;
+        int l = (r * 3 + g * 6 + b) / 10;
+        int mx = std::max({r, g, b}), mn = std::min({r, g, b});
+        if (l > 50 && mx - mn < 10) bright++;      // white / light grey fill
+        if (l < 14) dark++;
+        u32 k = c & 0x3F3F3F; bool seen = false;
+        for (int j = 0; j < nc && !seen; j++) seen = cols[j] == k;
+        if (!seen) { if (nc == 16) return false; cols[nc++] = k; }
+    }
+    if (opaque < 12 || bright < 6 || dark < 6 || opaque > w * h * 3 / 5) return false;
+    auto at = [&](int x, int y) { x = std::clamp(x, 0, w - 1); y = std::clamp(y, 0, h - 1); return px[y * w + x]; };
+    auto cr = [](float t, float* wt) {
+        float t2 = t * t, t3 = t2 * t;
+        wt[0] = -0.5f * t3 + t2 - 0.5f * t; wt[1] = 1.5f * t3 - 2.5f * t2 + 1.f;
+        wt[2] = -1.5f * t3 + 2.f * t2 + 0.5f * t; wt[3] = 0.5f * t3 - 0.5f * t2;
+    };
+    const int S = 8, W = w * S, H = h * S;
+    out.assign((size_t)W * H * 4, 0);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+        {
+            float fx = (x + 0.5f) / S - 0.5f, fy = (y + 0.5f) / S - 0.5f;
+            int ix = (int)std::floor(fx), iy = (int)std::floor(fy);
+            float wx[4], wy[4]; cr(fx - ix, wx); cr(fy - iy, wy);
+            float A = 0, F = 0, best = -1; u32 hue = 0xFFFFFF;
+            for (int j = 0; j < 4; j++)
+                for (int i = 0; i < 4; i++)
+                {
+                    u32 c = at(ix + i - 1, iy + j - 1);
+                    float a = (c >> 24) ? 1.f : 0.f, wgt = wx[i] * wy[j];
+                    float m = std::max({(int)(c & 0x3F), (int)((c >> 8) & 0x3F), (int)((c >> 16) & 0x3F)}) / 63.f * a;
+                    A += wgt * a; F += wgt * m;
+                    if (i >= 1 && i <= 2 && j >= 1 && j <= 2 && m > best) { best = m; hue = c; }
+                }
+            u8* o = &out[((size_t)y * W + x) * 4];
+            if (A < 0.5f) continue;
+            float t = std::clamp((F - 0.40f) / 0.22f, 0.f, 1.f); t = t * t * (3 - 2 * t);
+            float hm = std::max(best, 0.001f);
+            for (int k = 0; k < 3; k++)
+            {
+                float hc = ((hue >> (8 * k)) & 0x3F) / 63.f / hm * 0.97f;
+                o[k] = (u8)std::clamp((0.04f * (1 - t) + std::min(hc, 1.f) * t) * 255.f + 0.5f, 0.f, 255.f);
+            }
+            o[3] = 255;
+        }
+    return true;
+}
+
+GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone, const u32* px, int pw, int ph)
 {
     auto it = HD3D.find(hash);
     if (it != HD3D.end()) { it->second.LastUse = HD3DFrame; return it->second.Valid ? it->second.Tex : 0; }
@@ -168,6 +228,11 @@ GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone)
         ok = WC09::LoadHDImage(an, rgba, w, h) && w > 0 && h > 0;
     }
     if (!ok) ok = WC09::LoadHDImage(name, rgba, w, h) && w > 0 && h > 0;
+    if (!ok && px && pw * ph <= 64 * 32 && SmoothTextTexture(px, pw, ph, rgba))
+    {
+        // small text textures (names under cards in lists...): redrawn with smooth edges
+        w = pw * 8; h = ph * 8; ok = true;
+    }
     if (ok)
     {
         e.Tex = UploadHD3D(rgba.data(), w, h);
@@ -764,7 +829,7 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
                     }
                     else
                     {
-                        curhd = hdon ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash, Texcache.LastTone) : 0;
+                        curhd = hdon ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash, Texcache.LastTone, (textype >= 2 && textype <= 4) ? Texcache.LastNewPixels : nullptr, (int)texwidth, (int)TextureHeight(texparam)) : 0;
                         curhdmode = (textype == 1 || textype == 6) ? 2 : 1;
                     }
                 }

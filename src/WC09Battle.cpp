@@ -300,6 +300,7 @@ std::string BattleImageName(int image)
     if (IsCardSet(image)) return "cardset/" + std::to_string(image - kCardSetBase);
     if (IsCardImage(image)) return "card/" + std::to_string(image - kCardImageBase);
     if (image >= kStatPanelBase && image < kStatPanelBase + 400000) return "statpanel/" + std::to_string(image);
+    if (image >= kLpPanelBase && image < kLpPanelBase + 400000) return "lppanel/" + std::to_string(image);
     if (image >= kDeckTextBase && image < kSpriteImageBase)
         return std::string(((image - kDeckTextBase) & 1) ? "deckname/" : "decktext/") + std::to_string((image - kDeckTextBase) / 2);
     if (image >= kSpriteImageBase) return SpriteImageName(image);
@@ -436,12 +437,17 @@ bool GetStatPanel(int image, StatPanelInfo& out)
 namespace
 {
 RectHide DetailBadge[2];
+RectHide LpBand[2];
 std::atomic<u64> BadgeSeen[2];             // frame + 1 when the badge was last hidden
 std::atomic<int> BadgeX0[2], BadgeY0[2], BadgeX1[2], BadgeY1[2];
 }
 
 bool HideSprite(int engine, int x, int y, int w, int h)
 {
+    {
+        const RectHide& b = LpBand[engine & 1];
+        if (b.On && x >= b.X0 && x + w <= b.X1 + 1 && y >= b.Y0 && y < b.Y1) return true;
+    }
     const RectHide& r = DetailBadge[engine & 1];
     if (!r.On || w > 16 || h > 16) return false;
     // the level badge the game puts on the card's top-right corner: redrawn in HD by the panel
@@ -592,6 +598,19 @@ bool DetectTextLayer(GPU& gpu, int engine, int bg)
     }
     // a few tiles that match by chance are not text: need a real amount of it
     c.Text = textTiles >= 4;
+    if (getenv("WC09_TXTDBG"))
+    {
+        int n255 = 0, n128 = 0; for (u8 v : mask) { n255 += v == 255; n128 += v == 128; }
+        printf("txtmask e%d b%d text %d full %d mixed %d ramp %04x dir %d\n", engine, bg, c.Text, n255, n128, ramp, dirSum);
+        if (engine == 1 && bg == 3)
+            for (int y = 0; y < 24; y++)
+            {
+                printf("row %2d ", y);
+                for (int x = 0; x < 32; x++) printf("%c", mask[y * 64 + x] == 255 ? '#' : mask[y * 64 + x] == 128 ? '+' : '.');
+                printf("\n");
+            }
+        fflush(stdout);
+    }
     if (c.Text)
     {
         std::lock_guard<std::mutex> lk(Lock);
@@ -615,6 +634,161 @@ u32 GetTextMask(int engine, int bg, std::vector<u8>& mask, bool* outlined)
     mask = TextMask[engine & 1][bg & 3];
     if (outlined) *outlined = TextOutlined[engine & 1][bg & 3];
     return TextMaskGen[engine & 1][bg & 3];
+}
+
+
+namespace
+{
+// ---- duel life point panel ------------------------------------------------------------------
+// The panel under the card view (life points, gauges, turn, phase) is built from many small
+// sprites. It is redrawn as one HD image: the numbers are read back from the digit sprites
+// (matched by shape against duel2d.pac lp_num128), the phase from the phase name sprites.
+std::unordered_map<u64, int> LpDigit;       // 8x8 shape mask -> digit
+std::unordered_map<u64, int> PhaseTile;     // 8x8 shape mask -> phase 0..5 (DP SP M1 BP M2 EP)
+
+u64 TileMask(const u8* t, bool bpp8)
+{
+    u64 m = 0;
+    for (int i = 0; i < 64; i++)
+    {
+        u8 v = bpp8 ? t[i] : ((t[i >> 1] >> ((i & 1) * 4)) & 15);
+        if (v) m |= 1ull << i;
+    }
+    return m;
+}
+
+bool ObjdTiles(const std::vector<u8>& dec, std::vector<std::vector<u8>>& tiles, bool& bpp8)
+{
+    if (dec.size() < 16 || memcmp(dec.data(), "NTBG", 4)) return false;
+    for (u32 p = 16; p + 8 <= dec.size();)
+    {
+        u32 cs = RD32(&dec[p + 4]);
+        if (cs < 8 || p + cs > dec.size()) return false;
+        if (!memcmp(&dec[p], "OBJD", 4) && cs >= 32)
+        {
+            const u8* b = &dec[p + 8];
+            u32 mapsz = RD32(b + 4); u16 tw = RD16(b + 8), th = RD16(b + 10); u32 chrsz = RD32(b + 20);
+            u32 n = (u32)tw * th;
+            if (!n || 24 + mapsz + chrsz > cs - 8 || mapsz < n * 4) return false;
+            const u8* mp = b + 24; const u8* ch = b + 24 + mapsz;
+            bpp8 = chrsz >= n * 64;
+            u32 tb = bpp8 ? 64 : 32;
+            for (u32 t = 0; t < n; t++)
+            {
+                u32 off = RD32(mp + t * 4) * 32;
+                if (off + tb > chrsz) { tiles.emplace_back(tb, 0); continue; }
+                tiles.emplace_back(ch + off, ch + off + tb);
+            }
+            return true;
+        }
+        p += cs;
+    }
+    return false;
+}
+
+void LoadLpGlyphs(const u8* rom, u32 len)
+{
+    LpDigit.clear(); PhaseTile.clear();
+    FileRef ref;
+    if (!FindFile(rom, len, "Data_arc_pac/duel2d.pac", ref)) return;
+    const u8* pac = rom + ref.Start;
+    static const char* const kPhase[6] = {"duel_obj05_up", "duel_obj06_up", "duel_obj07_up", "duel_obj08_up", "duel_obj09_up", "duel_obj10_up"};
+    for (const PacEntry& pe : ParsePac(pac, ref.Size))
+    {
+        std::string stem = pe.Name.substr(0, pe.Name.find('.'));
+        int phase = -1;
+        for (int k = 0; k < 6; k++) if (stem == kPhase[k]) phase = k;
+        if (stem != "lp_num128" && phase < 0) continue;
+        std::vector<u8> dec;
+        if (pe.Size && pac[pe.Start] == 0x10) { if (!LZ10(pac + pe.Start, pe.Size, dec)) continue; }
+        else dec.assign(pac + pe.Start, pac + pe.Start + pe.Size);
+        std::vector<std::vector<u8>> tiles; bool bpp8 = false;
+        if (!ObjdTiles(dec, tiles, bpp8)) continue;
+        for (size_t i = 0; i < tiles.size(); i++)
+        {
+            u64 m = TileMask(tiles[i].data(), bpp8);
+            if (!m) continue;
+            if (stem == "lp_num128") { if (i < 10) LpDigit[m] = (int)i; }
+            else if (!PhaseTile.count(m)) PhaseTile[m] = phase;
+            else if (PhaseTile[m] != phase) PhaseTile[m] = -1;   // shared letter shapes say nothing
+        }
+    }
+}
+
+struct LpPanel { int Lp0, Lp1, Turn, Phase; bool TurnRight; };
+std::map<int, LpPanel> LpPanels;
+std::map<std::tuple<int, int, int, int, bool>, int> LpPanelIds;
+int NextLpPanel = kLpPanelBase;
+
+// Reads the panel's numbers from the OAM of `engine`. False if it doesn't look like the panel.
+bool ReadLpPanel(GPU& gpu, int engine, LpPanel& out)
+{
+    struct D { int x, y, v; };
+    std::vector<D> digits;
+    int votes[6] = {};
+    const u8* oam = &gpu.OAM[engine * 0x400];
+    const GPU2D& u = engine == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
+    if (!(u.DispCnt & (1 << 4))) return false;     // 1D mapping only
+    u32 shift = 5 + ((u.DispCnt >> 20) & 3);
+    static const u8 sizes[3][4][2] = {{{8, 8}, {16, 16}, {32, 32}, {64, 64}}, {{16, 8}, {32, 8}, {32, 16}, {64, 32}}, {{8, 16}, {8, 32}, {16, 32}, {32, 64}}};
+    for (int k = 0; k < 128; k++)
+    {
+        u16 a0 = RD16(oam + k * 8), a1 = RD16(oam + k * 8 + 2), a2 = RD16(oam + k * 8 + 4);
+        if ((a0 & 0x300) == 0x200 || (a0 >> 14) == 3) continue;
+        int y = a0 & 0xFF, x = a1 & 0x1FF; if (x >= 256) x -= 512;
+        if (y < 146 || y > 191 || x < 40 || x > 215) continue;
+        int w = sizes[a0 >> 14][a1 >> 14][0], h = sizes[a0 >> 14][a1 >> 14][1];
+        if (h != 8) continue;
+        bool bpp8 = a0 & (1 << 13);
+        u32 tb = bpp8 ? 64 : 32;
+        for (int t = 0; t < w / 8; t++)
+        {
+            u8 tile[64];
+            u32 base = ((a2 & 0x3FF) << shift) + t * tb;
+            for (u32 i = 0; i < tb; i += 2)
+            {
+                u16 v = engine ? gpu.ReadVRAM_BOBJ<u16>(base + i) : gpu.ReadVRAM_AOBJ<u16>(base + i);
+                tile[i] = v & 0xFF; tile[i + 1] = v >> 8;
+            }
+            u64 m = TileMask(tile, bpp8);
+            if (w == 8) { auto it = LpDigit.find(m); if (it != LpDigit.end()) digits.push_back({x, y, it->second}); }
+            else { auto it = PhaseTile.find(m); if (it != PhaseTile.end() && it->second >= 0) votes[it->second]++; }
+        }
+    }
+    if (digits.size() < 4) return false;
+    // rows by y, numbers by x gaps
+    std::sort(digits.begin(), digits.end(), [](const D& a, const D& b) { return a.y != b.y ? a.y < b.y : a.x < b.x; });
+    std::vector<std::vector<D>> nums;
+    for (const D& d : digits)
+    {
+        if (nums.empty() || std::abs(nums.back().back().y - d.y) > 2 || d.x - nums.back().back().x > 10) nums.push_back({});
+        nums.back().push_back(d);
+    }
+    int topY = digits.front().y;
+    out = {-1, -1, -1, -1, false};
+    for (auto& n : nums)
+    {
+        int v = 0; for (const D& d : n) v = v * 10 + d.v;
+        bool top = std::abs(n.front().y - topY) <= 2;
+        // the turn counter sits at the side of the player whose turn it is (x 72 or x 192)
+        if (n.size() <= 3 && (n.front().x < 90 || n.front().x > 172)) { out.Turn = v; out.TurnRight = n.front().x > 172; }
+        else if (top) out.Lp0 = v;
+        else out.Lp1 = v;
+    }
+    int best = -1, bv = 0;
+    for (int k = 0; k < 6; k++) if (votes[k] > bv) { bv = votes[k]; best = k; }
+    out.Phase = best;
+    return out.Lp0 >= 0 && out.Lp1 >= 0;
+}
+}
+
+bool GetLpPanel(int image, int& lp0, int& lp1, int& turn, int& phase, bool& turnRight)
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    auto it = LpPanels.find(image);
+    if (it == LpPanels.end()) return false;
+    lp0 = it->second.Lp0; lp1 = it->second.Lp1; turn = it->second.Turn; phase = it->second.Phase; turnRight = it->second.TurnRight;
+    return true;
 }
 
 void OnVBlankBattle(GPU& gpu)
@@ -670,6 +844,7 @@ void OnVBlankBattle(GPU& gpu)
             BuildIndex(cart->GetROM(), cart->GetROMLength());
             BuildSpriteIndex(cart->GetROM(), cart->GetROMLength());
             LoadCardText(cart->GetROM(), cart->GetROMLength());
+            LoadLpGlyphs(cart->GetROM(), cart->GetROMLength());
             IndexedROM = cart->GetROM();
             SetCardROM(cart->GetROM(), cart->GetROMLength());
         }
@@ -945,7 +1120,36 @@ void OnVBlankBattle(GPU& gpu)
     bool onScreen[2] = {false, false};
     for (int e = 0; e < 2; e++)
         for (int b = 0; b < 4; b++)
-            if (found[e][b].Image >= 0 && found[e][b].Image < kTextPanelBase && !IsCardImage(found[e][b].Image) && !IsCardSet(found[e][b].Image)) onScreen[(e == 0) == gpu.ScreenSwap ? 0 : 1] = true;
+            if (found[e][b].Image >= 0 && found[e][b].Image < kTextPanelBase && !IsCardImage(found[e][b].Image) && !IsCardSet(found[e][b].Image) && !found[e][b].ScreenSpace) onScreen[(e == 0) == gpu.ScreenSwap ? 0 : 1] = true;
+
+    // life point panel: BG1 shows the gauge image -> redraw the whole panel in HD
+    RectHide lpBand[2];
+    if (IsActive() && GetHDCardsEnabled())
+        for (int e = 0; e < 2; e++)
+        {
+            BGReplacement& rep = found[e][1];
+            if (rep.Image < 0 || rep.Image >= kTextPanelBase || BattleImageName(rep.Image) != "duel2d/status_bghpbarp") continue;
+            LpPanel lp;
+            if (!ReadLpPanel(gpu, e, lp)) continue;
+            int id;
+            {
+                std::lock_guard<std::mutex> lk2(Lock);
+                auto key = std::make_tuple(lp.Lp0, lp.Lp1, lp.Turn, lp.Phase, lp.TurnRight);
+                auto it = LpPanelIds.find(key);
+                if (it != LpPanelIds.end()) id = it->second;
+                else
+                {
+                    if (LpPanels.size() > 512) { LpPanels.clear(); LpPanelIds.clear(); }
+                    id = NextLpPanel++;
+                    if (NextLpPanel >= kLpPanelBase + 400000) NextLpPanel = kLpPanelBase;
+                    LpPanels[id] = lp; LpPanelIds[key] = id;
+                }
+            }
+            rep = BGReplacement{};
+            rep.Image = id; rep.ScreenSpace = true;
+            rep.OriginX = kLpX; rep.OriginY = kLpY; rep.Width = kLpW; rep.Height = kLpH;
+            lpBand[e] = {true, kLpX, kLpY, kLpX + kLpW, kLpY + kLpH};
+        }
 
     // text layers: one layer is re-examined per VBlank (round robin, 8 VBlanks for all), the
     // others keep their last result; the scan reads the layer's tiles, too costly for every frame
@@ -983,6 +1187,7 @@ void OnVBlankBattle(GPU& gpu)
         TextLayer[e][b] = textLayer[e][b];
     }
     DetailBadge[0] = detailBadge[0]; DetailBadge[1] = detailBadge[1];
+    LpBand[0] = lpBand[0]; LpBand[1] = lpBand[1];
     for (int e = 0; e < 2; e++) for (int b = 0; b < 4; b++)
     {
         if (debug && found[e][b].Image != Current[e][b].Image)

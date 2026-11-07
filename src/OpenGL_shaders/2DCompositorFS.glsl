@@ -223,7 +223,25 @@ vec4 TextFetch(sampler2D tex, ivec2 size, vec2 uv, int mode)
         float fill = smoothstep(0.40, 0.62, F);
         return vec4(mix(vec3(0.04, 0.045, 0.08), hue * 0.97, fill), 1.0);
     }
-    return vec4(clamp(acc.rgb / acc.a, 0.0, 1.0), 1.0);
+    // mode 2: crisp edges between the two most different nearby colours, keeping the game's colours
+    vec3 col = clamp(acc.rgb / acc.a, 0.0, 1.0);
+    vec3 lo = vec3(1.0), hi = vec3(0.0); float llo = 9.0, lhi = -1.0;
+    for (int j = 1; j <= 2; j++)
+        for (int i = 1; i <= 2; i++)
+        {
+            ivec2 q = p + ivec2(i - 1, j - 1);
+            vec4 c = texelFetch(tex, ivec2(q.x & (size.x - 1), q.y & (size.y - 1)), 0);
+            if (c.a < 0.5) continue;
+            float l = dot(c.rgb, vec3(0.3, 0.59, 0.11));
+            if (l < llo) { llo = l; lo = c.rgb; }
+            if (l > lhi) { lhi = l; hi = c.rgb; }
+        }
+    if (lhi - llo > 0.15)
+    {
+        float t = (dot(col, vec3(0.3, 0.59, 0.11)) - llo) / (lhi - llo);
+        col = mix(lo, hi, smoothstep(0.3, 0.7, t));
+    }
+    return vec4(col, 1.0);
 }
 
 ivec3 ConvertColor(int col)

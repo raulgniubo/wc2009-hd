@@ -54,7 +54,13 @@ void WC09Overlay::update(NDS* nds, const QString& romPath)
             };
             QString n = QString::fromStdString(name);
             QImage img;
-            if (n.startsWith("statpanel/"))
+            if (n.startsWith("lppanel/"))
+            {
+                int lp0, lp1, turn, phase; bool right;
+                if (WC09::GetLpPanel(n.mid(8).toInt(), lp0, lp1, turn, phase, right))
+                    img = WC09Overlay::renderLpPanel(lp0, lp1, turn, phase, right, 8.f);
+            }
+            else if (n.startsWith("statpanel/"))
             {
                 WC09::StatPanelInfo info;
                 if (WC09::GetStatPanel(n.mid(10).toInt(), info))
@@ -389,6 +395,87 @@ QImage WC09Overlay::renderStatPanel(const WC09::StatPanelInfo& info, float k)
         p.setFont(f); p.setPen(QColor(255, 255, 255));
         p.drawText(QRectF((gx + star + 2.f) * k, y0 * k, (tw + 2) * k, h * k), Qt::AlignLeft | Qt::AlignVCenter, num);
         p.restore();
+    }
+    p.end();
+    return img;
+}
+
+QImage WC09Overlay::renderLpPanel(int lp0, int lp1, int turn, int phase, bool turnRight, float k)
+{
+    const float W = WC09::kLpW, H = WC09::kLpH;
+    QImage img((int)std::ceil(W * k), (int)std::ceil(H * k), QImage::Format_RGBA8888_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+    p.scale(k, k);
+    // panel
+    QLinearGradient bg(0, 0, 0, H);
+    bg.setColorAt(0, QColor(30, 50, 100)); bg.setColorAt(1, QColor(14, 24, 54));
+    QPainterPath panel; panel.addRoundedRect(QRectF(0.5, 0.5, W - 1, H - 1), 6, 6);
+    p.fillPath(panel, bg);
+    p.setPen(QPen(QColor(120, 175, 255, 230), 0.8)); p.drawPath(panel);
+
+    auto bar = [&](QRectF track, float ratio, bool fromLeft) {
+        QPainterPath tp; tp.addRoundedRect(track, track.height() / 2, track.height() / 2);
+        p.fillPath(tp, QColor(8, 14, 34));
+        ratio = std::clamp(ratio, 0.f, 1.f);
+        if (ratio > 0)
+        {
+            float fw = std::max((float)track.height(), (float)track.width() * ratio);
+            QRectF f = fromLeft ? QRectF(track.x(), track.y(), fw, track.height())
+                                : QRectF(track.right() - fw, track.y(), fw, track.height());
+            QLinearGradient g(fromLeft ? track.left() : track.right(), 0, fromLeft ? track.right() : track.left(), 0);
+            g.setColorAt(0, QColor(255, 70, 40)); g.setColorAt(0.45, QColor(255, 170, 40)); g.setColorAt(1, QColor(255, 236, 120));
+            QPainterPath fp; fp.addRoundedRect(f, track.height() / 2, track.height() / 2);
+            p.fillPath(fp, g);
+            QLinearGradient gl(0, f.top(), 0, f.bottom());
+            gl.setColorAt(0, QColor(255, 255, 255, 110)); gl.setColorAt(0.5, QColor(255, 255, 255, 0));
+            p.fillPath(fp, gl);
+        }
+        p.setPen(QPen(QColor(120, 175, 255, 160), 0.5)); p.setBrush(Qt::NoBrush); p.drawPath(tp);
+    };
+    auto text = [&](QRectF r, const QString& t, float px, int flags, QColor col = QColor(255, 255, 255)) {
+        QFont f = QFontDatabase::systemFont(QFontDatabase::GeneralFont); f.setBold(true);
+        f.setPixelSize(std::max(1, (int)std::lround(px * k)));
+        QPainterPath path;
+        QFontMetricsF fm(f);
+        QRectF dr(r.x() * k, r.y() * k, r.width() * k, r.height() * k);
+        float tw = fm.horizontalAdvance(t);
+        float x = (flags & Qt::AlignRight) ? dr.right() - tw : (flags & Qt::AlignHCenter) ? dr.center().x() - tw / 2 : dr.left();
+        float y = dr.center().y() + (fm.ascent() - fm.descent()) / 2;
+        path.addText(QPointF(x, y), f, t);
+        p.save(); p.resetTransform();
+        p.setPen(QPen(QColor(6, 10, 28, 230), 0.22f * f.pixelSize(), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setBrush(Qt::NoBrush); p.drawPath(path);
+        p.setPen(Qt::NoPen); p.setBrush(col); p.drawPath(path);
+        p.restore();
+    };
+    // player 1: top row, bar from the left; player 2: bottom row, bar from the right
+    bar(QRectF(21, 3, W - 24, 10), lp0 / 8000.f, true);
+    bar(QRectF(3, H - 13, W - 24, 10), lp1 / 8000.f, false);
+    text(QRectF(23, 2, 60, 12), QString::number(lp0), 10.f, Qt::AlignLeft);
+    text(QRectF(W - 84, H - 14, 60, 12), QString::number(lp1), 10.f, Qt::AlignRight);
+    // turn chip
+    if (turn >= 0)
+    {
+        // on the side of the player whose turn it is (top-left: player 1, bottom-right: player 2)
+        QRectF cr = turnRight ? QRectF(W - 17, H - 15.5, 14, 14) : QRectF(3, 1.5, 14, 14);
+        QPainterPath cp; cp.addEllipse(cr);
+        p.fillPath(cp, turnRight ? QColor(170, 40, 70) : QColor(44, 74, 150)); p.setPen(QPen(QColor(200, 225, 255), 0.7)); p.drawPath(cp);
+        text(cr, QString::number(turn), turn >= 10 ? 7.f : 8.5f, Qt::AlignHCenter);
+    }
+    // phase pill
+    static const char* const kNames[6] = {"Draw Phase", "Standby Phase", "Main Phase 1", "Battle Phase", "Main Phase 2", "End Phase"};
+    if (phase >= 0 && phase < 6)
+    {
+        QRectF pr(W / 2 - 34, 15, 68, 11);
+        QPainterPath pp; pp.addRoundedRect(pr, 5.5, 5.5);
+        QLinearGradient pg(0, pr.top(), 0, pr.bottom());
+        QColor c0 = phase == 3 ? QColor(245, 95, 110) : QColor(80, 160, 255), c1 = phase == 3 ? QColor(175, 35, 60) : QColor(34, 90, 210);
+        pg.setColorAt(0, c0); pg.setColorAt(1, c1);
+        p.fillPath(pp, pg); p.setPen(QPen(QColor(220, 240, 255), 0.6)); p.drawPath(pp);
+        text(pr, kNames[phase], 7.4f, Qt::AlignHCenter);
     }
     p.end();
     return img;
