@@ -89,6 +89,7 @@ void NoteCards2DRendered();
 // stride of 128 pixels. Matching is approximate (the game's own decoder differs slightly).
 int CardFromBitmap(const u16* px);
 void SetCardROM(const u8* rom, u32 len);
+void PrepareCardFingerprints();   // builds the bitmap-card fingerprints now (background thread)
 
 // 2D cards found at the last VBlank, and marking one as swapped by the compositor.
 std::vector<CardQuad> GetLatest2D();

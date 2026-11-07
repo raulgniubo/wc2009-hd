@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstring>
 #include <atomic>
+#include <thread>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -49,6 +50,10 @@ std::vector<CharSet> CharSets;
 std::unordered_map<u64, TileRef> TileIndex;    // only tiles unique to one char set
 bool Indexed = false;
 const u8* IndexedROM = nullptr;
+// The ROM index (backgrounds, sprites, card text, glyphs, card fingerprints) is built on a
+// background thread when a ROM shows up; until it is ready the game just shows its own pixels.
+std::atomic<bool> IndexReady{false};
+struct IndexerThread { std::thread T; ~IndexerThread() { if (T.joinable()) T.join(); } } Indexer;
 
 std::vector<std::string> CardNames, CardDescs;
 std::vector<int> CardAtk, CardDef, CardLevel;   // printed values
@@ -310,8 +315,12 @@ std::string BattleImageName(int image)
     return Images[image].Name;
 }
 
-std::string CardNameEn(int card) { return card >= 0 && card < (int)CardNames.size() ? CardNames[card] : ""; }
-std::string CardDescEn(int card) { return card >= 0 && card < (int)CardDescs.size() ? CardDescs[card] : ""; }
+bool IsIndexReady() { return IndexReady.load(); }
+
+std::string CardNameEn(int card) { if (!IndexReady) return "";
+    return card >= 0 && card < (int)CardNames.size() ? CardNames[card] : ""; }
+std::string CardDescEn(int card) { if (!IndexReady) return "";
+    return card >= 0 && card < (int)CardDescs.size() ? CardDescs[card] : ""; }
 
 bool BattleOnScreen(int screen)
 {
@@ -841,15 +850,23 @@ void OnVBlankBattle(GPU& gpu)
         auto* cart = gpu.NDS.NDSCartSlot.GetCart();
         if (cart && cart->GetROM() != IndexedROM)
         {
-            BuildIndex(cart->GetROM(), cart->GetROMLength());
-            BuildSpriteIndex(cart->GetROM(), cart->GetROMLength());
-            LoadCardText(cart->GetROM(), cart->GetROMLength());
-            LoadLpGlyphs(cart->GetROM(), cart->GetROMLength());
-            IndexedROM = cart->GetROM();
-            SetCardROM(cart->GetROM(), cart->GetROMLength());
+            if (Indexer.T.joinable()) Indexer.T.join();
+            IndexReady = false;
+            const u8* rom = cart->GetROM(); u32 len = cart->GetROMLength();
+            IndexedROM = rom;
+            Indexer.T = std::thread([rom, len]() {
+                BuildIndex(rom, len);
+                BuildSpriteIndex(rom, len);
+                LoadCardText(rom, len);
+                LoadLpGlyphs(rom, len);
+                SetCardROM(rom, len);
+                PrepareCardFingerprints();
+                IndexReady = true;
+                if (getenv("WC09_DEBUG")) { printf("WC09 index ready\n"); fflush(stdout); }
+            });
         }
 
-        for (int engine = 0; engine < 2 && Indexed; engine++)
+        for (int engine = 0; engine < 2 && IndexReady; engine++)
         {
             const GPU2D& u = engine == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;
             u32 dispcnt = u.DispCnt;
@@ -963,7 +980,7 @@ void OnVBlankBattle(GPU& gpu)
     // 2D cards (card detail view, deck editor, battle cut-ins...): the compositor samples the
     // HD card face in place of the card's tiles. Several cards on one background become one
     // composed image.
-    if (IsActive() && GetHDCardsEnabled())
+    if (IndexReady && IsActive() && GetHDCardsEnabled())
     {
         std::vector<CardQuad> cards = GetLatest2D();
         for (int e = 0; e < 2; e++)
@@ -1001,7 +1018,7 @@ void OnVBlankBattle(GPU& gpu)
     }
     // deck editor / card list detail view: a big 3D card at the left of the top screen, the
     // description on BG3 and the name on BG2 (4-bit text layers): swap both for HD text
-    if (IsActive() && GetHDTextEnabled())
+    if (IndexReady && IsActive() && GetHDTextEnabled())
     {
         FrameCards fc = GetLatest(true);
         for (const CardQuad& q : fc.Quads)
@@ -1030,7 +1047,7 @@ void OnVBlankBattle(GPU& gpu)
     }
     // duel card detail: replace the description text background with a generated HD panel
     RectHide detailBadge[2];
-    if (IsActive() && GetHDTextEnabled())
+    if (IndexReady && IsActive() && GetHDTextEnabled())
     {
         FrameCards fc = GetLatest(true);
         for (const CardQuad& q : fc.Quads)
@@ -1124,13 +1141,15 @@ void OnVBlankBattle(GPU& gpu)
 
     // life point panel: BG1 shows the gauge image -> redraw the whole panel in HD
     RectHide lpBand[2];
-    if (IsActive() && GetHDCardsEnabled())
+    if (IndexReady && IsActive() && GetHDCardsEnabled())
         for (int e = 0; e < 2; e++)
         {
             BGReplacement& rep = found[e][1];
             if (rep.Image < 0 || rep.Image >= kTextPanelBase || BattleImageName(rep.Image) != "duel2d/status_bghpbarp") continue;
             LpPanel lp;
-            if (!ReadLpPanel(gpu, e, lp)) continue;
+            bool okLp = ReadLpPanel(gpu, e, lp);
+            if (getenv("WC09_LPDBG")) { printf("lp read %d: %d %d t%d p%d\n", okLp, lp.Lp0, lp.Lp1, lp.Turn, lp.Phase); fflush(stdout); }
+            if (!okLp) continue;
             int id;
             {
                 std::lock_guard<std::mutex> lk2(Lock);

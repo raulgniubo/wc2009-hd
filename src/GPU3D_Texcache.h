@@ -16,6 +16,7 @@
 #include "xxhash/xxhash.h"
 #include "WC09Cards.h"
 #include "WC09Sprites.h"
+#include "WC09Battle.h"
 
 namespace melonDS
 {
@@ -331,7 +332,7 @@ public:
             if (addr + n <= sizeof(GPU.VRAMFlat_Texture))
                 entry.Card = WC09::CardFromTexHash(XXH64(&GPU.VRAMFlat_Texture[addr], n, 0), width);
         }
-        if (fmt == 4 && width == 32 && height == 32 && addr + 1024 <= sizeof(GPU.VRAMFlat_Texture))
+        if (fmt == 4 && width == 32 && height == 32 && addr + 1024 <= sizeof(GPU.VRAMFlat_Texture) && WC09::IsIndexReady())
         {
             // card thumbnails in list windows (graveyard, extra deck...): bit 16 marks the layout
             int c = WC09::CardFromThumbTexture(XXH64(&GPU.VRAMFlat_Texture[addr], 1024, 0));

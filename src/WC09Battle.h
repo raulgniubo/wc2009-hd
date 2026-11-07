@@ -85,7 +85,10 @@ void NotePanelRendered();
 u64 FrameNum();
 bool PanelRenderedRecently();
 
-// Called at VBlank (after OnVBlank2D). Builds the index on first use.
+// True once the ROM index (built in the background) is ready.
+bool IsIndexReady();
+
+// Called at VBlank (after OnVBlank2D). Starts building the index on first use.
 void OnVBlankBattle(GPU& gpu);
 
 // Replacement for engine (0 = A, 1 = B) and BG (0..3) as of the last VBlank.

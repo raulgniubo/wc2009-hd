@@ -1657,7 +1657,7 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
             }
 
             WC09Spr[NumSprites] = {};
-            if ((GPU2D.DispCnt & (1<<4)) && WC09::IsActive() && WC09::GetHDCardsEnabled())
+            if ((GPU2D.DispCnt & (1<<4)) && WC09::IsActive() && WC09::GetHDCardsEnabled() && WC09::IsIndexReady())
             {
                 // identify once per frame per OAM entry (UpdateOAM runs for several line ranges)
                 auto& key = WC09SprCache[sprnum];

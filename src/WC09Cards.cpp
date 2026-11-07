@@ -196,8 +196,15 @@ void SetCardROM(const u8* rom, u32 len)
     FingerprintsBuilt = false; Fingerprints.clear(); BitmapCache.clear();
 }
 
+void PrepareCardFingerprints()
+{
+    std::lock_guard<std::mutex> lk(Lock);
+    if (!FingerprintsBuilt) BuildFingerprints();
+}
+
 int CardFromBitmap(const u16* px)
 {
+    if (!IsIndexReady()) return -1;
     // only card-shaped bitmaps: transparent margins, opaque face
     if ((px[64 * 128 + 2] & 0x8000) || (px[64 * 128 + 125] & 0x8000) || !(px[64 * 128 + 64] & 0x8000)) return -1;
     u64 key = XXH64(px, 128 * 128 * 2, 0);
