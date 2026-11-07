@@ -37,6 +37,7 @@ final class LibraryView extends LinearLayout {
         void gameOptions(Game g);
         void openSettings();
         void chooseFolder();
+        void importGames();
     }
 
     static final class Game {
@@ -69,6 +70,13 @@ final class LibraryView extends LinearLayout {
         bar.setPadding(Ui.dp(c, 20), Ui.dp(c, 18), Ui.dp(c, 12), Ui.dp(c, 8));
         TextView title = Ui.text(c, "Library", 30, Ui.TEXT, true);
         bar.addView(title, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
+        TextView add = Ui.text(c, "+  Add", 15, Ui.ACCENT, true);
+        add.setPadding(Ui.dp(c, 14), Ui.dp(c, 8), Ui.dp(c, 14), Ui.dp(c, 8));
+        add.setBackground(Ui.pressable(c, Ui.CARD, 18));
+        add.setOnClickListener(v -> listener.importGames());
+        LayoutParams ap = new LayoutParams(-2, -2);
+        ap.rightMargin = Ui.dp(c, 8);
+        bar.addView(add, ap);
         TextView gear = Ui.text(c, "Settings", 15, Ui.ACCENT, true);
         gear.setPadding(Ui.dp(c, 14), Ui.dp(c, 8), Ui.dp(c, 14), Ui.dp(c, 8));
         gear.setBackground(Ui.pressable(c, Ui.CARD, 18));
@@ -120,30 +128,56 @@ final class LibraryView extends LinearLayout {
         sub.setLineSpacing(0, 1.2f);
         col.addView(sub, new LayoutParams(-1, -2));
 
-        LinearLayout card = new LinearLayout(c);
-        card.setOrientation(VERTICAL);
-        card.setPadding(Ui.dp(c, 18), Ui.dp(c, 16), Ui.dp(c, 18), Ui.dp(c, 16));
-        card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(c, 16)));
-        card.addView(Ui.text(c, "Copy your .nds files into your games folder:", 15, Ui.TEXT, true));
-        folderLabel = Ui.text(c, "", 14, Ui.ACCENT, false);
-        folderLabel.setPadding(0, Ui.dp(c, 6), 0, Ui.dp(c, 6));
-        card.addView(folderLabel);
-        TextView hint = Ui.text(c, "Then come back here; they show up on their own. Some games get extra improvements, like Yu-Gi-Oh! 5D's WC2009 with HD cards (keep its HDCards folder next to the game).", 13.5f, Ui.TEXT_DIM, false);
-        hint.setLineSpacing(0, 1.2f);
-        card.addView(hint);
-        LayoutParams lp = new LayoutParams(-1, -2);
-        lp.topMargin = Ui.dp(c, 26);
-        col.addView(card, lp);
-
-        TextView choose = Ui.text(c, "Use another folder", 16, 0xFF06111F, true);
+        TextView choose = Ui.text(c, "Choose games folder", 16, 0xFF06111F, true);
         choose.setGravity(Gravity.CENTER);
         choose.setPadding(0, Ui.dp(c, 15), 0, Ui.dp(c, 15));
         choose.setBackground(Ui.pressable(c, Ui.ACCENT, 14));
         choose.setOnClickListener(v -> listener.chooseFolder());
         LayoutParams bp = new LayoutParams(-1, -2);
-        bp.topMargin = Ui.dp(c, 16);
+        bp.topMargin = Ui.dp(c, 26);
         col.addView(choose, bp);
+        TextView imp = Ui.text(c, "Import games", 16, Ui.ACCENT, true);
+        imp.setGravity(Gravity.CENTER);
+        imp.setPadding(0, Ui.dp(c, 15), 0, Ui.dp(c, 15));
+        imp.setBackground(Ui.pressable(c, 0xFF1A2B45, 14));
+        imp.setOnClickListener(v -> listener.importGames());
+        LayoutParams ip = new LayoutParams(-1, -2);
+        ip.topMargin = Ui.dp(c, 12);
+        col.addView(imp, ip);
+
+        col.addView(tip(c, "📁", "A folder for all your games", "Pick any folder on your phone or SD card. Every game in it shows up here, and new ones appear on their own. Now using:"), tipLp(c, 26));
+        folderLabel = Ui.text(c, "", 13.5f, Ui.ACCENT, false);
+        folderLabel.setPadding(Ui.dp(c, 64), Ui.dp(c, 4), Ui.dp(c, 18), 0);
+        col.addView(folderLabel);
+        col.addView(tip(c, "⬇", "Or import games", "Add one or more .nds files from anywhere on your phone. They're copied into your games folder."), tipLp(c, 12));
+        col.addView(tip(c, "✦", "Game enhancements", "Some games get extra improvements made just for them. See Settings > Game enhancements."), tipLp(c, 12));
         return sv;
+    }
+
+    private static LayoutParams tipLp(Context c, int topDp) {
+        LayoutParams lp = new LayoutParams(-1, -2);
+        lp.topMargin = Ui.dp(c, topDp);
+        return lp;
+    }
+
+    private static View tip(Context c, String icon, String title, String text) {
+        LinearLayout card = new LinearLayout(c);
+        card.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
+        card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(c, 16)));
+        TextView ic = Ui.text(c, icon, 15, 0xFF06111F, true);
+        ic.setGravity(Gravity.CENTER);
+        ic.setBackground(Ui.rounded(Ui.ACCENT, Ui.dp(c, 8)));
+        card.addView(ic, new LayoutParams(Ui.dp(c, 30), Ui.dp(c, 30)));
+        LinearLayout t = new LinearLayout(c);
+        t.setOrientation(VERTICAL);
+        t.setPadding(Ui.dp(c, 14), 0, 0, 0);
+        t.addView(Ui.text(c, title, 15, Ui.TEXT, true));
+        TextView b = Ui.text(c, text, 13.5f, Ui.TEXT_DIM, false);
+        b.setLineSpacing(0, 1.2f);
+        b.setPadding(0, Ui.dp(c, 3), 0, 0);
+        t.addView(b);
+        card.addView(t, new LayoutParams(0, -2, 1));
+        return card;
     }
 
     /** Rescans the folder (call after playing, to update the order and the resume badges). */

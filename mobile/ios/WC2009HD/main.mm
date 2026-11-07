@@ -470,7 +470,14 @@ static NSArray<NSDictionary*>* EnhancementPacks()
         @"code": @"CY8",
         @"title": @"Yu-Gi-Oh! 5D's World Championship 2009",
         @"short": @"Yu-Gi-Oh! 5D's WC2009",
-        @"about": @"HD card art, card text and menus redrawn in a clean font, and a redesigned duel screen, life point panel and menus.",
+        @"about": @"A full HD makeover for the card game, made just for it.",
+        @"features": @[
+            @"HD art for every card, in duels and in the deck editor",
+            @"Card names and descriptions in a clean, sharp font",
+            @"Redesigned life point panel, phase buttons and duel screen icons",
+            @"High-resolution menus, backgrounds and dialogs",
+        ],
+        @"needs": @"For the card art, keep the HDCards folder next to the game.",
         @"master": @"hdAll",
         @"options": @[
             @{@"key": @"hdCards", @"title": @"HD card art", @"detail": @"Real card images, from the HDCards folder next to the game."},
@@ -484,6 +491,72 @@ static NSDictionary* PackForCode(NSString* code)
     for (NSDictionary* p in EnhancementPacks()) if ([code hasPrefix:p[@"code"]]) return p;
     return nil;
 }
+
+// Games folders the user picked in Files (security-scoped bookmarks, kept open while the app runs)
+static NSMutableArray<NSURL*>* gFolders;
+
+static void LoadLinkedFolders()
+{
+    gFolders = [NSMutableArray array];
+    NSMutableArray* keep = [NSMutableArray array];
+    for (NSData* bm0 in [Prefs() arrayForKey:@"folders"] ?: @[])
+    {
+        NSData* bm = bm0;
+        BOOL stale = NO;
+        NSURL* u = [NSURL URLByResolvingBookmarkData:bm options:0 relativeToURL:nil bookmarkDataIsStale:&stale error:nil];
+        if (!u) continue;
+        [u startAccessingSecurityScopedResource];
+        if (stale) { NSData* nb = [u bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:nil]; if (nb) bm = nb; }
+        [keep addObject:bm];
+        [gFolders addObject:u];
+    }
+    [Prefs() setObject:keep forKey:@"folders"];
+}
+
+static BOOL AddLinkedFolder(NSURL* u)
+{
+    [u startAccessingSecurityScopedResource];
+    NSData* bm = [u bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
+    if (!bm) return NO;
+    for (NSURL* f in gFolders) if ([f.path isEqualToString:u.path]) return YES;
+    NSMutableArray* all = [[Prefs() arrayForKey:@"folders"] ?: @[] mutableCopy];
+    [all addObject:bm];
+    [Prefs() setObject:all forKey:@"folders"];
+    [gFolders addObject:u];
+    return YES;
+}
+
+static void RemoveLinkedFolder(NSUInteger i)
+{
+    if (i >= gFolders.count) return;
+    [gFolders[i] stopAccessingSecurityScopedResource];
+    [gFolders removeObjectAtIndex:i];
+    NSMutableArray* all = [[Prefs() arrayForKey:@"folders"] ?: @[] mutableCopy];
+    if (i < all.count) [all removeObjectAtIndex:i];
+    [Prefs() setObject:all forKey:@"folders"];
+}
+
+/** Presents the Files folder picker; the chosen folder joins the library. */
+@interface FolderPicker : NSObject <UIDocumentPickerDelegate>
++ (void)presentFrom:(UIViewController*)vc;
+@end
+
+@implementation FolderPicker
+static FolderPicker* gFolderPicker;
++ (void)presentFrom:(UIViewController*)vc
+{
+    gFolderPicker = [FolderPicker new];
+    UIDocumentPickerViewController* p = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder] asCopy:NO];
+    p.delegate = gFolderPicker;
+    [vc presentViewController:p animated:YES completion:nil];
+}
+- (void)documentPicker:(UIDocumentPickerViewController*)picker didPickDocumentsAtURLs:(NSArray<NSURL*>*)urls
+{
+    if (urls.firstObject && AddLinkedFolder(urls.firstObject)) PostChange(@"folders");
+    gFolderPicker = nil;
+}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController*)picker { gFolderPicker = nil; }
+@end
 
 // SF Symbol in white on a rounded coloured square, like the Settings app
 static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
@@ -564,6 +637,19 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
+    [self refresh];
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(changed:) name:kSettingsChanged object:nil];
+}
+
+- (void)changed:(NSNotification*)n { if ([n.object isEqualToString:@"folders"]) [self refresh]; }
+
+- (void)refresh
+{
     _sections = self.build();
     [self.tableView reloadData];
 }
@@ -582,7 +668,13 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
     UITableViewCell* cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     BOOL enabled = [self rowEnabled:row];
     UIListContentConfiguration* c;
-    if ([type isEqualToString:@"choice"] || [type isEqualToString:@"info"] || ([type isEqualToString:@"link"] && row[@"value"]))
+    if ([type isEqualToString:@"bullet"])
+    {
+        c = [UIListContentConfiguration cellConfiguration];
+        UIImageSymbolConfiguration* sc = [UIImageSymbolConfiguration configurationWithPointSize:15 weight:UIImageSymbolWeightSemibold];
+        c.image = [[UIImage systemImageNamed:@"checkmark.circle.fill" withConfiguration:sc] imageWithTintColor:RGB(0x22C55E) renderingMode:UIImageRenderingModeAlwaysOriginal];
+    }
+    else if ([type isEqualToString:@"choice"] || [type isEqualToString:@"info"] || ([type isEqualToString:@"link"] && row[@"value"]))
     {
         c = [UIListContentConfiguration valueCellConfiguration];
         if ([type isEqualToString:@"choice"])
@@ -620,7 +712,8 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
         cell.accessoryView = sw;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
-    else if ([type isEqualToString:@"info"]) cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    else if ([type isEqualToString:@"info"] || [type isEqualToString:@"bullet"]) cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    else if ([type isEqualToString:@"action"]) { if (row[@"destructive"]) c.textProperties.color = UIColor.systemRedColor; else if (!row[@"symbol"]) c.textProperties.color = Accent(); cell.contentConfiguration = c; }
     else cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
@@ -644,6 +737,11 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
     [tv deselectRowAtIndexPath:ip animated:YES];
     if ([row[@"type"] isEqualToString:@"choice"])
         [self.navigationController pushViewController:[[ChoiceViewController alloc] initWithRow:row] animated:YES];
+    else if ([row[@"type"] isEqualToString:@"action"])
+    {
+        void (^act)(UIViewController*) = row[@"action"];
+        act(self);
+    }
     else if ([row[@"type"] isEqualToString:@"link"])
     {
         UIViewController* (^open)(void) = row[@"open"];
@@ -674,12 +772,15 @@ static OptionsViewController* EnhancementsPage(NSDictionary* pack)
         NSMutableArray* opts = [NSMutableArray array];
         for (NSDictionary* o in pack[@"options"])
             [opts addObject:@{@"type": @"switch", @"key": o[@"key"], @"title": o[@"title"], @"detail": o[@"detail"], @"requires": pack[@"master"]}];
+        NSMutableArray* feats = [NSMutableArray array];
+        for (NSString* f in pack[@"features"]) [feats addObject:@{@"type": @"bullet", @"title": f}];
         return @[
             @{@"title": pack[@"title"], @"rows": @[
                 @{@"type": @"switch", @"key": pack[@"master"], @"title": @"Enhancements", @"symbol": @"sparkles", @"color": RGB(0xF2A93B),
                   @"detail": @"Off plays the game exactly like the original DS. You can also switch it from the in-game menu to compare."}],
               @"footer": pack[@"about"]},
-            @{@"title": @"Details", @"rows": opts},
+            @{@"title": @"What's improved", @"rows": feats, @"footer": pack[@"needs"]},
+            @{@"title": @"Fine-tune", @"rows": opts},
         ];
     };
     return vc;
@@ -706,7 +807,29 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
             [packs addObject:@{@"type": @"link", @"title": p[@"short"], @"symbol": @"sparkles", @"color": RGB(0xF2A93B),
                                @"value": [Prefs() boolForKey:p[@"master"]] ? @"On" : @"Off",
                                @"open": [^UIViewController* { return EnhancementsPage(p); } copy]}];
+        NSMutableArray* lib = [NSMutableArray array];
+        for (NSUInteger i = 0; i < gFolders.count; i++)
+        {
+            NSURL* u = gFolders[i];
+            [lib addObject:@{@"type": @"action", @"title": u.lastPathComponent, @"symbol": @"folder.fill", @"color": RGB(0x3B82F6),
+                             @"action": [^(UIViewController* vc) {
+                UIAlertController* a = [UIAlertController alertControllerWithTitle:u.lastPathComponent message:@"Stop showing the games in this folder? Nothing is deleted."
+                                                                    preferredStyle:UIAlertControllerStyleActionSheet];
+                [a addAction:[UIAlertAction actionWithTitle:@"Remove from Library" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) {
+                    NSUInteger idx = [gFolders indexOfObject:u];
+                    if (idx != NSNotFound) RemoveLinkedFolder(idx);
+                    PostChange(@"folders");
+                }]];
+                [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+                a.popoverPresentationController.sourceView = vc.view;
+                a.popoverPresentationController.sourceRect = CGRectMake(vc.view.bounds.size.width / 2, vc.view.bounds.size.height / 2, 1, 1);
+                [vc presentViewController:a animated:YES completion:nil];
+            } copy]}];
+        }
+        [lib addObject:@{@"type": @"action", @"title": @"Add Games Folder…", @"action": [^(UIViewController* vc) { [FolderPicker presentFrom:vc]; } copy]}];
         return @[
+            @{@"title": @"Library", @"rows": lib,
+              @"footer": @"Pick a folder in Files (On My iPhone, iCloud Drive, a USB drive…) and every game in it shows up in your Library, with its saves kept next to it. Games you import go into Dual HD's own folder."},
             @{@"title": @"Display", @"rows": @[
                 @{@"type": @"choice", @"key": @"scale", @"title": @"Resolution", @"symbol": @"tv", @"color": RGB(0x3B82F6),
                   @"footer": @"Higher is sharper. Each step renders the DS screens at that many times their size.",
@@ -739,7 +862,7 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
                   @"choices": @[@{@"title": @"2x", @"value": @2}, @{@"title": @"3x", @"value": @3}, @{@"title": @"4x", @"value": @4}]}],
               @"footer": @"Saves and save states are kept in a Saves folder next to your games, in the same format as melonDS on a computer."},
             @{@"title": @"Game Enhancements", @"rows": packs,
-              @"footer": @"Extra improvements made for specific games. They switch on by themselves when you play that game."},
+              @"footer": @"Extra improvements made for specific games. They switch on by themselves when you play that game; tap one to see what it improves."},
             @{@"title": @"About", @"rows": @[
                 @{@"type": @"info", @"title": @"Dual HD", @"symbol": @"rectangle.split.1x2.fill", @"color": RGB(0x0EA5E9),
                   @"value": [NSString stringWithFormat:@"Version %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]]}],
@@ -750,6 +873,127 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
     nav.navigationBar.prefersLargeTitles = YES;
     return nav;
 }
+
+// ------------------------------------------------------------------------------------------------
+// A frosted menu card over the game
+
+@interface MenuPanel : UIView
+- (instancetype)initWithTitle:(NSString*)title message:(NSString*)msg items:(NSArray<NSDictionary*>*)items onCancel:(void (^)(void))cancel;
+- (void)show;
+@end
+
+@implementation MenuPanel
+{
+    UIVisualEffectView* _card;
+    void (^_cancel)(void);
+}
+
+- (instancetype)initWithTitle:(NSString*)title message:(NSString*)msg items:(NSArray<NSDictionary*>*)items onCancel:(void (^)(void))cancel
+{
+    if (!(self = [super initWithFrame:CGRectZero])) return nil;
+    _cancel = [cancel copy];
+    self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
+    UITapGestureRecognizer* tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(backgroundTap:)];
+    [self addGestureRecognizer:tap];
+
+    _card = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterialDark]];
+    _card.layer.cornerRadius = 24; _card.layer.cornerCurve = kCACornerCurveContinuous; _card.clipsToBounds = YES;
+    _card.translatesAutoresizingMaskIntoConstraints = NO;
+    [self addSubview:_card];
+
+    UIStackView* st = [UIStackView new];
+    st.axis = UILayoutConstraintAxisVertical;
+    st.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel* t = [UILabel new];
+    t.text = title; t.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold]; t.textColor = UIColor.whiteColor;
+    t.textAlignment = NSTextAlignmentCenter; t.numberOfLines = 2;
+    [st addArrangedSubview:t];
+    [st setCustomSpacing:msg ? 6 : 14 afterView:t];
+    if (msg)
+    {
+        UILabel* m = [UILabel new];
+        m.text = msg; m.font = [UIFont systemFontOfSize:14]; m.textColor = UIColor.secondaryLabelColor;
+        m.textAlignment = NSTextAlignmentCenter; m.numberOfLines = 0;
+        [st addArrangedSubview:m];
+        [st setCustomSpacing:16 afterView:m];
+    }
+    NSMutableArray* all = [items mutableCopy];
+    [all addObject:@{@"title": @"Cancel", @"symbol": @"", @"cancel": @YES}];
+    for (NSDictionary* it in all)
+    {
+        BOOL isCancel = [it[@"cancel"] boolValue], destructive = [it[@"destructive"] boolValue];
+        UIButtonConfiguration* c = isCancel ? [UIButtonConfiguration grayButtonConfiguration] : [UIButtonConfiguration plainButtonConfiguration];
+        c.title = it[@"title"];
+        if ([it[@"symbol"] length]) c.image = [UIImage systemImageNamed:it[@"symbol"] withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightMedium]];
+        c.imagePadding = 14;
+        c.baseForegroundColor = destructive ? UIColor.systemRedColor : UIColor.whiteColor;
+        c.contentInsets = NSDirectionalEdgeInsetsMake(13, 16, 13, 16);
+        c.cornerStyle = UIButtonConfigurationCornerStyleLarge;
+        c.titleTextAttributesTransformer = ^NSDictionary*(NSDictionary* a) {
+            NSMutableDictionary* m = [a mutableCopy];
+            m[NSFontAttributeName] = [UIFont systemFontOfSize:16 weight:isCancel ? UIFontWeightSemibold : UIFontWeightRegular];
+            return m;
+        };
+        __weak MenuPanel* me = self;
+        void (^handler)(void) = it[@"handler"];
+        UIButton* b = [UIButton buttonWithConfiguration:c primaryAction:[UIAction actionWithHandler:^(UIAction*) {
+            [me hideThen:isCancel ? nil : handler cancelled:isCancel];
+        }]];
+        b.contentHorizontalAlignment = isCancel ? UIControlContentHorizontalAlignmentCenter : UIControlContentHorizontalAlignmentLeading;
+        if (isCancel) [st setCustomSpacing:10 afterView:st.arrangedSubviews.lastObject];
+        [st addArrangedSubview:b];
+    }
+
+    UIScrollView* sv = [UIScrollView new];
+    sv.translatesAutoresizingMaskIntoConstraints = NO;
+    sv.showsVerticalScrollIndicator = NO;
+    [sv addSubview:st];
+    [_card.contentView addSubview:sv];
+    NSLayoutConstraint* fitH = [sv.heightAnchor constraintEqualToAnchor:st.heightAnchor];
+    fitH.priority = UILayoutPriorityDefaultHigh;
+    NSLayoutConstraint* w = [_card.widthAnchor constraintEqualToConstant:360];
+    w.priority = UILayoutPriorityDefaultHigh;
+    [NSLayoutConstraint activateConstraints:@[
+        [_card.centerXAnchor constraintEqualToAnchor:self.centerXAnchor], [_card.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+        w, [_card.widthAnchor constraintLessThanOrEqualToAnchor:self.widthAnchor constant:-40],
+        [_card.heightAnchor constraintLessThanOrEqualToAnchor:self.heightAnchor constant:-40],
+        [sv.topAnchor constraintEqualToAnchor:_card.contentView.topAnchor constant:18],
+        [sv.bottomAnchor constraintEqualToAnchor:_card.contentView.bottomAnchor constant:-12],
+        [sv.leadingAnchor constraintEqualToAnchor:_card.contentView.leadingAnchor constant:10],
+        [sv.trailingAnchor constraintEqualToAnchor:_card.contentView.trailingAnchor constant:-10],
+        fitH,
+        [st.topAnchor constraintEqualToAnchor:sv.contentLayoutGuide.topAnchor], [st.bottomAnchor constraintEqualToAnchor:sv.contentLayoutGuide.bottomAnchor],
+        [st.leadingAnchor constraintEqualToAnchor:sv.contentLayoutGuide.leadingAnchor], [st.trailingAnchor constraintEqualToAnchor:sv.contentLayoutGuide.trailingAnchor],
+        [st.widthAnchor constraintEqualToAnchor:sv.frameLayoutGuide.widthAnchor]]];
+    return self;
+}
+
+- (void)show
+{
+    self.alpha = 0;
+    _card.transform = CGAffineTransformMakeScale(0.94, 0.94);
+    [UIView animateWithDuration:0.28 delay:0 usingSpringWithDamping:0.85 initialSpringVelocity:0 options:0 animations:^{
+        self.alpha = 1;
+        self->_card.transform = CGAffineTransformIdentity;
+    } completion:nil];
+}
+
+- (void)hideThen:(void (^)(void))handler cancelled:(BOOL)cancelled
+{
+    self.userInteractionEnabled = NO;
+    void (^cancel)(void) = _cancel;
+    [UIView animateWithDuration:0.16 animations:^{ self.alpha = 0; } completion:^(BOOL) {
+        [self removeFromSuperview];
+        if (cancelled) { if (cancel) cancel(); }
+        else if (handler) handler();
+    }];
+}
+
+- (void)backgroundTap:(UITapGestureRecognizer*)g
+{
+    if (!CGRectContainsPoint(_card.frame, [g locationInView:self])) [self hideThen:nil cancelled:YES];
+}
+@end
 
 // ------------------------------------------------------------------------------------------------
 // The game screen
@@ -766,7 +1010,7 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
     ControlsView* _controls;
     Layout _layout;
     NSString* _rom;
-    BOOL _fresh, _started, _paused, _ffwd;
+    BOOL _fresh, _started, _paused, _ffwd, _flipped;
     CFTimeInterval _base;
     long _framesRun;
     AVAudioEngine* _engine;
@@ -809,6 +1053,9 @@ static std::atomic<bool> gMuted{false};
     [nc addObserver:self selector:@selector(willResign) name:UISceneWillDeactivateNotification object:nil];
     [nc addObserver:self selector:@selector(didBecomeActive) name:UISceneDidActivateNotification object:nil];
     [nc addObserver:self selector:@selector(settingChanged:) name:kSettingsChanged object:nil];
+    // iOS doesn't rotate iPhone apps upside down: the game turns itself when the phone is flipped
+    [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
+    [nc addObserver:self selector:@selector(deviceRotated) name:UIDeviceOrientationDidChangeNotification object:nil];
     gMuted = ![Prefs() boolForKey:@"sound"];
     [self setupAudio];
     [self start];
@@ -822,9 +1069,16 @@ static std::atomic<bool> gMuted{false};
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
+    if (self.view.window.windowScene.interfaceOrientation != UIInterfaceOrientationPortrait && _flipped) [self setFlipped:NO];
     UIScreen* screen = self.view.window.windowScene.screen;
     if (screen && self.view.contentScaleFactor != screen.nativeScale) self.view.contentScaleFactor = screen.nativeScale;
-    _layout.compute(self.view.bounds.size, self.view.safeAreaInsets, [Prefs() boolForKey:@"buttons"]);
+    UIEdgeInsets safe = self.view.safeAreaInsets;
+    if (_flipped)   // the insets belong to the other edge now: keep clear of both
+    {
+        CGFloat v = MAX(safe.top, safe.bottom), h = MAX(safe.left, safe.right);
+        safe = UIEdgeInsetsMake(v, h, v, h);
+    }
+    _layout.compute(self.view.bounds.size, safe, [Prefs() boolForKey:@"buttons"]);
     [_controls setNeedsDisplay];
 }
 
@@ -868,6 +1122,25 @@ static std::atomic<bool> gMuted{false};
     self.paused = YES;
     void (^cb)(void) = self.onClose;
     [self.presentingViewController dismissViewControllerAnimated:YES completion:^{ if (cb) cb(); }];
+}
+
+- (void)deviceRotated
+{
+    UIDeviceOrientation o = UIDevice.currentDevice.orientation;
+    if (self.view.window.windowScene.interfaceOrientation != UIInterfaceOrientationPortrait) return;
+    if (o == UIDeviceOrientationPortraitUpsideDown) [self setFlipped:YES];
+    else if (o == UIDeviceOrientationPortrait) [self setFlipped:NO];
+}
+
+- (void)setFlipped:(BOOL)f
+{
+    if (f == _flipped) return;
+    _flipped = f;
+    [self.view setNeedsLayout];
+    [UIView animateWithDuration:0.35 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
+        self.view.transform = f ? CGAffineTransformMakeRotation(M_PI) : CGAffineTransformIdentity;
+        [self.view layoutIfNeeded];
+    } completion:nil];
 }
 
 - (void)settingChanged:(NSNotification*)n
@@ -998,39 +1271,51 @@ static std::atomic<bool> gMuted{false};
 
 - (void)resume { _paused = NO; _base = 0; }
 
+// The in-game menus are drawn by the app (not system alerts), so they turn with the game when
+// the phone is held upside down.
+- (void)panel:(NSString*)title message:(NSString*)msg items:(NSArray<NSDictionary*>*)items
+{
+    __weak GameViewController* me = self;
+    MenuPanel* p = [[MenuPanel alloc] initWithTitle:title message:msg items:items onCancel:^{ [me resume]; }];
+    p.frame = self.view.bounds;
+    p.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:p];
+    [p show];
+}
+
+static NSDictionary* Item(NSString* title, NSString* symbol, BOOL destructive, void (^handler)(void))
+{
+    return @{@"title": title, @"symbol": symbol ?: @"", @"destructive": @(destructive), @"handler": [handler copy]};
+}
+
 - (void)controlsMenu
 {
     if (!_started) return;
     _paused = YES;
-    UIAlertController* m = [UIAlertController alertControllerWithTitle:(self.gameTitle ?: _rom.lastPathComponent.stringByDeletingPathExtension) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak GameViewController* me = self;
     BOOL full = ![Prefs() boolForKey:@"buttons"];
-    [m addAction:[UIAlertAction actionWithTitle:(full ? @"Exit full screen" : @"Full screen (hide buttons)") style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
-        GameViewController* g = me;
-        if (!g) return;
+    NSMutableArray* items = [NSMutableArray array];
+    [items addObject:Item(@"Save State", @"square.and.arrow.down", NO, ^{ [me stateMenu:YES]; })];
+    [items addObject:Item(@"Load State", @"clock.arrow.circlepath", NO, ^{ [me stateMenu:NO]; })];
+    [items addObject:Item(full ? @"Exit Full Screen" : @"Full Screen", full ? @"arrow.down.right.and.arrow.up.left" : @"arrow.up.left.and.arrow.down.right", NO, ^{
         [Prefs() setBool:full forKey:@"buttons"];
-        [NSNotificationCenter.defaultCenter postNotificationName:kSettingsChanged object:@"buttons"];
-        [g resume];
-    }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Save state" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:YES]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Load state" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:NO]; }]];
+        PostChange(@"buttons");
+        [me resume];
+    })];
     if (wc09_is_hd_game())
     {
         BOOL hd = [Prefs() boolForKey:@"hdAll"];
-        [m addAction:[UIAlertAction actionWithTitle:(hd ? @"Switch to original look" : @"Switch to HD look") style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
-            GameViewController* g = me;
-            if (!g) return;
+        [items addObject:Item(hd ? @"Switch to Original Look" : @"Switch to HD Look", hd ? @"sparkles.rectangle.stack" : @"sparkles", NO, ^{
             [Prefs() setBool:!hd forKey:@"hdAll"];
             ApplyCoreOptions();
-            [g toast:hd ? @"Original look" : @"HD look"];
-            [g resume];
-        }]];
+            [me toast:hd ? @"Original look" : @"HD look"];
+            [me resume];
+        })];
     }
-    [m addAction:[UIAlertAction actionWithTitle:@"Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me openSettings]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Restart from in-game save" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me restartAsk]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Back to library" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) { [me close]; }]];
-    [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction*) { [me resume]; }]];
-    [self present:m];
+    [items addObject:Item(@"Settings", @"gearshape", NO, ^{ [me openSettings]; })];
+    [items addObject:Item(@"Restart from In-Game Save", @"arrow.counterclockwise", NO, ^{ [me restartAsk]; })];
+    [items addObject:Item(@"Back to Library", @"square.grid.2x2", YES, ^{ [me close]; })];
+    [self panel:(self.gameTitle ?: _rom.lastPathComponent.stringByDeletingPathExtension) message:nil items:items];
 }
 
 - (void)openSettings
@@ -1039,53 +1324,44 @@ static std::atomic<bool> gMuted{false};
     [self presentViewController:SettingsNavigation(^{ [me resume]; }) animated:YES completion:nil];
 }
 
-- (void)present:(UIAlertController*)a
-{
-    if (a.popoverPresentationController)
-    {
-        a.popoverPresentationController.sourceView = self.view;
-        a.popoverPresentationController.sourceRect = _layout.menu;
-    }
-    [self presentViewController:a animated:YES completion:nil];
-}
-
 - (void)stateMenu:(BOOL)save
 {
-    UIAlertController* m = [UIAlertController alertControllerWithTitle:(save ? @"Save state" : @"Load state") message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak GameViewController* me = self;
+    NSString* base = [[_rom.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"Saves"] stringByAppendingPathComponent:_rom.lastPathComponent.stringByDeletingPathExtension];
+    NSDateFormatter* df = [NSDateFormatter new];
+    df.doesRelativeDateFormatting = YES;
+    df.dateStyle = NSDateFormatterShortStyle; df.timeStyle = NSDateFormatterShortStyle;
+    NSMutableArray* items = [NSMutableArray array];
     for (int i = 1; i <= 8; i++)
     {
-        NSString* t = [NSString stringWithFormat:@"Slot %d%@", i, wc09_state_exists(i) ? @"" : @"   (empty)"];
-        [m addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
+        NSDictionary* at = [NSFileManager.defaultManager attributesOfItemAtPath:[base stringByAppendingFormat:@".ml%d", i] error:nil];
+        NSString* when = at ? [df stringFromDate:at.fileModificationDate] : @"Empty";
+        [items addObject:Item([NSString stringWithFormat:@"Slot %d  ·  %@", i, when], at ? @"square.stack.fill" : @"square.dashed", NO, ^{
             GameViewController* s = me;
             if (!s) return;
             [EAGLContext setCurrentContext:s->_ctx];
             int r = save ? wc09_save_state(i) : wc09_load_state(i);
             [s toast:r == 0 ? [NSString stringWithFormat:(save ? @"Saved to slot %d" : @"Loaded slot %d"), i]
-                            : (save ? @"Couldn't save" : [NSString stringWithFormat:@"Couldn't load slot %d", i])];
+                            : (save ? @"Couldn't save" : [NSString stringWithFormat:@"Slot %d is empty", i])];
             [s resume];
-        }]];
+        })];
     }
-    [m addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction*) { [me resume]; }]];
-    [self present:m];
+    [self panel:(save ? @"Save State" : @"Load State") message:nil items:items];
 }
 
 - (void)restartAsk
 {
-    UIAlertController* a = [UIAlertController alertControllerWithTitle:@"Restart the game?"
-        message:@"Starts again from your last in-game save. Anything after it is lost (save states are kept)."
-        preferredStyle:UIAlertControllerStyleAlert];
     __weak GameViewController* me = self;
-    [a addAction:[UIAlertAction actionWithTitle:@"Restart" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) {
-        GameViewController* g = me;
-        if (!g) return;
-        [EAGLContext setCurrentContext:g->_ctx];
-        wc09_delete_state(kAutoSlot);
-        wc09_load_rom(g->_rom.fileSystemRepresentation, PrefScale(), 0);
-        [g resume];
-    }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction*) { [me resume]; }]];
-    [self presentViewController:a animated:YES completion:nil];
+    [self panel:@"Restart the game?"
+        message:@"Starts again from your last in-game save. Anything after it is lost; save states are kept."
+          items:@[Item(@"Restart", @"arrow.counterclockwise", YES, ^{
+              GameViewController* g = me;
+              if (!g) return;
+              [EAGLContext setCurrentContext:g->_ctx];
+              wc09_delete_state(kAutoSlot);
+              wc09_load_rom(g->_rom.fileSystemRepresentation, PrefScale(), 0);
+              [g resume];
+          })]];
 }
 
 - (void)toast:(NSString*)text
@@ -1336,7 +1612,8 @@ static UILabel* Badge(NSString* text, UIColor* color)
 
 // ---- library screen ----
 
-@interface LibraryViewController : UICollectionViewController <UISearchResultsUpdating, UIDocumentPickerDelegate, PHPickerViewControllerDelegate>
+@interface LibraryViewController : UIViewController <UICollectionViewDataSource, UICollectionViewDelegate, UISearchResultsUpdating, UIDocumentPickerDelegate, PHPickerViewControllerDelegate>
+@property (nonatomic, strong) UICollectionView* collectionView;
 @end
 
 @implementation LibraryViewController
@@ -1347,6 +1624,8 @@ static UILabel* Badge(NSString* text, UIColor* color)
     NSString* _search;
     GameEntry* _coverTarget;   // the game whose cover is being picked
     BOOL _pickingCover;
+    UICollectionViewLayout* _grid;
+    UIView* _empty;
     UIView* _hud;
     UISearchController* _searchController;
 }
@@ -1382,12 +1661,12 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
 
 - (instancetype)init
 {
-    __block __weak LibraryViewController* weakSelf = nil;
-    self = [super initWithCollectionViewLayout:GridLayout(^BOOL(NSInteger s) {
+    if (!(self = [super initWithNibName:nil bundle:nil])) return nil;
+    __weak LibraryViewController* weakSelf = self;
+    _grid = GridLayout(^BOOL(NSInteger s) {
         LibraryViewController* me = weakSelf;
         return me && me->_sectionTitles.count > (NSUInteger)s && me->_sectionTitles[s].length > 0;
-    })];
-    weakSelf = self;
+    });
     return self;
 }
 
@@ -1397,6 +1676,12 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
 {
     [super viewDidLoad];
     self.title = @"Library";
+    self.view.backgroundColor = AppBackground();
+    self.collectionView = [[UICollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:_grid];
+    self.collectionView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.collectionView.dataSource = self;
+    self.collectionView.delegate = self;
+    [self.view addSubview:self.collectionView];
     self.collectionView.backgroundColor = AppBackground();
     self.collectionView.alwaysBounceVertical = YES;
     [self.collectionView registerClass:GameCell.class forCellWithReuseIdentifier:@"g"];
@@ -1406,7 +1691,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
     __weak LibraryViewController* me = self;
     UIMenu* add = [UIMenu menuWithChildren:@[
         [UIAction actionWithTitle:@"Import Games…" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(UIAction*) { [me importGames]; }],
-        [UIAction actionWithTitle:@"Show in Files" image:[UIImage systemImageNamed:@"folder"] identifier:nil handler:^(UIAction*) { [me openFiles]; }],
+        [UIAction actionWithTitle:@"Add Games Folder…" image:[UIImage systemImageNamed:@"folder.badge.plus"] identifier:nil handler:^(UIAction*) { [FolderPicker presentFrom:me]; }],
     ]];
     UIBarButtonItem* plus = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"plus"] menu:add];
     self.navigationItem.rightBarButtonItems = @[gear, plus];
@@ -1431,19 +1716,30 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
 - (void)reload
 {
     NSString* docs = DocumentsDir();
+    NSArray<NSURL*>* folders = [gFolders copy];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSMutableArray<NSString*>* roms = [NSMutableArray array];
         NSFileManager* fm = NSFileManager.defaultManager;
         void (^scan)(NSString*) = ^(NSString* dir) {
             for (NSString* f in [fm contentsOfDirectoryAtPath:dir error:nil])
-                if ([f.pathExtension.lowercaseString isEqualToString:@"nds"] && ![f hasPrefix:@"."]) [roms addObject:[dir stringByAppendingPathComponent:f]];
+            {
+                NSString* p = [dir stringByAppendingPathComponent:f];
+                if ([f.pathExtension.lowercaseString isEqualToString:@"nds"] && ![f hasPrefix:@"."]) { if (![roms containsObject:p]) [roms addObject:p]; }
+                else if ([f hasPrefix:@"."] && [f.lowercaseString hasSuffix:@".nds.icloud"])   // in iCloud, not downloaded yet
+                    [fm startDownloadingUbiquitousItemAtURL:[NSURL fileURLWithPath:p] error:nil];
+            }
         };
-        scan(docs);
-        for (NSString* f in [fm contentsOfDirectoryAtPath:docs error:nil])
+        NSMutableArray* roots = [NSMutableArray arrayWithObject:docs];
+        for (NSURL* u in folders) [roots addObject:u.path];
+        for (NSString* root in roots)
         {
-            NSString* p = [docs stringByAppendingPathComponent:f];
-            BOOL isDir = NO;
-            if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir && ![@[@"Saves", @"HDCards", @"Covers", @"Inbox"] containsObject:f]) scan(p);
+            scan(root);
+            for (NSString* f in [fm contentsOfDirectoryAtPath:root error:nil])
+            {
+                NSString* p = [root stringByAppendingPathComponent:f];
+                BOOL isDir = NO;
+                if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir && ![@[@"Saves", @"HDCards", @"Covers", @"Inbox"] containsObject:f]) scan(p);
+            }
         }
         NSMutableArray<GameEntry*>* games = [NSMutableArray array];
         for (NSString* r in roms) [games addObject:LoadEntry(r)];
@@ -1470,7 +1766,18 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
     else { _sections = @[rest]; _sectionTitles = @[@""]; }
     [self.collectionView.collectionViewLayout invalidateLayout];
     [self.collectionView reloadData];
-    self.collectionView.backgroundView = _all.count ? nil : [self emptyView];
+    if (!_empty)
+    {
+        _empty = [self emptyView];
+        _empty.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.view addSubview:_empty];
+        UILayoutGuide* g = self.view.safeAreaLayoutGuide;
+        [NSLayoutConstraint activateConstraints:@[
+            [_empty.topAnchor constraintEqualToAnchor:g.topAnchor], [_empty.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+            [_empty.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [_empty.trailingAnchor constraintEqualToAnchor:g.trailingAnchor]]];
+    }
+    _empty.hidden = _all.count > 0;
+    self.collectionView.hidden = _all.count == 0;
     self.navigationItem.searchController = _all.count ? _searchController : nil;
 }
 
@@ -1491,7 +1798,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
     GradientView* glow = [GradientView new];
     CAGradientLayer* gl = (CAGradientLayer*)glow.layer;
     gl.type = kCAGradientLayerRadial;
-    gl.colors = @[(id)[Accent() colorWithAlphaComponent:0.32].CGColor, (id)[Accent() colorWithAlphaComponent:0].CGColor];
+    gl.colors = @[(id)[Accent() colorWithAlphaComponent:0.28].CGColor, (id)[Accent() colorWithAlphaComponent:0].CGColor];
     gl.startPoint = CGPointMake(0.5, 0.5); gl.endPoint = CGPointMake(1, 1);
     UIView* body = [UIView new];
     body.backgroundColor = RGB(0x0B1730); body.layer.cornerRadius = 12;
@@ -1511,7 +1818,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
         [body.centerXAnchor constraintEqualToAnchor:art.centerXAnchor], [body.topAnchor constraintEqualToAnchor:art.topAnchor],
         [body.widthAnchor constraintEqualToConstant:70], [body.heightAnchor constraintEqualToConstant:104],
         [glow.centerXAnchor constraintEqualToAnchor:body.centerXAnchor], [glow.centerYAnchor constraintEqualToAnchor:body.centerYAnchor],
-        [glow.widthAnchor constraintEqualToConstant:230], [glow.heightAnchor constraintEqualToConstant:230]]];
+        [glow.widthAnchor constraintEqualToConstant:180], [glow.heightAnchor constraintEqualToConstant:180]]];
 
     UILabel* title = [UILabel new];
     title.text = @"Add your games";
@@ -1524,27 +1831,29 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
 
     __weak LibraryViewController* me = self;
     UIButtonConfiguration* bc = [UIButtonConfiguration filledButtonConfiguration];
-    bc.title = @"Import from Files";
-    bc.image = [UIImage systemImageNamed:@"square.and.arrow.down"];
+    bc.title = @"Choose Games Folder";
+    bc.image = [UIImage systemImageNamed:@"folder.badge.plus"];
     bc.imagePadding = 8; bc.cornerStyle = UIButtonConfigurationCornerStyleLarge;
     bc.baseBackgroundColor = Accent(); bc.baseForegroundColor = RGB(0x06111F);
     bc.contentInsets = NSDirectionalEdgeInsetsMake(14, 20, 14, 20);
-    UIButton* imp = [UIButton buttonWithConfiguration:bc primaryAction:[UIAction actionWithHandler:^(UIAction*) { [me importGames]; }]];
+    UIButton* imp = [UIButton buttonWithConfiguration:bc primaryAction:[UIAction actionWithHandler:^(UIAction*) { [FolderPicker presentFrom:me]; }]];
 
     UIButtonConfiguration* fc = [UIButtonConfiguration tintedButtonConfiguration];
-    fc.title = @"Open in the Files app";
-    fc.image = [UIImage systemImageNamed:@"folder"];
+    fc.title = @"Import Games";
+    fc.image = [UIImage systemImageNamed:@"square.and.arrow.down"];
     fc.imagePadding = 8; fc.cornerStyle = UIButtonConfigurationCornerStyleLarge;
     fc.baseForegroundColor = Accent();
     fc.contentInsets = NSDirectionalEdgeInsetsMake(14, 20, 14, 20);
-    UIButton* files = [UIButton buttonWithConfiguration:fc primaryAction:[UIAction actionWithHandler:^(UIAction*) { [me openFiles]; }]];
+    UIButton* files = [UIButton buttonWithConfiguration:fc primaryAction:[UIAction actionWithHandler:^(UIAction*) { [me importGames]; }]];
 
-    UIView* card = [self tipCard:@"laptopcomputer" title:@"From a Mac"
-                            text:@"Connect your iPhone, open Finder and select it. In the Files tab, drag your games onto Dual HD."];
+    UIView* card = [self tipCard:@"folder.fill" title:@"A folder for all your games"
+                            text:@"Pick any folder in Files: On My iPhone, iCloud Drive, a USB drive… Every game in it shows up here, and new ones appear on their own."];
+    UIView* card1 = [self tipCard:@"square.and.arrow.down.fill" title:@"Or import games"
+                             text:@"Add one or more .nds files from anywhere you saved them. They're copied into Dual HD."];
     UIView* card2 = [self tipCard:@"sparkles" title:@"Game enhancements"
-                             text:@"Some games get extra improvements, like Yu-Gi-Oh! 5D's WC2009 with HD cards (keep its HDCards folder next to the game)."];
+                             text:@"Some games get extra improvements made just for them. See Settings > Game Enhancements."];
 
-    UIStackView* st = [[UIStackView alloc] initWithArrangedSubviews:@[art, title, sub, imp, files, card, card2]];
+    UIStackView* st = [[UIStackView alloc] initWithArrangedSubviews:@[art, title, sub, imp, files, card, card1, card2]];
     st.axis = UILayoutConstraintAxisVertical; st.spacing = 14; st.alignment = UIStackViewAlignmentFill;
     [st setCustomSpacing:26 afterView:art];
     [st setCustomSpacing:8 afterView:title];
@@ -1557,9 +1866,9 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
         [sv.leadingAnchor constraintEqualToAnchor:v.leadingAnchor], [sv.trailingAnchor constraintEqualToAnchor:v.trailingAnchor],
         [art.heightAnchor constraintEqualToConstant:104],
         [st.widthAnchor constraintLessThanOrEqualToConstant:440],
-        [st.widthAnchor constraintLessThanOrEqualToAnchor:sv.frameLayoutGuide.widthAnchor constant:-48],
+        [st.widthAnchor constraintLessThanOrEqualToAnchor:sv.frameLayoutGuide.widthAnchor constant:-56],
         [st.centerXAnchor constraintEqualToAnchor:sv.frameLayoutGuide.centerXAnchor],
-        [st.topAnchor constraintEqualToAnchor:sv.contentLayoutGuide.topAnchor constant:40],
+        [st.topAnchor constraintEqualToAnchor:sv.contentLayoutGuide.topAnchor constant:56],
         [st.bottomAnchor constraintEqualToAnchor:sv.contentLayoutGuide.bottomAnchor constant:-40],
     ]];
     NSLayoutConstraint* wide = [st.widthAnchor constraintEqualToConstant:440];
@@ -1847,6 +2156,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
 - (BOOL)application:(UIApplication*)app didFinishLaunchingWithOptions:(NSDictionary*)opts
 {
     RegisterDefaults();
+    LoadLinkedFolders();
     return YES;
 }
 
@@ -1876,15 +2186,6 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
     self.window.tintColor = Accent();
     NavigationController* nav = [[NavigationController alloc] initWithRootViewController:[LibraryViewController new]];
     nav.navigationBar.prefersLargeTitles = YES;
-    UINavigationBarAppearance* ap = [UINavigationBarAppearance new];
-    [ap configureWithOpaqueBackground];
-    ap.backgroundColor = AppBackground();
-    ap.shadowColor = UIColor.clearColor;
-    ap.titleTextAttributes = @{NSForegroundColorAttributeName: UIColor.whiteColor};
-    ap.largeTitleTextAttributes = @{NSForegroundColorAttributeName: UIColor.whiteColor};
-    nav.navigationBar.standardAppearance = ap;
-    nav.navigationBar.scrollEdgeAppearance = ap;
-    nav.navigationBar.compactAppearance = ap;
     self.window.rootViewController = nav;
     self.window.backgroundColor = AppBackground();
     [self.window makeKeyAndVisible];

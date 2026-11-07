@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 
 public final class MainActivity extends Activity
         implements GameView.Host, ControlsView.Listener, LibraryView.Listener, SettingsView.Listener, EnhancementsView.Listener {
-    private static final int REQ_FOLDER = 1, REQ_PERMS = 2, REQ_COVER = 3;
+    private static final int REQ_FOLDER = 1, REQ_PERMS = 2, REQ_COVER = 3, REQ_IMPORT = 4;
     private LibraryView.Game coverTarget;
     private EnhancementsView enhancements;
     private static final int AUTO_SLOT = 0;   // the resume point
@@ -248,6 +248,15 @@ public final class MainActivity extends Activity
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_IMPORT) {
+            if (res != RESULT_OK || data == null) return;
+            java.util.List<Uri> uris = new java.util.ArrayList<>();
+            if (data.getClipData() != null)
+                for (int k = 0; k < data.getClipData().getItemCount(); k++) uris.add(data.getClipData().getItemAt(k).getUri());
+            else if (data.getData() != null) uris.add(data.getData());
+            if (!uris.isEmpty()) importUris(uris);
+            return;
+        }
         if (req == REQ_COVER) {
             if (res == RESULT_OK && data != null && data.getData() != null && coverTarget != null) saveCover(coverTarget, data.getData());
             return;
@@ -321,6 +330,44 @@ public final class MainActivity extends Activity
 
     @Override
     public void chooseFolder() { pickFolder(); }
+
+    @Override
+    public void importGames() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        startActivityForResult(i, REQ_IMPORT);
+    }
+
+    /** Copies the picked .nds files into the games folder. */
+    private void importUris(java.util.List<Uri> uris) {
+        toast("Importing…");
+        String dir = gameDir();
+        new Thread(() -> {
+            int n = 0, skipped = 0;
+            for (Uri u : uris) {
+                String name = null;
+                try (android.database.Cursor cur = getContentResolver().query(u, new String[] {android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                    if (cur != null && cur.moveToFirst()) name = cur.getString(0);
+                } catch (Exception ignored) {}
+                if (name == null || !name.toLowerCase().endsWith(".nds")) { skipped++; continue; }
+                File out = new File(dir, name);
+                if (out.exists()) continue;
+                try (InputStream in = getContentResolver().openInputStream(u); OutputStream os = new FileOutputStream(out)) {
+                    byte[] buf = new byte[1 << 20];
+                    int r;
+                    while ((r = in.read(buf)) > 0) os.write(buf, 0, r);
+                    n++;
+                } catch (Exception e) { out.delete(); }
+            }
+            final int added = n, other = skipped;
+            runOnUiThread(() -> {
+                toast(added == 1 ? "1 game added" : added + " games added" + (other > 0 ? " (only .nds files can be added)" : ""));
+                if (library != null) library.load(dir);
+            });
+        }).start();
+    }
 
     private void pickCover(LibraryView.Game g) {
         coverTarget = g;

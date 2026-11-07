@@ -60,7 +60,26 @@ final class EnhancementsView extends LinearLayout {
                     for (View r : detailRows) r.setAlpha(v ? 1f : 0.45f);
                 }));
 
-        TextView h = Ui.text(c, "DETAILS", 12.5f, Ui.TEXT_DIM, true);
+        TextView wh = Ui.text(c, "WHAT'S IMPROVED", 12.5f, Ui.TEXT_DIM, true);
+        wh.setLetterSpacing(0.06f);
+        wh.setPadding(Ui.dp(c, 6), Ui.dp(c, 22), 0, Ui.dp(c, 8));
+        list.addView(wh);
+        LinearLayout fc = card(c, list);
+        fc.setPadding(Ui.dp(c, 16), Ui.dp(c, 8), Ui.dp(c, 16), Ui.dp(c, 8));
+        for (String f : pack.features) {
+            LinearLayout fr = new LinearLayout(c);
+            fr.setPadding(0, Ui.dp(c, 8), 0, Ui.dp(c, 8));
+            TextView ck = Ui.text(c, "✓", 15, 0xFF22C55E, true);
+            ck.setPadding(0, 0, Ui.dp(c, 12), 0);
+            fr.addView(ck);
+            fr.addView(Ui.text(c, f, 15, Ui.TEXT, false), new LayoutParams(0, -2, 1));
+            fc.addView(fr);
+        }
+        TextView nd = Ui.text(c, pack.needs, 13, Ui.TEXT_DIM, false);
+        nd.setPadding(Ui.dp(c, 6), Ui.dp(c, 8), Ui.dp(c, 6), 0);
+        list.addView(nd);
+
+        TextView h = Ui.text(c, "FINE-TUNE", 12.5f, Ui.TEXT_DIM, true);
         h.setLetterSpacing(0.06f);
         h.setPadding(Ui.dp(c, 6), Ui.dp(c, 22), 0, Ui.dp(c, 8));
         list.addView(h);

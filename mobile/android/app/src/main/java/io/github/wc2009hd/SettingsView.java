@@ -101,7 +101,7 @@ final class SettingsView extends LinearLayout {
             row.setOnClickListener(v -> listener.openEnhancements(p));
             w.addView(row);
         }
-        TextView wn = Ui.text(c, "Extra improvements made for specific games. They switch on by themselves when you play that game.", 13, Ui.TEXT_DIM, false);
+        TextView wn = Ui.text(c, "Extra improvements made for specific games. They switch on by themselves when you play that game; tap one to see what it improves.", 13, Ui.TEXT_DIM, false);
         wn.setPadding(Ui.dp(c, 6), Ui.dp(c, 8), Ui.dp(c, 6), 0);
         list.addView(wn);
 
