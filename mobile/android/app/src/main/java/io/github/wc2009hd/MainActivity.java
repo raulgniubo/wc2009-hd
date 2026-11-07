@@ -59,7 +59,8 @@ public final class MainActivity extends Activity
     private final Runnable perfTick = new Runnable() {
         @Override public void run() {
             if (game == null || perfView == null) return;
-            if (perfView.getVisibility() == View.VISIBLE) perfView.setText(Native.perfText());
+            if (perfView.getVisibility() == View.VISIBLE)
+                perfView.setText(SettingsView.on(prefs, "perfDetail") ? Native.perfText() : String.valueOf(Native.fps()));
             perfHandler.postDelayed(this, 500);
         }
     };
@@ -602,8 +603,12 @@ public final class MainActivity extends Activity
         root.addView(game, new FrameLayout.LayoutParams(-1, -1));
         root.addView(controls, new FrameLayout.LayoutParams(-1, -1));
         perfView = Ui.text(this, "", 11, 0xFFFFFFFF, true);
-        perfView.setBackgroundColor(0x8C000000);
-        perfView.setPadding(Ui.dp(this, 6), Ui.dp(this, 2), Ui.dp(this, 6), Ui.dp(this, 2));
+        android.graphics.drawable.GradientDrawable pbg = new android.graphics.drawable.GradientDrawable();
+        pbg.setColor(0x73000000); pbg.setCornerRadius(Ui.dp(this, 5));
+        perfView.setBackground(pbg);
+        perfView.setGravity(android.view.Gravity.CENTER);
+        perfView.setMinWidth(Ui.dp(this, 28));
+        perfView.setPadding(Ui.dp(this, 5), Ui.dp(this, 1), Ui.dp(this, 5), Ui.dp(this, 1));
         FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(-2, -2);
         plp.leftMargin = Ui.dp(this, 8); plp.topMargin = Ui.dp(this, 8);
         root.addView(perfView, plp);

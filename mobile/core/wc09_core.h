@@ -64,6 +64,8 @@ int wc09_is_hd_game(void);
 const char* wc09_renderer_report(int* software);
 // "60 fps · 4.1 ms/frame · …", updated about once a second while a game runs
 const char* wc09_perf_text(void);
+/* frames per second the game ran at over the last second (0 before the first second) */
+int wc09_fps(void);
 // 4-letter game code from a ROM header into code[5] (e.g. "CY8E"); 0 on success
 int wc09_rom_code(const char* path, char* code);   // the loaded game is Yu-Gi-Oh! 5D's WC2009 (the HD options apply)
 

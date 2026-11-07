@@ -273,6 +273,10 @@ GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone, co
         e.Valid = true;
     }
     HD3D[hash] = e;
+    if (HD3D.size() > 384)   // forget textures not seen for half a minute (GPU memory on phones)
+        for (auto it = HD3D.begin(); it != HD3D.end();)
+            if (HD3DFrame - it->second.LastUse > 1800 && it->first != hash) { if (it->second.Valid) glDeleteTextures(1, &it->second.Tex); it = HD3D.erase(it); }
+            else ++it;
     static const bool debug = getenv("WC09_DEBUG") != nullptr;
     if (debug) { printf("WC09 tex3d %s s_%016llx_%c%c %s\n", name, (unsigned long long)alphaHash, tone ? tone >> 8 : '-', tone ? tone & 0xFF : '-', e.Valid ? "HD" : "-"); fflush(stdout); }
     return e.Valid ? e.Tex : 0;

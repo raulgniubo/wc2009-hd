@@ -258,6 +258,14 @@ u16 ReadBG(GPU& gpu, int engine, u32 addr)
 }
 
 void SetHDImageProvider(HDImageProvider provider) { std::lock_guard<std::mutex> lk(Lock); Provider = std::move(provider); }
+HDExistsCheck ExistsCheck;
+void SetHDExistsCheck(HDExistsCheck check) { std::lock_guard<std::mutex> lk(Lock); ExistsCheck = std::move(check); }
+static bool KnownMissing(const std::string& name)
+{
+    HDExistsCheck c;
+    { std::lock_guard<std::mutex> lk(Lock); c = ExistsCheck; }
+    return c && c(name) == 0;
+}
 
 // Menu screens show many small HD sprite images, first needed the moment the player presses a
 // button; decoding them then (on the emulation thread) makes the sound crackle. The first image
@@ -275,9 +283,15 @@ std::condition_variable PrefCV;
 bool PrefStop = false;
 struct PrefetchThread
 {
-    std::thread T;
-    ~PrefetchThread() { { std::lock_guard<std::mutex> lk(PrefLock); PrefStop = true; } PrefCV.notify_all(); if (T.joinable()) T.join(); }
+    std::thread T, T2;   // two workers: one big picture doesn't hold up the others
+    ~PrefetchThread() { { std::lock_guard<std::mutex> lk(PrefLock); PrefStop = true; } PrefCV.notify_all(); if (T.joinable()) T.join(); if (T2.joinable()) T2.join(); }
 } Prefetcher;
+void PrefetchLoop();
+void StartWorkers()
+{
+    if (!Prefetcher.T.joinable()) Prefetcher.T = std::thread(PrefetchLoop);
+    if (!Prefetcher.T2.joinable()) Prefetcher.T2 = std::thread(PrefetchLoop);
+}
 
 void PrefetchLoop()
 {
@@ -322,13 +336,14 @@ void PrefetchFolder(const std::string& name)
     std::vector<std::string> names = SpriteImageNamesWithPrefix(folder);
     std::lock_guard<std::mutex> lk(PrefLock);
     for (auto& n : names) PrefQueue.push_back(n);
-    if (!Prefetcher.T.joinable()) Prefetcher.T = std::thread(PrefetchLoop);
+    StartWorkers();
     PrefCV.notify_all();
 }
 }
 
 int LoadHDImageAsync(const std::string& name, std::vector<u8>& rgba, int& w, int& h)
 {
+    if (KnownMissing(name)) return -1;
     std::lock_guard<std::mutex> lk(PrefLock);
     auto it = Prefetched.find(name);
     if (it != Prefetched.end())
@@ -342,8 +357,9 @@ int LoadHDImageAsync(const std::string& name, std::vector<u8>& rgba, int& w, int
     {
         AsyncPending[name] = true;
         AsyncQueue.push_back(name);
-        if (AsyncQueue.size() > 8) { AsyncPending.erase(AsyncQueue.front()); AsyncQueue.erase(AsyncQueue.begin()); }
-        if (!Prefetcher.T.joinable()) Prefetcher.T = std::thread(PrefetchLoop);
+        // a long backlog of panels nobody looks at anymore: drop the oldest of those
+        if (AsyncQueue.size() > 48) { AsyncPending.erase(AsyncQueue.front()); AsyncQueue.erase(AsyncQueue.begin()); }
+        StartWorkers();
         PrefCV.notify_all();
     }
     return 0;
@@ -380,6 +396,7 @@ int LoadCardImageAsync(int card, std::vector<u8>& rgba, int& w, int& h)
 
 bool LoadHDImage(const std::string& name, std::vector<u8>& rgba, int& w, int& h)
 {
+    if (KnownMissing(name)) return false;
     {
         std::lock_guard<std::mutex> lk(PrefLock);
         auto it = Prefetched.find(name);

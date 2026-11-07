@@ -145,4 +145,5 @@ FN(jstring, rendererReport)(JNIEnv* env, jclass)
     const char* r = wc09_renderer_report(&soft);
     return env->NewStringUTF(r ? r : "");
 }
+FN(jint, fps)(JNIEnv*, jclass) { return wc09_fps(); }
 FN(jstring, perfText)(JNIEnv* env, jclass) { return env->NewStringUTF(wc09_perf_text()); }

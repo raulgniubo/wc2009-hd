@@ -445,7 +445,7 @@ static void PostChange(NSString* key) { [NSNotificationCenter.defaultCenter post
 static void RegisterDefaults()
 {
     [Prefs() registerDefaults:@{
-        @"boxart": @YES, @"sort": @"recent", @"perf": @NO, @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
+        @"boxart": @YES, @"sort": @"recent", @"perf": @NO, @"perfDetail": @NO, @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
         @"buttons": @YES, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
     }];
 }
@@ -925,8 +925,10 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
                       @{@"title": @"Sharp", @"detail": @"Keeps hard pixel edges", @"value": @NO}]},
                 @{@"type": @"switch", @"key": @"smooth2d", @"title": @"Smooth 2D Graphics", @"symbol": @"wand.and.stars", @"color": RGB(0x14B8A6),
                   @"detail": @"Upscales menus and sprites with smooth edges instead of blocky pixels."},
-                @{@"type": @"switch", @"key": @"perf", @"title": @"Show Performance", @"symbol": @"speedometer", @"color": RGB(0x64748B),
-                  @"detail": @"Frame rate and timing in a corner of the game screen."}]},
+                @{@"type": @"switch", @"key": @"perf", @"title": @"Show Frame Rate", @"symbol": @"speedometer", @"color": RGB(0x64748B),
+                  @"detail": @"A small number in a corner of the game screen. 60 is full speed."},
+                @{@"type": @"switch", @"key": @"perfDetail", @"title": @"Detailed Performance", @"symbol": @"chart.bar.xaxis", @"color": RGB(0x64748B),
+                  @"detail": @"Shows frame timing and graphics stats next to the frame rate."}]},
             @{@"title": @"Controls", @"rows": @[
                 @{@"type": @"switch", @"key": @"buttons", @"title": @"On-Screen Buttons", @"symbol": @"gamecontroller.fill", @"color": RGB(0xF97316),
                   @"detail": @"Turn off for full screen: just the DS screens and a small menu button."},
@@ -1135,7 +1137,10 @@ static std::atomic<bool> gMuted{false};
     _perf = [[UILabel alloc] initWithFrame:CGRectMake(8, 8, 600, 16)];
     _perf.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
     _perf.textColor = UIColor.whiteColor;
-    _perf.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
+    _perf.textAlignment = NSTextAlignmentCenter;
+    _perf.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
+    _perf.layer.cornerRadius = 5;
+    _perf.layer.masksToBounds = YES;
     _perf.hidden = ![Prefs() boolForKey:@"perf"];
     _perf.userInteractionEnabled = NO;
     [self.view addSubview:_perf];
@@ -1343,9 +1348,13 @@ static std::atomic<bool> gMuted{false};
     if (!_perf.hidden && t0 - _perfShown > 0.5)
     {
         _perfShown = t0;
-        _perf.text = [NSString stringWithFormat:@" %s  ·  draw %.1f ms ", wc09_perf_text(), _drawCount ? _drawSum / _drawCount * 1000 : 0];
+        if ([Prefs() boolForKey:@"perfDetail"])
+            _perf.text = [NSString stringWithFormat:@" %s  ·  draw %.1f ms ", wc09_perf_text(), _drawCount ? _drawSum / _drawCount * 1000 : 0];
+        else
+            _perf.text = [NSString stringWithFormat:@"%d", wc09_fps()];
         [_perf sizeToFit];
         CGRect f = _perf.frame;
+        f.size.width = MAX(f.size.width + 10, 28); f.size.height = MAX(f.size.height + 4, 18);
         f.origin = CGPointMake(self.view.safeAreaInsets.left + 8, self.view.safeAreaInsets.top + 6);
         _perf.frame = f;
         _drawSum = 0; _drawCount = 0;

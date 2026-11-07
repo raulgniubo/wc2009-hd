@@ -7,6 +7,11 @@
 #include <cstring>
 #include <algorithm>
 #include <mutex>
+#include <memory>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <thread>
+#include <unordered_set>
 #include <atomic>
 
 #define CANVAS_ITY_IMPLEMENTATION
@@ -394,8 +399,62 @@ std::mutex RenderLock;   // canvas_ity is reentrant, but the fonts are shared
 static std::atomic<float> PanelK{4.f};
 void SetPanelScale(int scale) { PanelK = (float)std::max(3, std::min(8, scale)); }
 
+// every picture in the HD pack (path without extension), listed once in the background: missing
+// pictures are then known at once instead of each costing a trip through the loader
+namespace
+{
+std::mutex IndexLock;
+std::shared_ptr<const std::unordered_set<std::string>> Index;
+std::string IndexedFolder;
+
+void ScanDir(const std::string& root, const std::string& rel, std::unordered_set<std::string>& out, int depth)
+{
+    DIR* d = opendir((root + "/" + rel).c_str());
+    if (!d) return;
+    while (dirent* e = readdir(d))
+    {
+        std::string n = e->d_name;
+        if (n.empty() || n[0] == '.') continue;
+        std::string r = rel.empty() ? n : rel + "/" + n;
+        bool isDir = e->d_type == DT_DIR;
+        if (e->d_type == DT_UNKNOWN) { struct stat st; isDir = stat((root + "/" + r).c_str(), &st) == 0 && S_ISDIR(st.st_mode); }
+        if (isDir) { if (depth < 4) ScanDir(root, r, out, depth + 1); continue; }
+        size_t dot = r.rfind('.');
+        size_t slash = r.rfind('/');
+        if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) out.insert(r.substr(0, dot));
+    }
+    closedir(d);
+}
+}
+
 void SetupHDProvider(const std::string& folder, const std::string& fontDir)
 {
+    {
+        std::lock_guard<std::mutex> lk(IndexLock);
+        if (IndexedFolder != folder)
+        {
+            IndexedFolder = folder;
+            Index.reset();
+            std::thread([folder] {
+                auto set = std::make_shared<std::unordered_set<std::string>>();
+                ScanDir(folder, "", *set, 0);
+                std::lock_guard<std::mutex> lk2(IndexLock);
+                if (IndexedFolder == folder) Index = set;
+            }).detach();
+        }
+    }
+    if (!getenv("WC09_NOINDEX")) WC09::SetHDExistsCheck([](const std::string& name) -> int {
+        static const char* const kMade[] = {"lppanel/", "statpanel/", "decktext/", "deckname/", "textpanel/", "cardimg/"};
+        for (const char* m : kMade) if (name.compare(0, strlen(m), m) == 0) return -1;
+        std::shared_ptr<const std::unordered_set<std::string>> idx;
+        { std::lock_guard<std::mutex> lk(IndexLock); idx = Index; }
+        if (!idx) return -1;
+        if (idx->count(name)) return 1;
+        // left-facing battle pictures can be mirrored from the right-facing ones
+        if (name.compare(0, 14, "BattleMonsterL") == 0 && name.size() > 2 && name.compare(name.size() - 2, 2, "_l") == 0)
+            return idx->count("BattleMonsterR" + name.substr(14, name.size() - 14 - 2) + "_r") ? 1 : 0;
+        return 0;
+    });
     if (FontMedium.empty()) FontMedium = ReadAll(fontDir + "/Inter-Medium.ttf");
     if (FontBold.empty()) FontBold = ReadAll(fontDir + "/Inter-Bold.ttf");
     std::string f = folder;

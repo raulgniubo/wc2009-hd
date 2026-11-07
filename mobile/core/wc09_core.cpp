@@ -83,6 +83,7 @@ std::string Report;
 
 u64 PerfFrames = 0, PerfUs = 0, PerfStart = 0, PerfMaxUs = 0;
 char PerfText[256] = "";
+int PerfFps = 0;
 
 // software renderer fallback: the RAM framebuffers go into this texture
 GLuint SoftTex = 0;
@@ -343,6 +344,7 @@ void wc09_run_frame(void)
     u64 now = Platform::GetMSCount();
     if (now - PerfStart >= 1000)
     {
+        PerfFps = (int)(PerfFrames * 1000.0 / (now - PerfStart) + 0.5);
         auto& st = melonDS::GLES::St();
         double n = std::max<u64>(1, PerfFrames), secs = (now - PerfStart) / 1000.0;
         snprintf(PerfText, sizeof(PerfText), "%.0f fps  ·  %.1f ms/frame (max %.0f)  ·  %.0f draws  ·  %.0f+%.0f KB up  ·  %.1f reads",
@@ -510,6 +512,7 @@ void wc09_set_option(int option, int value)
 }
 
 const char* wc09_perf_text(void) { return PerfText; }
+int wc09_fps(void) { return PerfFps; }
 
 const char* wc09_renderer_report(int* software)
 {

@@ -540,7 +540,12 @@ GLuint GLRenderer2D::GetHDTexture(int image)
             loaded = r > 0;
         }
         else
-            loaded = WC09::LoadHDImage(nm, rgba, w, h);
+        {
+            // other pictures too (story characters, backgrounds…): the original shows meanwhile
+            int r = WC09::LoadHDImageAsync(nm, rgba, w, h);
+            if (r == 0) { HDLastPending = true; return 0; }
+            loaded = r > 0;
+        }
     }
     if (getenv("WC09_DEBUG")) { printf("WC09 2D HD %d %s %s %dx%d\n", image, WC09::BattleImageName(image).c_str(), loaded ? "ok" : "missing", w, h); fflush(stdout); }
     if (loaded && w > 0 && h > 0)

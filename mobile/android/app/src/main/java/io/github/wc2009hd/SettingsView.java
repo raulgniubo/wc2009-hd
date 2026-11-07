@@ -83,7 +83,9 @@ final class SettingsView extends LinearLayout {
         g.addView(Ui.divider(c));
         g.addView(toggle("smooth2d", "Smooth 2D graphics", "Upscales menus and sprites with smooth edges instead of blocky pixels."));
         g.addView(Ui.divider(c));
-        g.addView(toggle("perf", "Show performance", "Frame rate and timing in a corner of the game screen."));
+        g.addView(toggle("perf", "Show frame rate", "A small number in a corner of the game screen. 60 is full speed."));
+        g.addView(Ui.divider(c));
+        g.addView(toggle("perfDetail", "Detailed performance", "Shows frame timing and graphics stats next to the frame rate."));
 
         // ---- WC2009
         LinearLayout w = section("Game enhancements");

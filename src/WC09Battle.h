@@ -116,6 +116,10 @@ std::string CardDescEn(int card);
 // HD image provider (set by the frontend): name -> straight RGBA8 pixels.
 using HDImageProvider = std::function<bool(const std::string& name, std::vector<u8>& rgba, int& w, int& h)>;
 void SetHDImageProvider(HDImageProvider provider);
+// Optional: does the HD pack have this image? 1 yes, 0 no, -1 don't know (generated images,
+// index not ready). Lets missing images be skipped without a trip through the loader.
+using HDExistsCheck = std::function<int(const std::string& name)>;
+void SetHDExistsCheck(HDExistsCheck check);
 bool LoadHDImage(const std::string& name, std::vector<u8>& rgba, int& w, int& h);
 // the same, rendered/loaded on a worker thread: 1 = ready (filled in), 0 = still working, -1 = failed
 int LoadHDImageAsync(const std::string& name, std::vector<u8>& rgba, int& w, int& h);
