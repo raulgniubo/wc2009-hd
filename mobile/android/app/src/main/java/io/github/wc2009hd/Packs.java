@@ -5,6 +5,7 @@ final class Packs {
     static final class Option { final String key, title, detail; Option(String k, String t, String d) { key = k; title = t; detail = d; } }
     static final class Pack {
         final String code, title, shortTitle, about, needs, master;
+        final String needsDetail = "The enhancements use an HD pack: a folder named HDCards with the card art and the redesigned screens (about 1 GB). It isn't part of the game file, so it has to sit right next to it.";
         final String[] features;
         final Option[] options;
         Pack(String code, String title, String shortTitle, String about, String[] features, String needs, String master, Option... options) {
@@ -22,7 +23,7 @@ final class Packs {
                     "Redesigned life point panel, phase buttons and duel screen icons",
                     "High-resolution menus, backgrounds and dialogs",
                 },
-                "For the card art, keep the HDCards folder next to the game.",
+                "HDCards",
                 "hdAll",
                 new Option("hdCards", "HD card art", "Real card images, from the HDCards folder next to the game."),
                 new Option("hdText", "HD text and menus", "Card names, descriptions and panels in a clean font.")),

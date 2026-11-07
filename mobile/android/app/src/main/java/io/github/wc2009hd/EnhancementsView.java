@@ -19,7 +19,7 @@ final class EnhancementsView extends LinearLayout {
     private final List<Switch> details = new ArrayList<>();
     private final List<View> detailRows = new ArrayList<>();
 
-    EnhancementsView(Context c, SharedPreferences prefs, Packs.Pack pack, Listener listener) {
+    EnhancementsView(Context c, SharedPreferences prefs, Packs.Pack pack, Listener listener, String gameDir) {
         super(c);
         setOrientation(VERTICAL);
         setBackgroundColor(Ui.BG);
@@ -75,8 +75,41 @@ final class EnhancementsView extends LinearLayout {
             fr.addView(Ui.text(c, f, 15, Ui.TEXT, false), new LayoutParams(0, -2, 1));
             fc.addView(fr);
         }
-        TextView nd = Ui.text(c, pack.needs, 13, Ui.TEXT_DIM, false);
-        nd.setPadding(Ui.dp(c, 6), Ui.dp(c, 8), Ui.dp(c, 6), 0);
+        // what you need, where it goes, and whether it's there
+        TextView nh = Ui.text(c, "WHAT YOU NEED: HD PACK (" + pack.needs.toUpperCase() + " FOLDER)", 12.5f, Ui.TEXT_DIM, true);
+        nh.setLetterSpacing(0.06f);
+        nh.setPadding(Ui.dp(c, 6), Ui.dp(c, 22), 0, Ui.dp(c, 8));
+        list.addView(nh);
+        LinearLayout sc = card(c, list);
+        sc.setPadding(Ui.dp(c, 16), Ui.dp(c, 12), Ui.dp(c, 16), Ui.dp(c, 12));
+        java.io.File[] files = new java.io.File(gameDir).listFiles();
+        int found = 0;
+        if (files != null)
+            for (java.io.File f : files) {
+                if (!f.isFile() || !f.getName().toLowerCase().endsWith(".nds")) continue;
+                String code = Native.romCode(f.getAbsolutePath());
+                if (code == null || !code.startsWith(pack.code)) continue;
+                found++;
+                boolean ok = new java.io.File(gameDir, pack.needs).isDirectory();
+                LinearLayout r = new LinearLayout(c);
+                r.setPadding(0, Ui.dp(c, 6), 0, Ui.dp(c, 6));
+                TextView ic = Ui.text(c, ok ? "✓" : "!", 15, 0xFF06111F, true);
+                ic.setGravity(Gravity.CENTER);
+                ic.setBackground(Ui.rounded(ok ? 0xFF22C55E : 0xFFF59E0B, Ui.dp(c, 8)));
+                r.addView(ic, new LayoutParams(Ui.dp(c, 28), Ui.dp(c, 28)));
+                LinearLayout t = new LinearLayout(c);
+                t.setOrientation(VERTICAL);
+                t.setPadding(Ui.dp(c, 14), 0, 0, 0);
+                t.addView(Ui.text(c, ok ? "Ready" : "HD pack missing", 16, Ui.TEXT, true));
+                t.addView(Ui.text(c, pack.needs + (ok ? " found" : " not found") + " next to " + f.getName(), 13, Ui.TEXT_DIM, false));
+                r.addView(t, new LayoutParams(0, -2, 1));
+                sc.addView(r);
+            }
+        if (found == 0) sc.addView(Ui.text(c, "Game not in your games folder yet", 15, Ui.TEXT_DIM, false));
+        TextView nd = Ui.text(c, pack.needsDetail + "\n\nPut it in the same folder as the game, like this:\n\n   📁 Your games folder\n        🎮 " + pack.shortTitle
+                + ".nds\n        📁 " + pack.needs + "\n\nKeep the folder name exactly \"" + pack.needs + "\". Without it the game runs like the original.", 13, Ui.TEXT_DIM, false);
+        nd.setLineSpacing(0, 1.2f);
+        nd.setPadding(Ui.dp(c, 6), Ui.dp(c, 10), Ui.dp(c, 6), 0);
         list.addView(nd);
 
         TextView h = Ui.text(c, "FINE-TUNE", 12.5f, Ui.TEXT_DIM, true);

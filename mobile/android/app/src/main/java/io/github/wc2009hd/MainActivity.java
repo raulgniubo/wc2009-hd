@@ -434,7 +434,7 @@ public final class MainActivity extends Activity
 
     @Override
     public void openEnhancements(Packs.Pack pack) {
-        enhancements = new EnhancementsView(this, prefs, pack, this);
+        enhancements = new EnhancementsView(this, prefs, pack, this, gameDir());
         root.addView(enhancements, new FrameLayout.LayoutParams(-1, -1));
     }
 

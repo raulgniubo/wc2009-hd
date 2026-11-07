@@ -477,7 +477,9 @@ static NSArray<NSDictionary*>* EnhancementPacks()
             @"Redesigned life point panel, phase buttons and duel screen icons",
             @"High-resolution menus, backgrounds and dialogs",
         ],
-        @"needs": @"For the card art, keep the HDCards folder next to the game.",
+        @"needs": @"HDCards",
+        @"needsTitle": @"HD pack (HDCards folder)",
+        @"needsDetail": @"The enhancements use an HD pack: a folder named HDCards with the card art and the redesigned screens (about 1 GB). It isn't part of the game file, so it has to sit right next to it.",
         @"master": @"hdAll",
         @"options": @[
             @{@"key": @"hdCards", @"title": @"HD card art", @"detail": @"Real card images, from the HDCards folder next to the game."},
@@ -557,6 +559,38 @@ static FolderPicker* gFolderPicker;
 }
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController*)picker { gFolderPicker = nil; }
 @end
+
+// Copies of a pack's game in the library (Documents and games folders, one level deep):
+// path -> YES if the pack's folder (e.g. HDCards) is next to it
+static NSDictionary<NSString*, NSNumber*>* PackInstalls(NSDictionary* pack)
+{
+    NSMutableDictionary* out = [NSMutableDictionary dictionary];
+    NSFileManager* fm = NSFileManager.defaultManager;
+    NSMutableArray* roots = [NSMutableArray arrayWithObject:NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject];
+    for (NSURL* u in gFolders) [roots addObject:u.path];
+    NSMutableArray* dirs = [NSMutableArray array];
+    for (NSString* r in roots)
+    {
+        [dirs addObject:r];
+        for (NSString* f in [fm contentsOfDirectoryAtPath:r error:nil])
+        {
+            BOOL isDir = NO;
+            NSString* p = [r stringByAppendingPathComponent:f];
+            if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir && ![@[@"Saves", @"HDCards", @"Covers"] containsObject:f]) [dirs addObject:p];
+        }
+    }
+    for (NSString* d in dirs)
+        for (NSString* f in [fm contentsOfDirectoryAtPath:d error:nil])
+        {
+            if (![f.pathExtension.lowercaseString isEqualToString:@"nds"]) continue;
+            NSString* p = [d stringByAppendingPathComponent:f];
+            char code[5];
+            if (wc09_rom_code(p.fileSystemRepresentation, code) != 0 || ![[NSString stringWithUTF8String:code] hasPrefix:pack[@"code"]]) continue;
+            BOOL isDir = NO;
+            out[p] = @([fm fileExistsAtPath:[d stringByAppendingPathComponent:pack[@"needs"]] isDirectory:&isDir] && isDir);
+        }
+    return out;
+}
 
 // SF Symbol in white on a rounded coloured square, like the Settings app
 static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
@@ -739,7 +773,7 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
         cell.accessoryView = sw;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
-    else if ([type isEqualToString:@"info"] || [type isEqualToString:@"bullet"]) cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    else if ([type isEqualToString:@"info"] || [type isEqualToString:@"bullet"] || [type isEqualToString:@"switchless"]) cell.selectionStyle = UITableViewCellSelectionStyleNone;
     else if ([type isEqualToString:@"action"]) { if (row[@"destructive"]) c.textProperties.color = UIColor.systemRedColor; else if (!row[@"symbol"]) c.textProperties.color = Accent(); cell.contentConfiguration = c; }
     else cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return cell;
@@ -801,12 +835,28 @@ static OptionsViewController* EnhancementsPage(NSDictionary* pack)
             [opts addObject:@{@"type": @"switch", @"key": o[@"key"], @"title": o[@"title"], @"detail": o[@"detail"], @"requires": pack[@"master"]}];
         NSMutableArray* feats = [NSMutableArray array];
         for (NSString* f in pack[@"features"]) [feats addObject:@{@"type": @"bullet", @"title": f}];
+
+        // what you need + where it goes + is it there
+        NSDictionary* inst = PackInstalls(pack);
+        NSMutableArray* need = [NSMutableArray array];
+        if (inst.count == 0)
+            [need addObject:@{@"type": @"info", @"title": @"Game not in your library yet", @"symbol": @"questionmark.folder.fill", @"color": RGB(0x64748B)}];
+        for (NSString* p in inst)
+        {
+            BOOL ok = [inst[p] boolValue];
+            [need addObject:@{@"type": @"switchless", @"title": ok ? @"Ready" : @"HD pack missing",
+                              @"detail": [NSString stringWithFormat:@"%@ %@ next to %@", pack[@"needs"], ok ? @"found" : @"not found", p.lastPathComponent],
+                              @"symbol": ok ? @"checkmark.seal.fill" : @"exclamationmark.triangle.fill", @"color": ok ? RGB(0x22C55E) : RGB(0xF59E0B)}];
+        }
+        NSString* where = [NSString stringWithFormat:@"%@\n\nPut it in the same folder as the game, like this:\n\n   📁 Your games folder\n        🎮 %@.nds\n        📁 %@\n\nKeep the folder name exactly \"%@\". Without it the game runs like the original.",
+                           pack[@"needsDetail"], pack[@"short"], pack[@"needs"], pack[@"needs"]];
         return @[
             @{@"title": pack[@"title"], @"rows": @[
                 @{@"type": @"switch", @"key": pack[@"master"], @"title": @"Enhancements", @"symbol": @"sparkles", @"color": RGB(0xF2A93B),
                   @"detail": @"Off plays the game exactly like the original DS. You can also switch it from the in-game menu to compare."}],
               @"footer": pack[@"about"]},
-            @{@"title": @"What's improved", @"rows": feats, @"footer": pack[@"needs"]},
+            @{@"title": @"What's improved", @"rows": feats},
+            @{@"title": [@"What you need: " stringByAppendingString:pack[@"needsTitle"]], @"rows": need, @"footer": where},
             @{@"title": @"Fine-tune", @"rows": opts},
         ];
     };
