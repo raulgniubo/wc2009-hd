@@ -1,5 +1,6 @@
-YU-GI-OH! 5D'S WC2009 HD  -  iPhone / iPad
-==========================================
+DUAL HD  -  DS EMULATOR FOR iPHONE / iPAD
+(with the Yu-Gi-Oh! 5D's WC2009 HD look built in)
+=========================================
 
 What's here
 -----------
@@ -32,10 +33,10 @@ Add games
   The app shows its own folder in the Files app and in Finder.
 
   From the Mac: with the iPhone plugged in, open Finder, click the iPhone in the sidebar,
-  open the "Files" tab, and drag your .nds files onto "WC2009 HD". For Yu-Gi-Oh! 5D's WC2009
+  open the "Files" tab, and drag your .nds files onto "Dual HD". For Yu-Gi-Oh! 5D's WC2009
   also drag its HDCards folder (next to the .nds). Folders with a game inside work too.
 
-  Or on the iPhone: Files app > On My iPhone > WC2009 HD.
+  Or on the iPhone: Files app > On My iPhone > Dual HD.
 
   Every game shows up in the Library. Pull down to refresh after adding some.
   Custom cover art: put a .png or .jpg with the same name as the game next to it.

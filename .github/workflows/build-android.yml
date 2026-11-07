@@ -33,7 +33,7 @@ jobs:
       - name: Collect
         run: |
           mkdir -p out
-          cp mobile/android/app/build/outputs/apk/release/app-release.apk "out/Yu-Gi-Oh 5Ds WC2009 HD.apk"
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk "out/Dual HD.apk"
       - name: Upload
         uses: actions/upload-artifact@v4
         with:

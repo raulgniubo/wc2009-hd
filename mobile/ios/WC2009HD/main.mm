@@ -1145,8 +1145,8 @@ static UICollectionViewLayout* GridLayout()
     _empty.font = [UIFont systemFontOfSize:16];
     _empty.text = @"No games yet\n\n"
                    "From a Mac: plug in the iPhone, open Finder, click the iPhone, open the Files tab and drag your .nds files "
-                   "(and for Yu-Gi-Oh! 5D's WC2009, its HDCards folder) onto WC2009 HD.\n\n"
-                   "Or use the Files app: On My iPhone > WC2009 HD.\n\n"
+                   "(and for Yu-Gi-Oh! 5D's WC2009, its HDCards folder) onto Dual HD.\n\n"
+                   "Or use the Files app: On My iPhone > Dual HD.\n\n"
                    "Custom cover art: add a .png or .jpg with the same name as the game.";
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:UISceneDidActivateNotification object:nil];
     [self reload];
