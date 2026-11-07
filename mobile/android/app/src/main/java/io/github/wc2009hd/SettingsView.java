@@ -90,7 +90,7 @@ final class SettingsView extends LinearLayout {
 
         // ---- controls
         LinearLayout ct = section("Controls");
-        ct.addView(toggle("buttons", "On-screen buttons", "Turn off to play only with touch or a controller."));
+        ct.addView(toggle("buttons", "On-screen buttons", "Off = full screen: the DS screens as big as they fit, with just a small menu button in the corner. Play with touch or a controller. Also in the in-game menu."));
         ct.addView(Ui.divider(c));
         final float[] ops = {0.25f, 0.4f, 0.55f, 0.75f, 0.95f};
         int os = 2;

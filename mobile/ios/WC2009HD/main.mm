@@ -49,70 +49,142 @@ struct InputState
 static InputState gInput;
 
 // ------------------------------------------------------------------------------------------------
-// Layout (points): portrait = screens stacked, controls below; landscape = side by side.
+// Layout (points), same rules as the Android app:
+//  - tall iPhone, portrait: screens stacked at the top, controls underneath
+//  - squarer screen, portrait (iPhone Duo open, iPad): "DS mode", top screen on the top half,
+//    bottom screen on the bottom half (meeting at the fold), controls beside the bottom screen
+//  - wide iPhone, landscape: screens side by side, controls in the side margins
+//  - squarer screen, landscape: screens side by side at the top, controls underneath
+//  - full screen (no buttons): screens as big as they fit, a small menu button in a corner
 
 struct Layout
 {
     CGRect top, bottom, l, r, start, select, menu, ffwd;
     CGFloat dpadX, dpadY, dpadR, abxyX, abxyY, abxyR, btnR;
+    bool landscape, fullscreen;
+    static constexpr CGFloat kTall = 1.75;
 
     void compute(CGSize size, UIEdgeInsets safe, bool controls)
     {
-        CGFloat w = size.width, h = size.height;
-        if (w <= h)
+        CGFloat W = size.width - safe.left - safe.right, H = size.height - safe.top - safe.bottom;
+        landscape = W > H;
+        fullscreen = !controls;
+        if (fullscreen) full(W, H);
+        else if (!landscape) { if (H / W >= kTall) phonePortrait(W, H); else foldPortrait(W, H); }
+        else { if (W / H >= kTall || !wideLandscape(W, H)) phoneLandscape(W, H); }
+        CGFloat dx = safe.left, dy = safe.top;
+        for (CGRect* rc : {&top, &bottom, &l, &r, &start, &select, &menu, &ffwd}) *rc = CGRectOffset(*rc, dx, dy);
+        dpadX += dx; dpadY += dy; abxyX += dx; abxyY += dy;
+    }
+
+    static CGRect R(CGFloat x0, CGFloat y0, CGFloat x1, CGFloat y1) { return CGRectMake(x0, y0, x1 - x0, y1 - y0); }
+
+    void full(CGFloat W, CGFloat H)
+    {
+        if (!landscape)
         {
-            CGFloat y0 = safe.top;
-            CGFloat minCtrl = controls ? 230 : 0;
-            CGFloat sw = w, sh = sw * 0.75;
-            CGFloat avail = h - y0 - safe.bottom;
-            if (sh * 2 > avail - minCtrl) { sh = MAX((avail - minCtrl) / 2, avail * 0.3); sw = sh / 0.75; }
-            CGFloat x0 = (w - sw) / 2;
-            top = CGRectMake(x0, y0, sw, sh);
-            bottom = CGRectMake(x0, y0 + sh, sw, sh);
-            CGFloat areaTop = MIN(CGRectGetMaxY(bottom), h - safe.bottom - minCtrl);
-            CGFloat areaH = h - safe.bottom - areaTop;
-            CGFloat side = MIN(w, areaH * 2.2);
-            CGFloat pad = 18;
-            dpadR = MIN(72.0, MIN(areaH * 0.36, side * 0.2));
-            btnR = dpadR * 0.36; abxyR = dpadR * 0.88;
-            CGFloat cy = areaTop + areaH * 0.52;
-            dpadX = pad + dpadR; dpadY = cy;
-            abxyX = w - pad - abxyR - btnR; abxyY = cy;
-            CGFloat lrW = 86, lrH = 34, lrY = areaTop + 10;
-            l = CGRectMake(pad, lrY, lrW, lrH);
-            r = CGRectMake(w - pad - lrW, lrY, lrW, lrH);
-            CGFloat pillW = 64, pillH = 26, py = h - safe.bottom - pad - pillH;
-            select = CGRectMake(w / 2 - 8 - pillW, py, pillW, pillH);
-            start = CGRectMake(w / 2 + 8, py, pillW, pillH);
-            CGFloat mb = 40, my = areaTop + 10;
-            menu = CGRectMake(w / 2 + 6, my, mb, mb);
-            ffwd = CGRectMake(w / 2 - 6 - mb, my, mb, mb);
+            if (H / W < kTall)
+            {
+                CGFloat half = H / 2, sh = MIN(half, W * 0.75), sw = sh / 0.75;
+                top = R((W - sw) / 2, half - sh, (W + sw) / 2, half);
+                bottom = R((W - sw) / 2, half, (W + sw) / 2, half + sh);
+            }
+            else
+            {
+                CGFloat sw = MIN(W, H / 1.5), sh = sw * 0.75, y0 = (H - 2 * sh) / 2;
+                top = R((W - sw) / 2, y0, (W + sw) / 2, y0 + sh);
+                bottom = R((W - sw) / 2, y0 + sh, (W + sw) / 2, y0 + 2 * sh);
+            }
         }
         else
         {
-            CGFloat left = MAX(safe.left, 0), right = MAX(safe.right, 0);
-            CGFloat margin = controls ? MIN(150.0, w * 0.17) : 0;
-            CGFloat availW = w - left - right - 2 * margin;
-            CGFloat availH = h - safe.top - safe.bottom;
-            CGFloat sw = MIN(availW / 2, availH / 0.75), sh = sw * 0.75;
-            CGFloat cx = left + (w - left - right) / 2, y0 = safe.top + (availH - sh) / 2;
-            top = CGRectMake(cx - sw, y0, sw, sh);
-            bottom = CGRectMake(cx, y0, sw, sh);
-            CGFloat m = MAX(margin, 120.0), pad = 14;
-            dpadR = MIN(66.0, (m - pad) * 0.5);
-            btnR = dpadR * 0.36; abxyR = dpadR * 0.88;
-            dpadX = left + pad + dpadR + 4; dpadY = h * 0.55;
-            abxyX = w - right - pad - abxyR - btnR; abxyY = h * 0.55;
-            CGFloat lrW = MIN(86.0, m - 2 * pad), lrH = 34, t = safe.top + pad;
-            l = CGRectMake(left + pad, t, lrW, lrH);
-            r = CGRectMake(w - right - pad - lrW, t, lrW, lrH);
-            CGFloat pillW = MIN(64.0, m - 2 * pad), pillH = 26, b = h - safe.bottom - pad - pillH;
-            select = CGRectMake(left + pad, b, pillW, pillH);
-            start = CGRectMake(w - right - pad - pillW, b, pillW, pillH);
-            CGFloat mb = 36, my = CGRectGetMaxY(l) + 12;
-            menu = CGRectMake(w - right - pad - mb, controls ? my : t, mb, mb);
-            ffwd = CGRectMake(left + pad, my, mb, mb);
+            CGFloat sw = MIN(W / 2, H / 0.75), sh = sw * 0.75, y0 = (H - sh) / 2;
+            top = R(W / 2 - sw, y0, W / 2, y0 + sh);
+            bottom = R(W / 2, y0, W / 2 + sw, y0 + sh);
         }
+        CGFloat mb = 34, pad = 6;
+        menu = R(W - pad - mb, pad, W - pad, pad + mb);
+        ffwd = CGRectMake(-100, -100, 0, 0);
+        dpadR = 0; dpadX = dpadY = abxyX = abxyY = -1000; btnR = abxyR = 0;
+        l = r = start = select = CGRectMake(-100, -100, 0, 0);
+    }
+
+    void phonePortrait(CGFloat W, CGFloat H)
+    {
+        CGFloat minCtrl = 230, sw = W, sh = sw * 0.75;
+        if (sh * 2 > H - minCtrl) { sh = MAX((H - minCtrl) / 2, H * 0.3); sw = sh / 0.75; }
+        CGFloat x0 = (W - sw) / 2;
+        top = R(x0, 0, x0 + sw, sh);
+        bottom = R(x0, sh, x0 + sw, 2 * sh);
+        areaControls(0, MIN(CGRectGetMaxY(bottom), H - minCtrl), W, H);
+    }
+
+    void foldPortrait(CGFloat W, CGFloat H)
+    {
+        CGFloat half = H / 2, sh = MIN(half, W * 0.75), sw = sh / 0.75;
+        top = R((W - sw) / 2, half - sh, (W + sw) / 2, half);
+        CGFloat m = MAX(110.0, MIN(170.0, W * 0.2));
+        CGFloat bw = MIN(W - 2 * m, half / 0.75), bh = bw * 0.75;
+        bottom = R((W - bw) / 2, half, (W + bw) / 2, half + bh);
+        marginControls(half, H, 0, m, W - m, W);
+    }
+
+    void phoneLandscape(CGFloat W, CGFloat H)
+    {
+        CGFloat m = MIN(150.0, W * 0.17);
+        CGFloat sw = MIN((W - 2 * m) / 2, H / 0.75), sh = sw * 0.75, y0 = (H - sh) / 2;
+        top = R(W / 2 - sw, y0, W / 2, y0 + sh);
+        bottom = R(W / 2, y0, W / 2 + sw, y0 + sh);
+        CGFloat mm = MAX(m, 120.0);
+        marginControls(0, H, 0, mm, W - mm, W);
+    }
+
+    bool wideLandscape(CGFloat W, CGFloat H)
+    {
+        CGFloat sw = MIN(W / 2, (H - 170) / 0.75), sh = sw * 0.75;
+        if (H - sh < 150) return false;
+        top = R(W / 2 - sw, 0, W / 2, sh);
+        bottom = R(W / 2, 0, W / 2 + sw, sh);
+        areaControls(0, sh, W, H);
+        return true;
+    }
+
+    void areaControls(CGFloat x0, CGFloat y0, CGFloat x1, CGFloat y1)
+    {
+        CGFloat aw = x1 - x0, ah = y1 - y0, side = MIN(aw, ah * 2.2), pad = 18;
+        dpadR = MIN(72.0, MIN(ah * 0.36, side * 0.2));
+        btnR = dpadR * 0.36; abxyR = dpadR * 0.88;
+        CGFloat cy = y0 + ah * 0.52;
+        dpadX = x0 + pad + dpadR; dpadY = cy;
+        abxyX = x1 - pad - abxyR - btnR; abxyY = cy;
+        CGFloat lrW = 86, lrH = 34, lrY = y0 + 10;
+        l = R(x0 + pad, lrY, x0 + pad + lrW, lrY + lrH);
+        r = R(x1 - pad - lrW, lrY, x1 - pad, lrY + lrH);
+        CGFloat pillW = 64, pillH = 26, py = y1 - pad - pillH, cx = (x0 + x1) / 2;
+        select = R(cx - 8 - pillW, py, cx - 8, py + pillH);
+        start = R(cx + 8, py, cx + 8 + pillW, py + pillH);
+        CGFloat mb = 40, my = y0 + 10;
+        menu = R(cx + 6, my, cx + 6 + mb, my + mb);
+        ffwd = R(cx - 6 - mb, my, cx - 6, my + mb);
+    }
+
+    void marginControls(CGFloat y0, CGFloat y1, CGFloat lx0, CGFloat lx1, CGFloat rx0, CGFloat rx1)
+    {
+        CGFloat m = lx1 - lx0, pad = 14, ah = y1 - y0;
+        dpadR = MIN(66.0, MIN((m - pad) * 0.5, ah * 0.22));
+        btnR = dpadR * 0.36; abxyR = dpadR * 0.88;
+        CGFloat cy = y0 + ah * 0.55;
+        dpadX = lx0 + pad + dpadR + 4; dpadY = cy;
+        abxyX = rx1 - pad - abxyR - btnR; abxyY = cy;
+        CGFloat lrW = MIN(86.0, m - 2 * pad), lrH = 34, t = y0 + pad;
+        l = R(lx0 + pad, t, lx0 + pad + lrW, t + lrH);
+        r = R(rx1 - pad - lrW, t, rx1 - pad, t + lrH);
+        CGFloat pillW = MIN(64.0, m - 2 * pad), pillH = 26, b = y1 - pad - pillH;
+        select = R(lx0 + pad, b, lx0 + pad + pillW, b + pillH);
+        start = R(rx1 - pad - pillW, b, rx1 - pad, b + pillH);
+        CGFloat mb = 36, my = CGRectGetMaxY(l) + 12;
+        menu = R(rx1 - pad - mb, my, rx1 - pad, my + mb);
+        ffwd = R(lx0 + pad, my, lx0 + pad + mb, my + mb);
     }
 };
 
@@ -202,7 +274,7 @@ struct Layout
     for (UITouch* t in touches)
     {
         CGPoint p = [t locationInView:self];
-        if (CGRectContainsPoint(_layout->menu, p)) { [_delegate controlsMenu]; continue; }
+        if (CGRectContainsPoint(CGRectInset(_layout->menu, -10, -10), p)) { [_delegate controlsMenu]; continue; }
         if (_showButtons && CGRectContainsPoint(CGRectInset(_layout->ffwd, -8, -8), p))
         {
             _ffwdOn = !_ffwdOn; [_delegate controlsFastForward:_ffwdOn]; [self setNeedsDisplay]; continue;
@@ -284,11 +356,11 @@ struct Layout
     Layout& L = *_layout;
     CGFloat a = _opacity;
 
-    // menu button
-    [self styleFill:NO alpha:MAX(a, 0.55) ctx:c];
+    // menu button (full screen: a quiet chip in the corner)
+    [self styleFill:NO alpha:(_showButtons ? MAX(a, 0.55) : 0.37) ctx:c];
     UIBezierPath* mp = [UIBezierPath bezierPathWithRoundedRect:L.menu cornerRadius:10];
     [mp fill]; [mp stroke];
-    CGContextSetRGBStrokeColor(c, 1, 1, 1, 0.9); CGContextSetLineWidth(c, 2.5); CGContextSetLineCap(c, kCGLineCapRound);
+    CGContextSetRGBStrokeColor(c, 1, 1, 1, _showButtons ? 0.9 : 0.6); CGContextSetLineWidth(c, 2.5); CGContextSetLineCap(c, kCGLineCapRound);
     for (int i = -1; i <= 1; i++)
     {
         CGFloat y = CGRectGetMidY(L.menu) + i * L.menu.size.height * 0.2, hw = L.menu.size.width * 0.26;
@@ -412,7 +484,7 @@ static UIColor* Accent() { return [UIColor colorWithRed:0.29 green:0.64 blue:1.0
                 @{@"type": @"switch", @"key": @"hdText", @"label": @"HD text and menus"}],
               @"footer": @"Turn HD improvements off to play exactly like the original DS (you can also switch it from the in-game menu to compare). Card art uses the HDCards folder next to the game."},
             @{@"title": @"Controls", @"rows": @[
-                @{@"type": @"switch", @"key": @"buttons", @"label": @"On-screen buttons"},
+                @{@"type": @"switch", @"key": @"buttons", @"label": @"On-screen buttons (off = full screen)"},
                 @{@"type": @"seg", @"key": @"opacity", @"label": @"Button opacity", @"items": @[@"25%", @"40%", @"55%", @"75%", @"95%"], @"values": @[@0.25f, @0.4f, @0.55f, @0.75f, @0.95f]},
                 @{@"type": @"switch", @"key": @"haptics", @"label": @"Vibration"}],
               @"footer": @"Game controllers (Xbox, PlayStation, MFi) work as well."},
@@ -760,6 +832,14 @@ static std::atomic<bool> gMuted{false};
     _paused = YES;
     UIAlertController* m = [UIAlertController alertControllerWithTitle:_rom.lastPathComponent.stringByDeletingPathExtension message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak GameViewController* me = self;
+    BOOL full = ![Prefs() boolForKey:@"buttons"];
+    [m addAction:[UIAlertAction actionWithTitle:(full ? @"Exit full screen" : @"Full screen (hide buttons)") style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
+        GameViewController* g = me;
+        if (!g) return;
+        [Prefs() setBool:full forKey:@"buttons"];
+        [NSNotificationCenter.defaultCenter postNotificationName:kSettingsChanged object:@"buttons"];
+        [g resume];
+    }]];
     [m addAction:[UIAlertAction actionWithTitle:@"Save state" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:YES]; }]];
     [m addAction:[UIAlertAction actionWithTitle:@"Load state" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) { [me stateMenu:NO]; }]];
     if (wc09_is_hd_game())

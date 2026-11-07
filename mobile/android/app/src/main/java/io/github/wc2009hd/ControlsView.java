@@ -106,7 +106,7 @@ final class ControlsView extends View {
         switch (action) {
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_POINTER_DOWN: {
-                if (layout.menu.contains(x, y)) { listener.onMenu(); return true; }
+                if (grow(layout.menu).contains(x, y)) { listener.onMenu(); return true; }
                 if (showButtons && grow(layout.ffwd).contains(x, y)) {
                     ffwdOn = !ffwdOn; listener.onFastForward(ffwdOn); invalidate(); return true;
                 }
@@ -236,12 +236,13 @@ final class ControlsView extends View {
 
     private void drawMenuButton(Canvas c, int a) {
         RectF m = layout.menu;
-        setFill(false, Math.max(a, 140));
+        int ma = showButtons ? Math.max(a, 140) : 95;   // full screen: a quiet chip in the corner
+        setFill(false, ma);
         c.drawRoundRect(m, 10 * dp, 10 * dp, fill);
-        stroke.setAlpha(Math.max(a, 140));
+        stroke.setAlpha(ma);
         c.drawRoundRect(m, 10 * dp, 10 * dp, stroke);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(0xFFFFFFFF); p.setAlpha(230); p.setStrokeWidth(2.5f * dp); p.setStrokeCap(Paint.Cap.ROUND);
+        p.setColor(0xFFFFFFFF); p.setAlpha(showButtons ? 230 : 150); p.setStrokeWidth(2.5f * dp); p.setStrokeCap(Paint.Cap.ROUND);
         float w = m.width() * 0.26f;
         for (int i = -1; i <= 1; i++) {
             float y = m.centerY() + i * m.height() * 0.2f;

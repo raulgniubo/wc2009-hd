@@ -455,12 +455,21 @@ public final class MainActivity extends Activity
         if (game == null || settings != null) return;
         game.setPaused(true);
         boolean hdGame = Native.isHdGame(), hd = SettingsView.on(prefs, "hdAll");
+        boolean full = !SettingsView.on(prefs, "buttons");
+        String fs = full ? "Exit full screen" : "Full screen (hide buttons)";
         String[] items = hdGame
-                ? new String[] {"Save state", "Load state", hd ? "Switch to original look" : "Switch to HD look", "Settings", "Restart from in-game save", "Back to library"}
-                : new String[] {"Save state", "Load state", "Settings", "Restart from in-game save", "Back to library"};
+                ? new String[] {fs, "Save state", "Load state", hd ? "Switch to original look" : "Switch to HD look", "Settings", "Restart from in-game save", "Back to library"}
+                : new String[] {fs, "Save state", "Load state", "Settings", "Restart from in-game save", "Back to library"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(currentRom != null ? currentRom.getName().replaceAll("\\.nds$", "") : "Menu")
                 .setItems(items, (d, which) -> {
+                    if (which == 0) {
+                        prefs.edit().putBoolean("buttons", full).apply();
+                        settingChanged("buttons");
+                        game.setPaused(false);
+                        return;
+                    }
+                    which--;
                     if (hdGame) {
                         if (which == 2) {
                             prefs.edit().putBoolean("hdAll", !hd).apply();
