@@ -22,7 +22,7 @@ final class SettingsView extends LinearLayout {
     static int scale(SharedPreferences p) { return p.getInt("scale", 4); }
     static boolean on(SharedPreferences p, String key) {
         switch (key) {
-            case "hdAll": case "jit": case "filter": case "smooth2d": case "hdCards": case "hdText": case "buttons":
+            case "boxart": case "hdAll": case "jit": case "filter": case "smooth2d": case "hdCards": case "hdText": case "buttons":
             case "haptics": case "resume": case "sound": return p.getBoolean(key, true);
             default: return p.getBoolean(key, false);
         }
@@ -138,7 +138,9 @@ final class SettingsView extends LinearLayout {
         pf.addView(toggle("jit", "Fast CPU mode (JIT)", "Much faster emulation. Turned off by itself if the app ever crashes with it. Applies the next time a game starts."));
 
         // ---- storage
-        LinearLayout st = section("Games folder");
+        LinearLayout st = section("Library");
+        st.addView(toggle("boxart", "Download box art", "Shows each game's real box art, downloaded once from GameTDB. Your own covers always come first."));
+        st.addView(Ui.divider(c));
         TextView path = Ui.text(c, folder, 14, Ui.TEXT_DIM, false);
         path.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 6));
         st.addView(path);

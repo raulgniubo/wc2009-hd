@@ -315,7 +315,7 @@ public final class MainActivity extends Activity
         items.add(g.favorite ? "Remove from favorites" : "Add to favorites");
         acts.add(() -> { prefs.edit().putBoolean("fav:" + g.rom.getName(), !g.favorite).apply(); library.load(gameDir()); });
         items.add("Change cover…"); acts.add(() -> pickCover(g));
-        if (g.cover != null) { items.add("Use game icon"); acts.add(() -> { removeCovers(g); library.load(gameDir()); }); }
+        if (g.cover != null) { items.add("Use default cover"); acts.add(() -> { removeCovers(g); library.load(gameDir()); }); }
         items.add("Rename…"); acts.add(() -> rename(g));
         if (g.resume) {
             items.add("Remove resume point");

@@ -445,7 +445,7 @@ static void PostChange(NSString* key) { [NSNotificationCenter.defaultCenter post
 static void RegisterDefaults()
 {
     [Prefs() registerDefaults:@{
-        @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
+        @"boxart": @YES, @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
         @"buttons": @YES, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
     }];
 }
@@ -904,6 +904,8 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
             } copy]}];
         }
         [lib addObject:@{@"type": @"action", @"title": @"Add Games Folder…", @"action": [^(UIViewController* vc) { [FolderPicker presentFrom:vc]; } copy]}];
+        [lib addObject:@{@"type": @"switch", @"key": @"boxart", @"title": @"Download Box Art", @"symbol": @"photo.on.rectangle.angled", @"color": RGB(0xA855F7),
+                         @"detail": @"Shows each game's real box art, downloaded once from GameTDB. Your own covers always come first."}];
         return @[
             @{@"title": @"Library", @"rows": lib,
               @"footer": @"Pick a folder in Files (On My iPhone, iCloud Drive, a USB drive…) and every game in it shows up in your Library, with its saves kept next to it. Games you import go into Dual HD's own folder."},
@@ -1503,6 +1505,65 @@ static NSArray<NSString*>* CoverCandidates(NSString* dir, NSString* base)
     return a;
 }
 
+// ---- box art: downloaded once from GameTDB by the game's 4-letter code, kept in Application Support
+
+static NSString* BoxArtDir()
+{
+    NSString* d = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"boxart"];
+    [NSFileManager.defaultManager createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+    return d;
+}
+static NSString* BoxArtPath(NSString* code) { return [[BoxArtDir() stringByAppendingPathComponent:code] stringByAppendingPathExtension:@"jpg"]; }
+static NSString* const kBoxArtLoaded = @"WC09BoxArtLoaded";
+
+static NSArray<NSString*>* BoxArtRegions(NSString* code)
+{
+    NSDictionary* m = @{@"E": @"US", @"P": @"EN", @"J": @"JA", @"D": @"DE", @"F": @"FR", @"S": @"ES", @"I": @"IT", @"K": @"KO", @"U": @"AU", @"H": @"NL", @"X": @"EN", @"Y": @"EN"};
+    NSString* r = code.length >= 4 ? m[[code substringWithRange:NSMakeRange(3, 1)]] : nil;
+    NSMutableArray* a = [NSMutableArray array];
+    if (r) [a addObject:r];
+    for (NSString* x in @[@"US", @"EN", @"JA"]) if (![a containsObject:x]) [a addObject:x];
+    return a;
+}
+
+// tries each URL in turn until one gives a picture
+static void TryBoxArt(NSString* code, NSArray<NSURL*>* urls, NSUInteger i)
+{
+    if (i >= urls.count)
+    {
+        [Prefs() setDouble:NSDate.date.timeIntervalSince1970 forKey:[@"boxartMiss:" stringByAppendingString:code]];
+        return;
+    }
+    [[NSURLSession.sharedSession dataTaskWithURL:urls[i] completionHandler:^(NSData* data, NSURLResponse* resp, NSError* err) {
+        UIImage* im = data ? [UIImage imageWithData:data] : nil;
+        if (!err && [(NSHTTPURLResponse*)resp statusCode] == 200 && im && im.size.width >= 64)
+        {
+            [UIImageJPEGRepresentation(im, 0.92) writeToFile:BoxArtPath(code) atomically:YES];
+            dispatch_async(dispatch_get_main_queue(), ^{ [NSNotificationCenter.defaultCenter postNotificationName:kBoxArtLoaded object:code]; });
+            return;
+        }
+        TryBoxArt(code, urls, i + 1);
+    }] resume];
+}
+
+static void FetchBoxArt(NSString* code)
+{
+    static NSMutableSet* busy;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ busy = [NSMutableSet set]; });
+    if (code.length != 4 || ![Prefs() boolForKey:@"boxart"]) return;
+    @synchronized (busy) { if ([busy containsObject:code]) return; [busy addObject:code]; }
+    // a code that wasn't found is tried again after a week
+    double missed = [Prefs() doubleForKey:[@"boxartMiss:" stringByAppendingString:code]];
+    if (missed > 0 && NSDate.date.timeIntervalSince1970 - missed < 7 * 86400) return;
+
+    NSMutableArray<NSURL*>* urls = [NSMutableArray array];
+    for (NSString* region in BoxArtRegions(code))
+        for (NSString* kind in @[@"coverHQ/%@/%@.jpg", @"coverM/%@/%@.jpg", @"cover/%@/%@.jpg", @"coverS/%@/%@.png"])
+            [urls addObject:[NSURL URLWithString:[@"https://art.gametdb.com/ds/" stringByAppendingFormat:kind, region, code]]];
+    TryBoxArt(code, urls, 0);
+}
+
 static GameEntry* LoadEntry(NSString* path)
 {
     GameEntry* g = [GameEntry new];
@@ -1546,6 +1607,12 @@ static GameEntry* LoadEntry(NSString* path)
         g.cover = k < 1 ? [im imageByPreparingThumbnailOfSize:CGSizeMake(im.size.width * k, im.size.height * k)] : im;
         if (!g.cover) g.cover = im;
         break;
+    }
+    if (!g.cover && g.code.length == 4)
+    {
+        UIImage* im = [UIImage imageWithContentsOfFile:BoxArtPath(g.code)];
+        if (im) g.cover = im;
+        else FetchBoxArt(g.code);
     }
     g.resume = [NSFileManager.defaultManager fileExistsAtPath:[[dir stringByAppendingPathComponent:@"Saves"] stringByAppendingPathComponent:[g.base stringByAppendingString:@".ml0"]]];
     g.lastPlayed = [Prefs() doubleForKey:[@"played:" stringByAppendingString:g.file]];
@@ -1785,6 +1852,14 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
     self.collectionView.refreshControl = rc;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:UISceneDidActivateNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:kSettingsChanged object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(boxArtLoaded) name:kBoxArtLoaded object:nil];
+}
+
+// several covers arrive together: reload once
+- (void)boxArtLoaded
+{
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(reload) object:nil];
+    [self performSelector:@selector(reload) withObject:nil afterDelay:0.3];
 }
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self reload]; }
@@ -2027,7 +2102,7 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
         UIMenu* cover = [UIMenu menuWithTitle:@"Change Cover" image:[UIImage systemImageNamed:@"photo"] identifier:nil options:0 children:@[
             [UIAction actionWithTitle:@"From Photos" image:[UIImage systemImageNamed:@"photo.on.rectangle"] identifier:nil handler:^(UIAction*) { [me pickCoverFromPhotos:g]; }],
             [UIAction actionWithTitle:@"From Files" image:[UIImage systemImageNamed:@"folder"] identifier:nil handler:^(UIAction*) { [me pickCoverFromFiles:g]; }],
-            [UIAction actionWithTitle:@"Use Game Icon" image:[UIImage systemImageNamed:@"arrow.uturn.backward"] identifier:nil handler:^(UIAction*) { [me removeCover:g]; }],
+            [UIAction actionWithTitle:@"Use Default Cover" image:[UIImage systemImageNamed:@"arrow.uturn.backward"] identifier:nil handler:^(UIAction*) { [me removeCover:g]; }],
         ]];
         UIAction* rename = [UIAction actionWithTitle:@"Rename" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction*) { [me rename:g]; }];
         NSMutableArray* more = [NSMutableArray arrayWithObjects:fav, cover, rename, nil];

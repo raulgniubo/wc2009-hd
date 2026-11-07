@@ -193,6 +193,46 @@ final class LibraryView extends LinearLayout {
         return card;
     }
 
+    private static final java.util.Set<String> fetching = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+    /** Box art from GameTDB by the game's 4-letter code (tried again after a week if not found). */
+    private void fetchBoxArt(String code, File out) {
+        long missed = prefs.getLong("boxartMiss:" + code, 0);
+        if (missed > 0 && System.currentTimeMillis() - missed < 7L * 86400 * 1000) return;
+        if (!fetching.add(code)) return;
+        String region;
+        switch (code.charAt(3)) {
+            case 'E': region = "US"; break; case 'J': region = "JA"; break; case 'D': region = "DE"; break;
+            case 'F': region = "FR"; break; case 'S': region = "ES"; break; case 'I': region = "IT"; break;
+            case 'K': region = "KO"; break; case 'U': region = "AU"; break; case 'H': region = "NL"; break;
+            default: region = "EN";
+        }
+        java.util.LinkedHashSet<String> regions = new java.util.LinkedHashSet<>(java.util.Arrays.asList(region, "US", "EN", "JA"));
+        new Thread(() -> {
+            for (String r : regions)
+                for (String kind : new String[] {"coverHQ/%s/%s.jpg", "coverM/%s/%s.jpg", "cover/%s/%s.jpg", "coverS/%s/%s.png"}) {
+                    try {
+                        java.net.HttpURLConnection con = (java.net.HttpURLConnection) new java.net.URL("https://art.gametdb.com/ds/" + String.format(kind, r, code)).openConnection();
+                        con.setConnectTimeout(8000); con.setReadTimeout(15000);
+                        if (con.getResponseCode() != 200) { con.disconnect(); continue; }
+                        Bitmap bm;
+                        try (java.io.InputStream in = con.getInputStream()) { bm = BitmapFactory.decodeStream(in); }
+                        con.disconnect();
+                        if (bm == null || bm.getWidth() < 64) continue;
+                        out.getParentFile().mkdirs();
+                        try (java.io.FileOutputStream os = new java.io.FileOutputStream(out)) { bm.compress(Bitmap.CompressFormat.JPEG, 92, os); }
+                        fetching.remove(code);
+                        post(() -> { removeCallbacks(reloadSoon); postDelayed(reloadSoon, 300); });
+                        return;
+                    } catch (Exception ignored) {}
+                }
+            prefs.edit().putLong("boxartMiss:" + code, System.currentTimeMillis()).apply();
+            fetching.remove(code);
+        }).start();
+    }
+
+    private final Runnable reloadSoon = () -> { if (!dir.isEmpty()) load(dir); };
+
     /** Rescans the folder (call after playing, to update the order and the resume badges). */
     void load(String folder) {
         dir = folder;
@@ -236,6 +276,12 @@ final class LibraryView extends LinearLayout {
             g.icon = Bitmap.createBitmap(px, 32, 32, Bitmap.Config.ARGB_8888);
             g.tint = averageColor(px);
             g.cover = loadCover(folder, g.base);
+            String code = Native.romCode(f.getAbsolutePath());
+            if (g.cover == null && code != null && code.length() == 4) {
+                File art = new File(getContext().getFilesDir(), "boxart/" + code + ".jpg");
+                if (art.exists()) g.cover = BitmapFactory.decodeFile(art.getAbsolutePath());
+                else if (prefs.getBoolean("boxart", true)) fetchBoxArt(code, art);
+            }
             g.resume = new File(folder + "/Saves/" + g.base + ".ml0").exists();
             g.lastPlayed = prefs.getLong("played:" + n, 0);
             out.add(g);
