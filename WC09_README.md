@@ -19,32 +19,37 @@ the fork recognizes what the game draws and swaps in HD versions.
 | Smooth 2D graphics (everything else 2D) | xBR-style edge-directed upscaling of 2D layers and sprites | Smooth 2D graphics |
 | Sharp 3D | OpenGL renderer at 4x by default | Config > Video |
 
-Defaults are set for the best look: OpenGL renderer at 4x, OpenGL display, screens side by side.
+## The apps
+Dual HD runs on Mac, Windows, iPhone/iPad and Android, all on the same emulator core
+(`mobile/core`, OpenGL ES on phones, desktop OpenGL through glad on computers):
+- **Mac / Windows**: `desktop/` (Qt 6 + SDL 2). Builds: Actions > macOS / Windows > Artifacts.
+- **iPhone / iPad**: `mobile/ios`. **Android**: `mobile/android`.
 
-## Use it
-1. Download the latest macOS build: **Actions > macOS (Apple Silicon) > latest run > Artifacts**.
-2. Unzip, then right-click `melonDS.app` > Open the first time (ad-hoc signed).
-3. Put your ROM in a folder with an `HDCards` folder next to it:
-   - `bash get_hd_cards.sh` fills it with the full card images (by passcode, from YGOPRODeck).
-   - Unzip the HD pack (battle images, menus, portraits, game-only cards) into the same folder.
+Each game with an HD pack offers four looks: **HD** (everything in high resolution, original look),
+**HD + Redesign**, **HD Cards** and **Original**.
 
-Layout of `HDCards/`:
-- `<passcode>.jpg` - card faces; `card_<index>.jpg` for game-only cards without a passcode; `cardback.png` for the card back.
-- `BattleMonsterR1/<id>_r.png`, `BattleMonsterR2/...`, `BattleMonsterL1/...`, `BattleMonsterL2/...` -
-  battle images. Left-facing images that are just mirrors fall back to the right-facing file.
-- `tex3d/<hash>.png` for 3D textures (hash = XXH64 of the decoded texels; `WC09_DUMP3D=<dir>` dumps them).
-- `<set>/<name>.png` for menus and sprites, e.g. `DCustom/dcus_menu_bg01.png`, `BustupR/bu001_r_c0.png`.
-- Anything missing simply shows the original graphics.
+## The HD pack
+A folder next to the ROM with a `pack.json` (`"game": "CY8"`):
+- `cards/` - card faces: `<passcode>.jpg`, `card_<index>.jpg` for game-only cards, `cardback.png`.
+- `hd/` - HD pictures that keep the original look: `BattleMonsterR1/<id>_r.png` (left-facing ones
+  fall back to the mirrored right-facing file), `tex3d/<hash>.png` (XXH64 of the decoded texels),
+  `<set>/<name>.png` for menus and sprites.
+- `redesign/` - the modern redesign, used only in "HD + Redesign" (it wins over `hd/` there):
+  `tex3d/s_<hash>[_<hue><level>].png` keyed by texture structure, `duel2d/`, `janken/`, `tiles/`.
+- `data/cardtable.bin` - which texture is which card (made from the ROM by `wc09/tools`).
+- Anything missing simply shows the original graphics. `wc09/pack/make_pack.py` turns an older
+  `HDCards` folder into this layout.
 
 ## Layout of the code
-- `src/WC09Cards.*`: identifies card textures (XXH64 over texel data, table in `WC09CardTable.h`)
+- `src/WC09Cards.*`: identifies card textures (XXH64 over texel data, table from the pack's `data/cardtable.bin`)
   and 2D card faces; records each card's screen quad.
 - `src/WC09Battle.*`: indexes the ROM's background image sets at load, recognizes them per frame,
   card text from the ROM's card database.
 - `src/WC09Sprites.*`: sprite tile index and per-sprite identification. `src/WC09Rom.h`: ROM/.pac/LZ helpers.
 - `src/GPU2D_OpenGL.cpp`, `OpenGL_shaders/2DCompositorFS.glsl`, `2DSpriteFS.glsl`: HD background
   sampling, text panel, xBR smoothing.
-- `src/frontend/qt_sdl/WC09Overlay.*`, `Screen.cpp`: HD card overlay, text panel rendering, image loading.
+- `mobile/core`: the shared emulator core and its C API (`wc09_core.h`), HD pack loading, text panels.
+- `desktop/`: Dual HD for Mac and Windows. `mobile/ios`, `mobile/android`: the phone apps.
 - `wc09/tools`: ROM research tools; `wc09/research/FINDINGS.md`: verified facts about the game's assets.
 
 ## Known gaps

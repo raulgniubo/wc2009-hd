@@ -34,7 +34,7 @@ Add games
 
   From the Mac: with the iPhone plugged in, open Finder, click the iPhone in the sidebar,
   open the "Files" tab, and drag your .nds files onto "Dual HD". For Yu-Gi-Oh! 5D's WC2009
-  also drag its HDCards folder (next to the .nds). Folders with a game inside work too.
+  also drag its WC2009-HD folder (next to the .nds). Folders with a game inside work too.
 
   Or on the iPhone: Files app > On My iPhone > Dual HD.
 
