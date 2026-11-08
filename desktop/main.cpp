@@ -1,5 +1,4 @@
 // Dual HD for Mac and Windows.
-#include "GL.h"
 #include "MainWindow.h"
 #include "App.h"
 #include "Pads.h"

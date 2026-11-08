@@ -1,4 +1,4 @@
-#include "GL.h"   // before any Qt OpenGL header
+#include "GameGL.h"
 #include "GameView.h"
 #include "App.h"
 #include "Pads.h"
@@ -51,7 +51,7 @@ void GameView::start(const QString& romPath, bool fresh)
 
 void GameView::initializeGL()
 {
-    gladLoadGLLoader([](const char* name) -> void* {
+    gamegl::Load([](const char* name) -> void* {
         return (void*)QOpenGLContext::currentContext()->getProcAddress(name);
     });
     GLReady = true;
@@ -283,17 +283,12 @@ void GameView::paintGL()
     const int W = (int)std::round(width() * dpr), H = (int)std::round(height() * dpr);
     if (Running) runFrames();
     qint64 d0 = Clock.nsecsElapsed();
-    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
-    glViewport(0, 0, W, H);
-    glDisable(GL_SCISSOR_TEST);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
+    gamegl::Clear(defaultFramebufferObject(), W, H);
     if (!Running) return;
     computeLayout(W, H);
     if (TopRect.isValid()) wc09_draw_screen(0, TopRect.x(), TopRect.y(), TopRect.width(), TopRect.height(), W, H);
     if (BottomRect.isValid()) wc09_draw_screen(1, BottomRect.x(), BottomRect.y(), BottomRect.width(), BottomRect.height(), W, H);
-    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+    gamegl::Bind(defaultFramebufferObject());
     DrawSum += (Clock.nsecsElapsed() - d0) / 1e6; DrawCount++;
 
     // the app's side for the debug report

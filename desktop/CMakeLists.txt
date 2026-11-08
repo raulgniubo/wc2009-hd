@@ -13,7 +13,7 @@ pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(SOURCES main.cpp App.cpp MainWindow.cpp Library.cpp GameView.cpp SettingsDialog.cpp PauseMenu.cpp Pads.cpp res/dualhd.qrc)
+set(SOURCES main.cpp App.cpp MainWindow.cpp Library.cpp GameView.cpp GameGL.cpp SettingsDialog.cpp PauseMenu.cpp Pads.cpp res/dualhd.qrc)
 
 if (APPLE)
     set(ICON ${CMAKE_CURRENT_SOURCE_DIR}/res/icon.icns)
