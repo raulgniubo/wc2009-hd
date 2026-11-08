@@ -20,7 +20,7 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QUrl>
-#include <QNetworkReply>
+#include "Http.h"
 #include <QRegularExpression>
 #include <QTextDocument>
 #include <QStandardPaths>
@@ -37,15 +37,44 @@ static QString CoverDir() { QString d = app::DataDir() + "/covers"; QDir().mkpat
 
 static QFont TitleFont() { QFont f; f.setPixelSize(13); f.setWeight(QFont::Medium); return f; }
 
-// "STARDUST ACCELERATOR" -> "Stardust Accelerator" (banner titles are often in capitals)
+// "Yu-Gi-Oh! 5D's STARDUST ACCELERATOR" -> "Yu-Gi-Oh! 5D's Stardust Accelerator": words longer than
+// three letters in capitals get title case (same as the phone apps)
 static QString Pretty(QString t)
 {
-    t = t.simplified();
-    bool caps = t == t.toUpper() && t != t.toLower();
-    if (!caps) return t;
-    QStringList w = t.toLower().split(' ');
-    for (QString& x : w) if (!x.isEmpty()) x[0] = x[0].toUpper();
+    QStringList w = t.simplified().split(' ');
+    for (QString& x : w)
+        if (x.size() > 3 && x == x.toUpper() && x != x.toLower()) x = x.left(1) + x.mid(1).toLower();
     return w.join(' ');
+}
+
+// a lookup that found nothing is tried again after a week
+static bool RecentlyMissed(const QString& key)
+{
+    qint64 t = app::S().value(key).toLongLong();
+    return t > 0 && QDateTime::currentSecsSinceEpoch() - t < 7 * 86400;
+}
+
+static QStringList ArtRegions(const QString& code)
+{
+    static const QHash<QChar, QString> m = {{'E', "US"}, {'P', "EN"}, {'J', "JA"}, {'D', "DE"}, {'F', "FR"}, {'S', "ES"},
+                                            {'I', "IT"}, {'K', "KO"}, {'U', "AU"}, {'H', "NL"}, {'X', "EN"}, {'Y', "EN"}};
+    QStringList r;
+    if (code.size() >= 4 && m.contains(code[3])) r << m[code[3]];
+    for (const char* x : {"US", "EN", "JA"}) if (!r.contains(x)) r << x;
+    return r;
+}
+
+static QString HtmlText(QString s)
+{
+    s.remove(QRegularExpression("<[^>]+>"));
+    QTextDocument d; d.setHtml(s);
+    return d.toPlainText().simplified();
+}
+
+static QString FirstMatch(const QString& html, const QString& re)
+{
+    QRegularExpressionMatch m = QRegularExpression(re, QRegularExpression::DotMatchesEverythingOption | QRegularExpression::CaseInsensitiveOption).match(html);
+    return m.hasMatch() ? HtmlText(m.captured(1)) : QString();
 }
 
 static void ScanFolder(const QString& dir, QList<GameEntry>& out, int depth)
@@ -444,24 +473,26 @@ void Library::fetchArt(int idx)
     if (!app::On("boxart") || g.Code.size() != 4 || !g.Cover.isNull()) return;
     QString code = g.Code;
     QString out = ArtDir() + "/" + code + ".png";
-    if (QFileInfo::exists(out) || app::S().value("noart/" + code).toBool()) return;
+    if (QFileInfo::exists(out) || RecentlyMissed("artMiss/" + code) || Busy.contains("a" + code)) return;
+    Busy.insert("a" + code);
     QStringList urls;
-    for (const QString& kind : {"coverM", "cover"})
-        for (const QString& reg : {Region(code), QString("EN"), QString("US")})
-            urls << QString("https://art.gametdb.com/ds/%1/%2/%3.png").arg(kind, reg, code);
-    urls.removeDuplicates();
+    for (const QString& reg : ArtRegions(code))
+        for (const char* kind : {"coverHQ/%1/%2.jpg", "coverM/%1/%2.jpg", "cover/%1/%2.jpg", "coverS/%1/%2.png"})
+            urls << "https://art.gametdb.com/ds/" + QString(kind).arg(reg, code);
     auto tryNext = std::make_shared<std::function<void(int)>>();
     *tryNext = [this, urls, out, code, tryNext](int n) {
-        if (n >= urls.size()) { app::S().setValue("noart/" + code, true); return; }
-        QNetworkRequest rq{QUrl(urls[n])};
-        rq.setHeader(QNetworkRequest::UserAgentHeader, "DualHD/1.0");
-        QNetworkReply* r = Net.get(rq);
-        connect(r, &QNetworkReply::finished, this, [this, r, n, out, code, tryNext] {
-            r->deleteLater();
+        if (n >= urls.size())
+        {
+            app::S().setValue("artMiss/" + code, QDateTime::currentSecsSinceEpoch());
+            Busy.remove("a" + code);
+            return;
+        }
+        http::Get(urls[n], this, [this, n, out, code, tryNext](int status, const QByteArray& body) {
             QImage img;
-            if (r->error() == QNetworkReply::NoError) img.loadFromData(r->readAll());
-            if (img.isNull()) { (*tryNext)(n + 1); return; }
+            if (status == 200) img.loadFromData(body);
+            if (img.isNull() || img.width() < 64) { (*tryNext)(n + 1); return; }
             img.save(out);
+            Busy.remove("a" + code);
             for (GameEntry& g : Model->All) if (g.Code == code && g.Cover.isNull()) loadCover(g);
             Grid->viewport()->update();
         });
@@ -472,24 +503,27 @@ void Library::fetchArt(int idx)
 void Library::fetchInfo(int idx)
 {
     const GameEntry& g = Model->All[idx];
-    if (g.Code.size() != 4 || app::S().contains("tdb/" + g.Code)) return;
+    if (!app::On("boxart") || g.Code.size() != 4 || app::S().contains("tdb/" + g.Code)) return;
     QString code = g.Code;
-    QNetworkRequest rq{QUrl("https://www.gametdb.com/DS/" + code)};
-    rq.setHeader(QNetworkRequest::UserAgentHeader, "DualHD/1.0");
-    QNetworkReply* r = Net.get(rq);
-    connect(r, &QNetworkReply::finished, this, [this, r, code] {
-        r->deleteLater();
-        if (r->error() != QNetworkReply::NoError) return;
-        QString html = QString::fromUtf8(r->readAll());
-        auto match = [&](const QString& re) {
-            QRegularExpressionMatch m = QRegularExpression(re, QRegularExpression::DotMatchesEverythingOption | QRegularExpression::CaseInsensitiveOption).match(html);
-            if (!m.hasMatch()) return QString();
-            QTextDocument d; d.setHtml(m.captured(1));
-            return d.toPlainText().simplified();
-        };
-        QString title = match("title \\(EN\\)\\s*</t[dh]>\\s*<td[^>]*>(.*?)</td>");
-        QString pub = match("publisher\\s*</t[dh]>\\s*<td[^>]*>(.*?)</td>");
-        if (title.isEmpty()) return;
+    if (RecentlyMissed("tdbMiss/" + code) || Busy.contains("i" + code)) return;
+    Busy.insert("i" + code);
+    http::Get("https://www.gametdb.com/DS/" + code, this, [this, code](int status, const QByteArray& body) {
+        Busy.remove("i" + code);
+        QString title, pub;
+        if (status == 200)
+        {
+            QString html = QString::fromUtf8(body);
+            title = FirstMatch(html, "title \\(EN\\)\\s*</t[dh]>\\s*<td[^>]*>(.*?)</td>");
+            if (title.isEmpty())
+            {
+                QString t = FirstMatch(html, "<title>(.*?)</title>");
+                int d = t.indexOf(" - "); if (d >= 0) t = t.mid(d + 3);
+                int bar = t.indexOf(" | "); if (bar >= 0) t = t.left(bar);
+                if (!t.isEmpty() && !t.contains("gametdb", Qt::CaseInsensitive)) title = t;
+            }
+            pub = FirstMatch(html, "publisher\\s*</t[dh]>\\s*<td[^>]*>(.*?)</td>");
+        }
+        if (title.isEmpty()) { app::S().setValue("tdbMiss/" + code, QDateTime::currentSecsSinceEpoch()); return; }
         app::S().setValue("tdb/" + code, title + "\n" + pub);
         for (GameEntry& g : Model->All)
             if (g.Code == code && app::S().value(Key("name", g.File)).toString().isEmpty()) g.Title = title;

@@ -2,10 +2,10 @@
 // covers and names, favourites first, sorted by recently played, name or a custom order.
 #pragma once
 #include <QWidget>
+#include <QSet>
 #include <QImage>
 #include <QAbstractListModel>
 #include <QStyledItemDelegate>
-#include <QNetworkAccessManager>
 
 class QListView;
 class QLineEdit;
@@ -72,6 +72,7 @@ private:
     void relayout();
     void contextMenu(const QPoint& at);
     void fetchInfo(int idx);
+    QSet<QString> Busy;   // codes with a download under way
     void fetchArt(int idx);
     void applySort();
     void loadCover(GameEntry& g);
@@ -83,5 +84,4 @@ private:
     QStackedWidget* Stack;
     QToolButton* SortBtn;
     QLabel* Count;
-    QNetworkAccessManager Net;
 };
