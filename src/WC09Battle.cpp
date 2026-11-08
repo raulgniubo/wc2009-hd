@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <unordered_set>
 #include <atomic>
 #include <thread>
 #include <memory>
@@ -633,12 +634,56 @@ std::atomic<int> BadgeX0[2], BadgeY0[2], BadgeX1[2], BadgeY1[2];
 
 bool LpPanelShown(int engine) { return LpBand[engine & 1].On; }
 
+void ReleaseROM()
+{
+    // the background indexer reads the ROM: it has to finish before the ROM goes away
+    if (Indexer.T.joinable()) Indexer.T.join();
+    IndexedROM = nullptr;
+    IndexReady = false;
+}
+
+bool IsRedesignName(const std::string& name)
+{
+    static const std::unordered_set<std::string> names = {
+#include "WC09Redesign.inc"
+    };
+    // pictures drawn by the app itself in a modern style, and redesigns keyed by texture structure
+    static const char* const kMade[] = {"lppanel/", "statpanel/", "decktext/", "deckname/", "textpanel/",
+                                        "tex3d/s_", "tex3d/h_", "tex3d/phase_", "tex3d/corner_"};
+    for (const char* m : kMade) if (name.compare(0, strlen(m), m) == 0) return true;
+    return names.count(name) > 0;
+}
+
+std::string FaithfulName(const std::string& name)
+{
+    if (GetRedesignEnabled() || !IsRedesignName(name)) return name;
+    // the HD pack keeps an HD version that looks like the original for some of them
+    if (name.compare(0, 6, "tex3d/") == 0 && name.compare(0, 8, "tex3d/s_") != 0 && name.compare(0, 8, "tex3d/h_") != 0 &&
+        name.compare(0, 12, "tex3d/phase_") != 0 && name.compare(0, 13, "tex3d/corner_") != 0)
+        return "orig/" + name;
+    if (name.find('/') != std::string::npos && name.compare(0, 6, "tex3d/") != 0 &&
+        name.compare(0, 8, "lppanel/") != 0 && name.compare(0, 10, "statpanel/") != 0 && name.compare(0, 9, "decktext/") != 0 &&
+        name.compare(0, 9, "deckname/") != 0 && name.compare(0, 10, "textpanel/") != 0)
+        return "orig/" + name;
+    return "";
+}
+
 bool HDImageAllowed(int image)
 {
     if (image < 0) return false;
     if (IsCardImage(image) || IsCardSet(image)) return GetHDCardsEnabled();
-    if (image >= kTextPanelBase && image < kSpriteImageBase) return GetHDTextEnabled();
-    return GetHDPackEnabled();
+    if (image >= kTextPanelBase && image < kSpriteImageBase) return GetHDTextEnabled() && GetRedesignEnabled();
+    if (!GetHDPackEnabled()) return false;
+    if (GetRedesignEnabled()) return true;
+    // faithful HD: redesigned pictures only where an HD version of the original exists
+    static std::unordered_map<int, bool> cache;
+    static u32 cacheGen = 0;
+    if (cacheGen != HDSettingsGeneration()) { cache.clear(); cacheGen = HDSettingsGeneration(); }
+    auto it = cache.find(image);
+    if (it != cache.end()) return it->second;
+    bool ok = !FaithfulName(BattleImageName(image)).empty();
+    cache[image] = ok;
+    return ok;
 }
 
 bool HideSprite(int engine, int x, int y, int w, int h, bool affine)
@@ -1487,7 +1532,7 @@ void OnVBlankBattle(GPU& gpu)
 
     // life point panel: BG1 shows the gauge image -> redraw the whole panel in HD
     RectHide lpBand[2];
-    if (IndexReady && IsActive() && GetHDTextEnabled())
+    if (IndexReady && IsActive() && GetHDTextEnabled() && GetRedesignEnabled())
         for (int e = 0; e < 2; e++)
         {
             BGReplacement& rep = found[e][1];
@@ -1551,7 +1596,7 @@ void OnVBlankBattle(GPU& gpu)
         bool updated[2][4] = {};
         static const bool perf = getenv("WC09_PERF") != nullptr;
         auto tp0 = std::chrono::steady_clock::now();
-        if ((HDTilesReady || dumpNow) && IsActive() && GetHDPackEnabled())
+        if ((HDTilesReady || dumpNow) && IsActive() && GetHDPackEnabled() && GetRedesignEnabled())
             for (int e = 0; e < 2; e++)
             {
                 const GPU2D& u = e == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;

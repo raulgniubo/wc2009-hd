@@ -176,6 +176,7 @@ private:
     u32 NumIndices {}, NumEdgeIndices {};
 
     const u32 EdgeIndicesOffset = 2048 * 30;
+    u32 EdgeShift = 0;   // edge indices are uploaded right after the polygon indices
 
     int ScaleFactor {};
     bool BetterPolygons {};

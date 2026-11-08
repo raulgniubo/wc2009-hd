@@ -34,12 +34,15 @@ final class SettingsView extends LinearLayout {
         if (!p.contains("hdMode") && p.contains("hdAll") && !p.getBoolean("hdAll", true)) return 0;   // older on/off switch
         return p.getInt("hdMode", 2);
     }
-    static final String[] HD_MODES = {"Original", "HD Cards", "Full HD"};
+    static final String[] HD_MODES = {"Original", "HD Cards", "HD", "HD + Redesign"};
     static final String[] HD_MODE_DETAILS = {
         "The game exactly as on the DS. Resolution and smoothing settings still apply.",
-        "The original game, with HD art for every card. Lighter, good for older phones.",
-        "HD cards plus the redesigned panels, menus, backgrounds and 3D textures. Needs the most from your phone.",
+        "The original game with just the card art in HD. Lightest, good for older phones.",
+        "Everything in high resolution, looking just like the original: cards, characters, backgrounds, 3D world. Recommended.",
+        "HD plus a modern redesign: new life point panel, duel buttons and icons, menus, and card text in a clean font. Changes how the game looks.",
     };
+    /** the order the modes are offered in */
+    static final int[] HD_MODE_ORDER = {2, 3, 1, 0};
 
     static float opacity(SharedPreferences p) { return p.getFloat("opacity", 0.55f); }
     static int ffSpeed(SharedPreferences p) { return p.getInt("ffSpeed", 3); }
@@ -181,7 +184,7 @@ final class SettingsView extends LinearLayout {
         copy.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
         copy.setOnClickListener(v -> {
             String report = "device " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + ", Android " + android.os.Build.VERSION.RELEASE
-                    + "\nsettings: scale " + scale(prefs) + "x, HD mode " + HD_MODES[hdMode(prefs)] + ", HD text " + (on(prefs, "hdText") ? "on" : "off") + ", smooth 2D " + (on(prefs, "smooth2d") ? "on" : "off")
+                    + "\nsettings: scale " + scale(prefs) + "x, HD mode " + HD_MODES[hdMode(prefs)] + ", smooth 2D " + (on(prefs, "smooth2d") ? "on" : "off")
                     + ", filter " + (on(prefs, "filter") ? "smooth" : "sharp") + ", screen buttons " + (on(prefs, "buttons") ? "on" : "off") + "\n"
                     + Native.debugReport();
             android.content.ClipboardManager cm = (android.content.ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);

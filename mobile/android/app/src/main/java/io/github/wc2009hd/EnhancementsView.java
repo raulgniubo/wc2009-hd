@@ -55,10 +55,10 @@ final class EnhancementsView extends LinearLayout {
         // mode: Full HD / HD Cards / Original
         card.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
         card.addView(Ui.text(c, "Mode", 16, Ui.TEXT, true));
-        final int[] order = {2, 1, 0};
-        String[] labels = new String[3];
+        final int[] order = SettingsView.HD_MODE_ORDER;
+        String[] labels = new String[order.length];
         int sel = 0;
-        for (int i = 0; i < 3; i++) { labels[i] = SettingsView.HD_MODES[order[i]]; if (order[i] == SettingsView.hdMode(prefs)) sel = i; }
+        for (int i = 0; i < order.length; i++) { labels[i] = SettingsView.HD_MODES[order[i]]; if (order[i] == SettingsView.hdMode(prefs)) sel = i; }
         TextView md = Ui.text(c, SettingsView.HD_MODE_DETAILS[SettingsView.hdMode(prefs)], 13, Ui.TEXT_DIM, false);
         LinearLayout chips = Ui.chips(c, labels, sel, i -> {
             prefs.edit().putInt(pack.master, order[i]).apply();
@@ -124,20 +124,6 @@ final class EnhancementsView extends LinearLayout {
         nd.setPadding(Ui.dp(c, 6), Ui.dp(c, 10), Ui.dp(c, 6), 0);
         list.addView(nd);
 
-        TextView h = Ui.text(c, "FINE-TUNE", 12.5f, Ui.TEXT_DIM, true);
-        h.setLetterSpacing(0.06f);
-        h.setPadding(Ui.dp(c, 6), Ui.dp(c, 22), 0, Ui.dp(c, 8));
-        list.addView(h);
-        LinearLayout d = card(c, list);
-        for (int i = 0; i < pack.options.length; i++) {
-            Packs.Option o = pack.options[i];
-            if (i > 0) d.addView(Ui.divider(c));
-            View r = row(c, prefs, o.key, o.title, o.detail, false, (key, v) -> listener.settingChanged(key));
-            r.setAlpha(on ? 1f : 0.45f);
-            detailRows.add(r);
-            d.addView(r);
-        }
-        for (Switch s : details) s.setEnabled(on);
     }
 
     private interface Toggled { void changed(String key, boolean value); }

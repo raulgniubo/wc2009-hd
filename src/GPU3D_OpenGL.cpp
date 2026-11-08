@@ -252,6 +252,13 @@ GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone, co
         char an[40]; snprintf(an, sizeof(an), "tex3d/h_%016llx", (unsigned long long)halfHash); names.push_back(an);
     }
     names.push_back(name);
+    // faithful HD mode: no redesigns, the original-style HD version where the pack has one
+    if (!WC09::GetRedesignEnabled())
+    {
+        std::vector<std::string> keep;
+        for (auto& n : names) { std::string f = WC09::FaithfulName(n); if (!f.empty()) keep.push_back(f); }
+        names.swap(keep);
+    }
     // the pictures are decoded on the worker thread (big PNGs would stall the game for a moment):
     // the original texture shows until the HD one is ready
     int& stage = HD3DStage[hash];
@@ -898,7 +905,7 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
         rp->HDMode = curhdmode;
         // WC09: duel UI pieces the game animates (phase bar, corner buttons) come in many
         // colour/lighting frames; anything without its own HD image is matched by where it sits
-        if (hdpack && !rp->HDTex && curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF && ((poly->TexParam >> 26) & 7) == 4)
+        if (hdpack && WC09::GetRedesignEnabled() && !rp->HDTex && curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF && ((poly->TexParam >> 26) & 7) == 4)
         {
             u32 tw = TextureWidth(poly->TexParam), th = TextureHeight(poly->TexParam);
             if (tw == 32 && (th == 16 || th == 32))
@@ -1252,7 +1259,7 @@ int GLRenderer3D::RenderPolygonEdgeBatch(int i) const
     }
 
     SetupPolygonTexture(rp);
-    glDrawElements(GL_LINES, numindices, GL_UNSIGNED_SHORT, (void*)(uintptr_t)(rp->EdgeIndicesOffset * 2));
+    glDrawElements(GL_LINES, numindices, GL_UNSIGNED_SHORT, (void*)(uintptr_t)((rp->EdgeIndicesOffset - EdgeShift) * 2));
     return numpolys;
 }
 
@@ -1669,7 +1676,14 @@ void GLRenderer3D::RenderFrame()
     u32 hdgen = WC09::HDSettingsGeneration();
     bool hdChanged = hdgen != LastHDGen;
     // decode the textures again: HD cards are built from freshly decoded card textures
-    if (hdChanged && LastHDGen != 0) Texcache.Reset();
+    if (hdChanged && LastHDGen != 0)
+    {
+        Texcache.Reset();
+        // another HD mode may use other pictures for the same textures
+        for (auto& e : HD3D) if (e.second.Valid) glDeleteTextures(1, &e.second.Tex);
+        HD3D.clear();
+        HD3DStage.clear();
+    }
     LastHDGen = hdgen;
     // HD pictures still loading last time: draw again until they're all in
     bool hdWaiting = HDPending;
@@ -1870,13 +1884,17 @@ void GLRenderer3D::RenderFrame()
         NumOpaqueFinalPolys = firsttrans;
 
         BuildPolygons(&PolygonList[0], npolys, captureinfo);
+        // WC09: fresh storage holding just this frame's data (no waiting on the GPU, no copying of
+        // the unused rest); the edge indices move right behind the polygon indices
         glBindBuffer(GL_ARRAY_BUFFER, VertexBufferID);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, NumVertices*7*4, VertexBuffer);
+        glBufferData(GL_ARRAY_BUFFER, std::max<u32>(NumVertices * 7 * 4, 64), VertexBuffer, GL_DYNAMIC_DRAW);
 
         // bind to access the index buffer
         glBindVertexArray(VertexArrayID);
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, NumIndices * 2, IndexBuffer);
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, EdgeIndicesOffset * 2, NumEdgeIndices * 2, IndexBuffer + EdgeIndicesOffset);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IndexBufferID);
+        EdgeShift = EdgeIndicesOffset - NumIndices;
+        if (NumEdgeIndices) memmove(IndexBuffer + NumIndices, IndexBuffer + EdgeIndicesOffset, NumEdgeIndices * 2);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, std::max<u32>((NumIndices + NumEdgeIndices) * 2, 64), IndexBuffer, GL_DYNAMIC_DRAW);
 
         RenderSceneChunk(0, 192);
     }

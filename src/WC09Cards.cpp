@@ -52,6 +52,7 @@ std::atomic<bool> Smooth2D{true};
 std::atomic<bool> HDCards{true};
 std::atomic<bool> HDText{true};
 std::atomic<bool> HDPack{true};
+std::atomic<bool> Redesign{true};
 std::atomic<u32> HDGen{1};
 void SetHDTextEnabled(bool on) { if (HDText != on) { HDText = on; HDGen++; } }
 bool GetHDTextEnabled() { return HDText; }
@@ -60,6 +61,8 @@ bool GetHDCardsEnabled() { return HDCards; }
 void SetHDPackEnabled(bool on) { if (HDPack != on) { HDPack = on; HDGen++; } }
 bool GetHDPackEnabled() { return HDPack; }
 u32 HDSettingsGeneration() { return HDGen; }
+void SetRedesignEnabled(bool on) { if (Redesign != on) { Redesign = on; HDGen++; } }
+bool GetRedesignEnabled() { return Redesign; }
 void SetSmooth2D(bool on) { if (Smooth2D != on) { Smooth2D = on; HDGen++; } }
 bool GetSmooth2D() { return Smooth2D; }
 

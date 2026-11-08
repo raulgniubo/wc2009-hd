@@ -63,6 +63,10 @@ bool GetHDCardsEnabled();
 // Off with HD cards on = the original game with just the card art in HD. On by default.
 void SetHDPackEnabled(bool on);
 bool GetHDPackEnabled();
+// The redesign on top of the HD pack: new duel screen pieces (life point panel, buttons, icons),
+// menus, card text in a modern font. Off = HD versions that look just like the original.
+void SetRedesignEnabled(bool on);
+bool GetRedesignEnabled();
 // Changes whenever one of these switches does (renderers redraw instead of reusing a frame).
 u32 HDSettingsGeneration();
 

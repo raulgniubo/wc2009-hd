@@ -355,10 +355,14 @@ static std::string ToES(const std::string& src, bool fragment, const std::initia
 #ifdef MELONDS_GLES_30
     // no per-attachment colour masks in ES 3.0: a second output is masked in the shader (it reads
     // the current value with framebuffer fetch and keeps the masked channels, see GLES_Compat.h)
-    std::string maskOut;
+    // both outputs are fetched and masked, so the renderer never has to switch draw buffers
+    std::string maskOut, maskOut0;
     if (fragment && HasFramebufferFetch())
         for (const AttributeTarget& t : outs)
             if (t.Location == 1) maskOut = t.Name;
+    if (!maskOut.empty())
+        for (const AttributeTarget& t : outs)
+            if (t.Location == 0) maskOut0 = t.Name;
 #endif
     if (fragment)
         for (const AttributeTarget& t : outs)
@@ -378,7 +382,7 @@ static std::string ToES(const std::string& src, bool fragment, const std::initia
                     {
                         std::string lay = "layout(location = " + std::to_string(t.Location) + ") ";
 #ifdef MELONDS_GLES_30
-                        if (nm == maskOut) lay += "in";   // "inout"
+                        if (nm == maskOut || (!maskOut0.empty() && nm == maskOut0)) lay += "in";   // "inout"
 #endif
                         s.insert(pos, lay);
                         pos += lay.size();
@@ -401,8 +405,13 @@ static std::string ToES(const std::string& src, bool fragment, const std::initia
         if (m != std::string::npos)
         {
             s.replace(m, 11, "void wc09_main()");
-            s += "\nuniform vec4 uWC09Mask1;\nvoid main()\n{\n    vec4 wc09prev = " + maskOut + ";\n    wc09_main();\n    "
-                 + maskOut + " = mix(wc09prev, " + maskOut + ", uWC09Mask1);\n}\n";
+            if (maskOut0.empty())
+                s += "\nuniform vec4 uWC09Mask1;\nvoid main()\n{\n    vec4 wc09prev = " + maskOut + ";\n    wc09_main();\n    "
+                     + maskOut + " = mix(wc09prev, " + maskOut + ", uWC09Mask1);\n}\n";
+            else
+                s += "\nuniform vec4 uWC09Mask0;\nuniform vec4 uWC09Mask1;\nvoid main()\n{\n    vec4 wc09prev0 = " + maskOut0 + ";\n    vec4 wc09prev = " + maskOut + ";\n    wc09_main();\n    "
+                     + maskOut0 + " = mix(wc09prev0, " + maskOut0 + ", uWC09Mask0);\n    "
+                     + maskOut + " = mix(wc09prev, " + maskOut + ", uWC09Mask1);\n}\n";
             size_t nl = s.find('\n');
             s.insert(nl + 1, "#extension GL_EXT_shader_framebuffer_fetch : require\n");
         }

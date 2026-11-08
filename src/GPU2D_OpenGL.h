@@ -106,6 +106,7 @@ private:
     struct HDTexEntry { int Image; GLuint Tex; bool Valid; };
     std::vector<HDTexEntry> HDTextures;     // small LRU of uploaded HD BG images
     std::unordered_map<int, u64> HDMissing; // image -> frame of the last failed lookup
+    u32 HDGenSeen = 0;
     GLuint GetHDTexture(int image);
 
     // base index for a BG layer within the BG texture arrays

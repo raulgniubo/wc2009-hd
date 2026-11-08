@@ -461,19 +461,21 @@ static void MigratePrefs()
     if (saved[@"hdMode"] == nil && saved[@"hdAll"] != nil && ![saved[@"hdAll"] boolValue]) [d setInteger:0 forKey:@"hdMode"];
 }
 
-// enhancement modes for packs: 0 original, 1 HD cards only, 2 everything
+// enhancement modes for packs: 0 original, 1 HD cards only, 2 everything in HD with the original
+// look, 3 HD plus the redesign
 static NSArray* HDModeChoices()
 {
-    return @[@{@"title": @"Full HD", @"detail": @"HD cards plus the redesigned panels, menus, backgrounds and 3D textures. Needs the most from your phone.", @"value": @2},
-             @{@"title": @"HD Cards", @"detail": @"The original game, with HD art for every card. Lighter, good for older phones.", @"value": @1},
+    return @[@{@"title": @"HD", @"detail": @"Everything in high resolution, looking just like the original: cards, characters, backgrounds, 3D world. Recommended.", @"value": @2},
+             @{@"title": @"HD + Redesign", @"detail": @"HD plus a modern redesign: new life point panel, duel buttons and icons, menus, and card text in a clean font. Changes how the game looks.", @"value": @3},
+             @{@"title": @"HD Cards", @"detail": @"The original game with just the card art in HD. Lightest, good for older phones.", @"value": @1},
              @{@"title": @"Original", @"detail": @"The game exactly as on the DS. Resolution and smoothing settings still apply.", @"value": @0}];
 }
-static NSString* HDModeName(NSInteger m) { return m == 0 ? @"Original" : m == 1 ? @"HD Cards" : @"Full HD"; }
+static NSString* HDModeName(NSInteger m) { return m == 0 ? @"Original" : m == 1 ? @"HD Cards" : m == 3 ? @"HD + Redesign" : @"HD"; }
 
 static void ApplyCoreOptions()
 {
     wc09_set_option(WC09_OPT_HD_CARDS, 1);   // the mode decides (an older separate switch is ignored)
-    wc09_set_option(WC09_OPT_HD_TEXT, [Prefs() boolForKey:@"hdText"]);
+    wc09_set_option(WC09_OPT_HD_TEXT, 1);
     wc09_set_option(WC09_OPT_SMOOTH_2D, [Prefs() boolForKey:@"smooth2d"]);
     wc09_set_option(WC09_OPT_LINEAR_FILTER, [Prefs() boolForKey:@"filter"]);
     wc09_set_option(WC09_OPT_HD_MODE, (int)[Prefs() integerForKey:@"hdMode"]);
@@ -490,20 +492,18 @@ static NSArray<NSDictionary*>* EnhancementPacks()
         @"code": @"CY8",
         @"title": @"Yu-Gi-Oh! 5D's World Championship 2009",
         @"short": @"Yu-Gi-Oh! 5D's WC2009",
-        @"about": @"A full HD makeover for the card game, made just for it.",
+        @"about": @"An HD makeover for the card game, made just for it.",
         @"features": @[
             @"HD art for every card, in duels and in the deck editor",
-            @"Card names and descriptions in a clean, sharp font",
-            @"Redesigned life point panel, phase buttons and duel screen icons",
-            @"High-resolution menus, backgrounds and dialogs",
+            @"High-resolution characters, backgrounds, menus and 3D world",
+            @"Sharper game text, with the same look",
+            @"Optional redesign: new life point panel, duel buttons and icons, card text in a clean font",
         ],
         @"needs": @"HDCards",
         @"needsTitle": @"HD pack (HDCards folder)",
         @"needsDetail": @"The enhancements use an HD pack: a folder named HDCards with the card art and the redesigned screens (about 1 GB). It isn't part of the game file, so it has to sit right next to it.",
         @"master": @"hdMode",
-        @"options": @[
-            @{@"key": @"hdText", @"title": @"HD text and panels", @"detail": @"Full HD mode: card names, descriptions and duel panels in a clean font."},
-        ],
+        @"options": @[],
     }];
 }
 
@@ -873,10 +873,9 @@ static OptionsViewController* EnhancementsPage(NSDictionary* pack)
             @{@"title": pack[@"title"], @"rows": @[
                 @{@"type": @"choice", @"key": pack[@"master"], @"title": @"Mode", @"symbol": @"sparkles", @"color": RGB(0xF2A93B),
                   @"choices": HDModeChoices()}],
-              @"footer": [pack[@"about"] stringByAppendingString:@"\n\nFull HD: everything below. HD Cards: the original game with just the card art in HD. Original: exactly like the DS. You can switch from the in-game menu too, even mid-game."]},
+              @"footer": [pack[@"about"] stringByAppendingString:@"\n\nYou can switch from the in-game menu too, even mid-game."]},
             @{@"title": @"What's improved", @"rows": feats},
             @{@"title": [@"What you need: " stringByAppendingString:pack[@"needsTitle"]], @"rows": need, @"footer": where},
-            @{@"title": @"Fine-tune", @"rows": opts},
         ];
     };
     return vc;
@@ -894,9 +893,9 @@ static NSString* DebugReportText()
 {
     struct utsname u; uname(&u);
     NSUserDefaults* d = Prefs();
-    NSString* head = [NSString stringWithFormat:@"device %s, iOS %@, app %@\nsettings: scale %ldx, HD mode %@, HD text %@, smooth 2D %@, filter %@, screen buttons %@\n",
+    NSString* head = [NSString stringWithFormat:@"device %s, iOS %@, app %@\nsettings: scale %ldx, HD mode %@, smooth 2D %@, filter %@, screen buttons %@\n",
         u.machine, UIDevice.currentDevice.systemVersion, [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"],
-        (long)[d integerForKey:@"scale"], HDModeName([d integerForKey:@"hdMode"]), [d boolForKey:@"hdText"] ? @"on" : @"off", [d boolForKey:@"smooth2d"] ? @"on" : @"off",
+        (long)[d integerForKey:@"scale"], HDModeName([d integerForKey:@"hdMode"]), [d boolForKey:@"smooth2d"] ? @"on" : @"off",
         [d boolForKey:@"filter"] ? @"smooth" : @"sharp", [d boolForKey:@"buttons"] ? @"on" : @"off"];
     return [head stringByAppendingString:[NSString stringWithUTF8String:wc09_debug_report()]];
 }
@@ -1536,7 +1535,7 @@ static NSDictionary* Item(NSString* title, NSString* symbol, BOOL destructive, v
             [me resume];
         })];
     }
-    [self panel:@"Look" message:@"Full HD: everything redesigned. HD Cards: the original game with HD card art. Original: exactly like the DS." items:items];
+    [self panel:@"Look" message:@"HD keeps the original look. HD + Redesign changes the duel screen, menus and card text." items:items];
 }
 
 - (void)stateMenu:(BOOL)save

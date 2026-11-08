@@ -35,7 +35,7 @@
 
 // per-frame GL statistics (Settings > Show performance, and WC09_GLSTATS in the test harness)
 namespace melonDS { namespace GLES {
-struct Stats { unsigned draws, bufUploads, bufBytes, texUploads, texBytes, readbacks; };
+struct Stats { unsigned draws, bufUploads, bufBytes, texUploads, texBytes, readbacks, passBreaks; };
 inline Stats& St() { static Stats s{}; return s; }
 }}
 
@@ -169,12 +169,14 @@ inline void glesReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum f, GLe
 // on, the shaders mask attachment 1 themselves with framebuffer fetch (uWC09Mask1, see
 // OpenGLSupport.cpp).
 namespace melonDS { namespace GLES30 {
-struct ProgState { GLint Loc = -2; GLfloat Last[4] = {-1, -1, -1, -1}; };
+struct ProgState { GLint Loc0 = -2, Loc1 = -2; GLfloat Last0[4] = {-1, -1, -1, -1}, Last1[4] = {-1, -1, -1, -1}; };
 struct State
 {
     GLboolean Mask[2][4] = {{1, 1, 1, 1}, {1, 1, 1, 1}};
+    GLboolean RealMask[4] = {1, 1, 1, 1};      // what glColorMask is set to right now
     GLuint Prog = 0, DrawFB = 0;
     std::unordered_map<GLuint, std::vector<GLenum>> FBBufs;
+    std::unordered_map<GLuint, bool> FBOverride;  // draw buffer 0 switched off for attachment-1-only draws
     std::unordered_map<GLuint, ProgState> Progs;
     GLfloat ClearCol[4] = {0, 0, 0, 0};
 };
@@ -186,43 +188,86 @@ inline const std::vector<GLenum>* Bufs()
 }
 inline bool TwoTargets() { const auto* b = Bufs(); return b && b->size() >= 2 && (*b)[1] != GL_NONE; }
 inline bool Any(const GLboolean* m) { return m[0] || m[1] || m[2] || m[3]; }
-// sets up the masks for a draw; returns true if the draw buffers have to be restored after
+inline void RealColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a)
+{
+    GLboolean* c = S().RealMask;
+    if (c[0] == r && c[1] == g && c[2] == b && c[3] == a) return;
+    c[0] = r; c[1] = g; c[2] = b; c[3] = a;
+    glColorMask(r, g, b, a);
+}
+// Draw buffers are only changed when really needed, and never back and forth around each draw:
+// on tile-based GPUs (every iPhone) each change ends the GPU's render pass, which then writes the
+// whole framebuffer out to memory and reads it back in. That is what made big 3D scenes slow.
+inline void SetOverride(bool on)
+{
+    State& s = S();
+    bool& cur = s.FBOverride[s.DrawFB];
+    if (cur == on) return;
+    const auto* b = Bufs();
+    if (!b) return;
+    if (on) { GLenum x[2] = {GL_NONE, (*b)[1]}; glDrawBuffers(2, x); }
+    else glDrawBuffers((GLsizei)b->size(), b->data());
+    cur = on;
+    melonDS::GLES::St().passBreaks++;
+}
+inline void SetMaskUniform(GLint& loc, GLfloat* last, const char* name, const GLfloat* v)
+{
+    State& s = S();
+    if (loc == -2) loc = glGetUniformLocation(s.Prog, name);
+    if (loc >= 0 && memcmp(last, v, sizeof(GLfloat) * 4))
+    {
+        glUniform4fv(loc, 1, v);
+        memcpy(last, v, sizeof(GLfloat) * 4);
+    }
+}
+// sets up the masks for a draw
 inline bool PrepareDraw()
 {
     State& s = S();
-    GLfloat m1[4];
-    bool restore = false;
-    if (!Any(s.Mask[0]) && TwoTargets())
+    const bool two = TwoTargets();
+    ProgState* p = s.Prog ? &s.Progs[s.Prog] : nullptr;
+    if (p && p->Loc0 == -2) p->Loc0 = glGetUniformLocation(s.Prog, "uWC09Mask0");
+    if (p && p->Loc1 == -2) p->Loc1 = glGetUniformLocation(s.Prog, "uWC09Mask1");
+    GLfloat m0[4], m1[4];
+    for (int i = 0; i < 4; i++) { m0[i] = s.Mask[0][i] ? 1.f : 0.f; m1[i] = s.Mask[1][i] ? 1.f : 0.f; }
+    static const GLfloat ones[4] = {1, 1, 1, 1};
+    if (!two)
     {
-        GLenum b[2] = {GL_NONE, (*Bufs())[1]};
-        glDrawBuffers(2, b);
-        restore = true;
-        glColorMask(s.Mask[1][0], s.Mask[1][1], s.Mask[1][2], s.Mask[1][3]);
-        m1[0] = m1[1] = m1[2] = m1[3] = 1;
+        SetOverride(false);
+        RealColorMask(s.Mask[0][0], s.Mask[0][1], s.Mask[0][2], s.Mask[0][3]);
+        if (p) { SetMaskUniform(p->Loc0, p->Last0, "uWC09Mask0", ones); SetMaskUniform(p->Loc1, p->Last1, "uWC09Mask1", ones); }
+    }
+    else if (!Any(s.Mask[0]) && !Any(s.Mask[1]))
+    {
+        // stencil/depth only (shadow volumes): no colour at all, nothing else to change
+        RealColorMask(0, 0, 0, 0);
+    }
+    else if (p && p->Loc0 >= 0 && p->Loc1 >= 0)
+    {
+        // the shader keeps masked channels of both attachments itself (framebuffer fetch)
+        SetOverride(false);
+        RealColorMask(1, 1, 1, 1);
+        SetMaskUniform(p->Loc0, p->Last0, "uWC09Mask0", m0);
+        SetMaskUniform(p->Loc1, p->Last1, "uWC09Mask1", m1);
+    }
+    else if (!Any(s.Mask[0]))
+    {
+        // no framebuffer fetch: attachment 1 alone
+        SetOverride(true);
+        RealColorMask(s.Mask[1][0], s.Mask[1][1], s.Mask[1][2], s.Mask[1][3]);
+        if (p) SetMaskUniform(p->Loc1, p->Last1, "uWC09Mask1", ones);
     }
     else
     {
-        glColorMask(s.Mask[0][0], s.Mask[0][1], s.Mask[0][2], s.Mask[0][3]);
-        for (int i = 0; i < 4; i++) m1[i] = s.Mask[1][i] ? 1.f : 0.f;
+        SetOverride(false);
+        RealColorMask(s.Mask[0][0], s.Mask[0][1], s.Mask[0][2], s.Mask[0][3]);
+        if (p) SetMaskUniform(p->Loc1, p->Last1, "uWC09Mask1", m1);
     }
-    if (s.Prog)
-    {
-        ProgState& p = s.Progs[s.Prog];
-        if (p.Loc == -2) p.Loc = glGetUniformLocation(s.Prog, "uWC09Mask1");
-        if (p.Loc >= 0 && memcmp(p.Last, m1, sizeof(m1)))
-        {
-            glUniform4fv(p.Loc, 1, m1);
-            memcpy(p.Last, m1, sizeof(m1));
-        }
-    }
-    return restore;
+    return false;
 }
-inline void FinishDraw(bool restore)
-{
-    if (!restore) return;
-    const auto* b = Bufs();
-    if (b) glDrawBuffers((GLsizei)b->size(), b->data());
-}
+inline void FinishDraw(bool) {}
+// something outside may have changed the colour mask (the app's own drawing): set it again next time
+inline void ForgetColorMask() { for (auto& c : S().RealMask) c = 2; }
 }}
 
 inline void glColorMaski(GLuint buf, GLboolean r, GLboolean g, GLboolean b, GLboolean a)
@@ -234,7 +279,7 @@ inline void glColorMaski(GLuint buf, GLboolean r, GLboolean g, GLboolean b, GLbo
 inline void gles30ColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a)
 {
     glColorMaski(0, r, g, b, a); glColorMaski(1, r, g, b, a);
-    glColorMask(r, g, b, a);
+    melonDS::GLES30::RealColorMask(r, g, b, a);
 }
 inline void gles30UseProgram(GLuint p) { melonDS::GLES30::S().Prog = p; glUseProgram(p); }
 inline void gles30DeleteProgram(GLuint p)
@@ -252,7 +297,7 @@ inline void gles30BindFramebuffer(GLenum t, GLuint fb)
 inline void gles30DrawBuffers(GLsizei n, const GLenum* b)
 {
     auto& s = melonDS::GLES30::S();
-    if (s.DrawFB) s.FBBufs[s.DrawFB].assign(b, b + n);
+    if (s.DrawFB) { s.FBBufs[s.DrawFB].assign(b, b + n); s.FBOverride[s.DrawFB] = false; }
     glDrawBuffers(n, b);
 }
 inline void gles30ClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
@@ -265,19 +310,20 @@ inline void gles30Clear(GLbitfield m)
 {
     using namespace melonDS::GLES30;
     State& s = S();
+    if (m & GL_COLOR_BUFFER_BIT) SetOverride(false);
     if ((m & GL_COLOR_BUFFER_BIT) && TwoTargets() && memcmp(s.Mask[0], s.Mask[1], 4))
     {
         for (int i = 0; i < 2; i++)
         {
-            glColorMask(s.Mask[i][0], s.Mask[i][1], s.Mask[i][2], s.Mask[i][3]);
+            RealColorMask(s.Mask[i][0], s.Mask[i][1], s.Mask[i][2], s.Mask[i][3]);
             glClearBufferfv(GL_COLOR, i, s.ClearCol);
         }
         m &= ~GL_COLOR_BUFFER_BIT;
-        glColorMask(s.Mask[0][0], s.Mask[0][1], s.Mask[0][2], s.Mask[0][3]);
+        RealColorMask(s.Mask[0][0], s.Mask[0][1], s.Mask[0][2], s.Mask[0][3]);
         if (m) glClear(m);
         return;
     }
-    glColorMask(s.Mask[0][0], s.Mask[0][1], s.Mask[0][2], s.Mask[0][3]);
+    RealColorMask(s.Mask[0][0], s.Mask[0][1], s.Mask[0][2], s.Mask[0][3]);
     glClear(m);
 }
 inline void gles30DrawArrays(GLenum mode, GLint first, GLsizei count)

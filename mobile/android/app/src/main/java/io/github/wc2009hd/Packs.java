@@ -16,16 +16,15 @@ final class Packs {
 
     static final Pack[] ALL = {
         new Pack("CY8", "Yu-Gi-Oh! 5D's World Championship 2009", "Yu-Gi-Oh! 5D's WC2009",
-                "A full HD makeover for the card game, made just for it.",
+                "An HD makeover for the card game, made just for it.",
                 new String[] {
                     "HD art for every card, in duels and in the deck editor",
-                    "Card names and descriptions in a clean, sharp font",
-                    "Redesigned life point panel, phase buttons and duel screen icons",
-                    "High-resolution menus, backgrounds and dialogs",
+                    "High-resolution characters, backgrounds, menus and 3D world",
+                    "Sharper game text, with the same look",
+                    "Optional redesign: new life point panel, duel buttons and icons, card text in a clean font",
                 },
                 "HDCards",
-                "hdMode",
-                new Option("hdText", "HD text and panels", "Full HD mode: card names, descriptions and duel panels in a clean font.")),
+                "hdMode"),
     };
 
     static Pack forCode(String code) {

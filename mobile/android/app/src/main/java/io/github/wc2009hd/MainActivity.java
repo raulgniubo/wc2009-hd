@@ -585,7 +585,7 @@ public final class MainActivity extends Activity
 
     private void applyOptions() {
         Native.setOption(Native.OPT_HD_CARDS, 1);   // the mode decides (an older separate switch is ignored)
-        Native.setOption(Native.OPT_HD_TEXT, SettingsView.on(prefs, "hdText") ? 1 : 0);
+        Native.setOption(Native.OPT_HD_TEXT, 1);
         Native.setOption(Native.OPT_SMOOTH_2D, SettingsView.on(prefs, "smooth2d") ? 1 : 0);
         Native.setOption(Native.OPT_LINEAR_FILTER, SettingsView.on(prefs, "filter") ? 1 : 0);
         Native.setOption(Native.OPT_HD_MODE, SettingsView.hdMode(prefs));
@@ -703,10 +703,10 @@ public final class MainActivity extends Activity
     public void onFastForward(boolean on) { game.setFastForward(on); }
 
     private void lookDialog() {
-        final int[] order = {2, 1, 0};
-        String[] labels = new String[3];
+        final int[] order = SettingsView.HD_MODE_ORDER;
+        String[] labels = new String[order.length];
         int sel = 0;
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < order.length; i++) {
             labels[i] = SettingsView.HD_MODES[order[i]] + "\n" + SettingsView.HD_MODE_DETAILS[order[i]];
             if (order[i] == SettingsView.hdMode(prefs)) sel = i;
         }

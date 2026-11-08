@@ -93,7 +93,7 @@ struct PerfSample
     u32 T;                       // seconds since the game started
     u8 Fps, Thermal, LowPower, Hz;
     float EmuMs, RenderMs, R3DMs, MaxMs, DrawMs, GapMs;
-    u16 Loading, Uploads, Hd2, Hd3, Draws;
+    u16 Loading, Uploads, Hd2, Hd3, Draws, Passes, BufUps;
     float TexKB, BufKB;
 };
 std::vector<PerfSample> PerfLog;  // ring
@@ -157,12 +157,14 @@ int OptHdMode = 2;
 // the master switch off = the original game: no HD layers, and no 2D smoothing for it either
 void ApplyHdOptions()
 {
-    // modes: 0 = the game as on the DS, 1 = + HD card art, 2 = + everything else in the HD pack.
+    // modes: 0 = the game as on the DS, 1 = + HD card art, 2 = everything in HD but looking like the
+    // original, 3 = + the redesign (new duel screen, menus, card text font).
     // Smooth 2D is a general picture setting, the same in every mode.
-    int mode = WC09::IsActive() ? OptHdMode : 2;
+    int mode = WC09::IsActive() ? OptHdMode : 3;
     WC09::SetHDCardsEnabled(mode >= 1 && OptHdCards);
     WC09::SetHDPackEnabled(mode >= 2);
     WC09::SetHDTextEnabled(mode >= 2 && OptHdText);
+    WC09::SetRedesignEnabled(mode >= 3);
     WC09::SetSmooth2D(OptSmooth2D);
 }
 GLint LocLayer = -1, LocSwap = -1;
@@ -247,6 +249,7 @@ int wc09_load_rom(const char* path, int scale, int jit)
 {
     std::vector<u8> rom;
     if (!path || !ReadFile(path, rom)) return 1;
+    WC09::ReleaseROM();
     RomPath = path;
     { std::lock_guard<std::mutex> plk(PerfLogLock); PerfLog.clear(); PerfLogNext = 0; }
     PerfGameStart = 0; PerfLastCall = 0;
@@ -345,6 +348,9 @@ int wc09_get_scale(void) { return Scale; }
 void wc09_run_frame(void)
 {
     if (!Nds) return;
+#ifdef MELONDS_GLES_30
+    melonDS::GLES30::ForgetColorMask();
+#endif
     NDS::Current = Nds.get();
     auto& r = Nds->GPU.GetRenderer();
     if (r.NeedsShaderCompile())
@@ -392,6 +398,8 @@ void wc09_run_frame(void)
             s.Uploads = (u16)std::min<u64>(65535, up - PerfUploads0);
             s.Hd2 = (u16)WC09Perf::Hd2DCount; s.Hd3 = (u16)WC09Perf::Hd3DCount;
             s.Draws = (u16)std::min(65535.0, st.draws / n);
+            s.Passes = (u16)std::min(65535.0, st.passBreaks / n);
+            s.BufUps = (u16)std::min(65535.0, st.bufUploads / n);
             s.TexKB = (float)(st.texBytes / n / 1024.0); s.BufKB = (float)(st.bufBytes / n / 1024.0);
             PerfRender0 = rus; PerfRender3D0 = r3; PerfUploads0 = up;
             std::lock_guard<std::mutex> plk(PerfLogLock);
@@ -532,6 +540,7 @@ void wc09_shutdown(void)
 {
     // call with the game's GL context current: the renderer and screen program are deleted
     FlushSave(true);
+    WC09::ReleaseROM();
     {
         std::lock_guard<std::mutex> lk(AudioLock);
         Nds.reset();
@@ -555,7 +564,7 @@ void wc09_set_option(int option, int value)
     case WC09_OPT_HD_TEXT: OptHdText = value != 0; break;
     case WC09_OPT_SMOOTH_2D: OptSmooth2D = value != 0; break;
     case WC09_OPT_HD_ALL: OptHdMode = value ? 2 : 0; break;
-    case WC09_OPT_HD_MODE: OptHdMode = std::clamp(value, 0, 2); break;
+    case WC09_OPT_HD_MODE: OptHdMode = std::clamp(value, 0, 3); break;
     case WC09_OPT_LINEAR_FILTER: LinearFilter = value != 0; break;
     }
     ApplyHdOptions();
@@ -663,11 +672,11 @@ const char* wc09_debug_report(void)
     for (auto& s : v) if (s.Fps < 57) slow++;
     snprintf(b, sizeof(b), "%zu seconds logged, %d below 57 fps\n", v.size(), slow);
     out += b;
-    out += "columns: time fps | emu ms, render ms (3d), max ms, gap ms, draw ms, display hz | loading, hd uploads, hd2d/hd3d cached, draws, tex KB, buf KB | thermal, low power\n";
+    out += "columns: time fps | emu ms, render ms (3d), max ms, gap ms, draw ms, display hz | loading, hd uploads, hd2d/hd3d cached, draws, tex KB, buf KB, buf updates, pass breaks | thermal, low power\n";
     auto line = [&](const PerfSample& s) {
-        snprintf(b, sizeof(b), "%02u:%02u %2u | %.1f %.1f(%.1f) %.0f %.0f %.1f %u | %u %u %u/%u %u %.0f %.0f | %u %u\n",
+        snprintf(b, sizeof(b), "%02u:%02u %2u | %.1f %.1f(%.1f) %.0f %.0f %.1f %u | %u %u %u/%u %u %.0f %.0f %u %u | %u %u\n",
                  s.T / 60, s.T % 60, s.Fps, s.EmuMs, s.RenderMs, s.R3DMs, s.MaxMs, s.GapMs, s.DrawMs, s.Hz,
-                 s.Loading, s.Uploads, s.Hd2, s.Hd3, s.Draws, s.TexKB, s.BufKB, s.Thermal, s.LowPower);
+                 s.Loading, s.Uploads, s.Hd2, s.Hd3, s.Draws, s.TexKB, s.BufKB, s.BufUps, s.Passes, s.Thermal, s.LowPower);
         out += b;
     };
     std::vector<bool> show(v.size(), false);
