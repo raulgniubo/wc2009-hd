@@ -19,6 +19,8 @@ bool Init()
     SDL_SetMainReady();
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    // Qt owns quitting: SDL would swallow SIGINT/SIGTERM and the app would ignore them
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     Inited = SDL_Init(SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) == 0;
     return Inited;
 }
