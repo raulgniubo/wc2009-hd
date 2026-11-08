@@ -238,6 +238,16 @@ unsigned GameView::padKeys()
     return k;
 }
 
+static const int kMinTouchFrames = 4;
+
+void GameView::stepFrame(unsigned keys)
+{
+    wc09_set_keys(keys);
+    wc09_run_frame();
+    if (Touching) TouchFrames++;
+    if (ReleasePending && TouchFrames >= kMinTouchFrames) { wc09_touch(0, 0, 0); Touching = false; ReleasePending = false; }
+}
+
 void GameView::runFrames()
 {
     unsigned keys = KeyMask | padKeys();
@@ -250,7 +260,7 @@ void GameView::runFrames()
         // as fast as it goes: frames until this display refresh's time is used up
         qint64 until = Clock.nsecsElapsed() + 12000000;
         int n = 0;
-        do { wc09_set_keys(keys); wc09_run_frame(); n++; } while (Clock.nsecsElapsed() < until && n < 12);
+        do { stepFrame(keys); n++; } while (Clock.nsecsElapsed() < until && n < 12);
         Base = 0;
         return;
     }
@@ -267,7 +277,7 @@ void GameView::runFrames()
         else if (run == 2 && q > 48000 * 90 / 1000) run = 1;
     }
     FramesRun += run;
-    for (int i = 0; i < run; i++) { wc09_set_keys(keys); wc09_run_frame(); }
+    for (int i = 0; i < run; i++) stepFrame(keys);
 }
 
 void GameView::paintGL()
@@ -303,6 +313,7 @@ void GameView::paintGL()
     if (Grabbing) return;
     bool showPerf = app::On("perf"), showToast = ms < ToastUntil && !Toast.isEmpty(), showPause = Paused;
     if (!showPerf && !showToast && !showPause) return;
+    gamegl::ResetForPainter(defaultFramebufferObject());
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     QFont f = font();
@@ -354,7 +365,7 @@ void GameView::focusOutEvent(QFocusEvent* e)
 {
     // keys let go while another window had focus would otherwise stay "held"
     KeyMask = 0; KeysHeld.clear(); FFwdHeld = false;
-    if (Touching) { wc09_touch(0, 0, 0); Touching = false; }
+    if (Touching) { wc09_touch(0, 0, 0); Touching = false; ReleasePending = false; }
     QOpenGLWidget::focusOutEvent(e);
 }
 
@@ -372,13 +383,14 @@ void GameView::mousePressEvent(QMouseEvent* e)
 {
     unsetCursor(); CursorTimer.start();
     int x, y;
-    if (Running && e->button() == Qt::LeftButton && touchAt(e->position(), x, y)) { wc09_touch(1, x, y); Touching = true; }
+    if (Running && e->button() == Qt::LeftButton && touchAt(e->position(), x, y))
+    { wc09_touch(1, x, y); Touching = true; ReleasePending = false; TouchFrames = 0; }
 }
 
 void GameView::mouseMoveEvent(QMouseEvent* e)
 {
     unsetCursor(); CursorTimer.start();
-    if (!Touching) return;
+    if (!Touching || ReleasePending) return;
     int x, y;
     touchAt(e->position(), x, y);
     wc09_touch(1, std::clamp(x, 0, 255), std::clamp(y, 0, 191));
@@ -386,7 +398,11 @@ void GameView::mouseMoveEvent(QMouseEvent* e)
 
 void GameView::mouseReleaseEvent(QMouseEvent* e)
 {
-    if (Touching && e->button() == Qt::LeftButton) { wc09_touch(0, 0, 0); Touching = false; }
+    if (Touching && e->button() == Qt::LeftButton)
+    {
+        if (TouchFrames >= kMinTouchFrames || !Running || paused()) { wc09_touch(0, 0, 0); Touching = false; }
+        else ReleasePending = true;   // let go after the game has seen the press
+    }
 }
 
 void GameView::mouseDoubleClickEvent(QMouseEvent* e)

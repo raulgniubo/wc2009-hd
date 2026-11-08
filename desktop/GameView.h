@@ -70,6 +70,11 @@ private:
     QSet<int> KeysHeld;
     unsigned KeyMask = 0, PadPrev = 0;
     bool Touching = false, PadFfwd = false;
+    // a click can be shorter than a frame (trackpad taps especially): the game only reads the touch
+    // screen once per frame, so the release waits until the press has been seen for a few frames
+    bool ReleasePending = false;
+    int TouchFrames = 0;
+    void stepFrame(unsigned keys);
     QElapsedTimer Clock;
     double Base = 0; long FramesRun = 0;
     QTimer Ticker;                    // drives frames when vsync is off

@@ -257,7 +257,11 @@ void MainWindow::openRom(const QString& path, bool fresh)
         {
             QStringList lines = QString::fromUtf8(title).split('\n');
             if (lines.size() >= 2) lines.removeLast();   // the publisher
-            GameTitle = lines.join(' ').simplified();
+            // words longer than three letters in capitals get title case, like the Library
+            QStringList w = lines.join(' ').simplified().split(' ');
+            for (QString& x : w)
+                if (x.size() > 3 && x == x.toUpper() && x != x.toLower()) x = x.left(1) + x.mid(1).toLower();
+            GameTitle = w.join(' ');
         }
     }
     if (GameTitle.isEmpty()) GameTitle = fi.completeBaseName();
