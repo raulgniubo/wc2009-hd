@@ -9,7 +9,7 @@ target_include_directories(wc09mobile PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE
 target_link_libraries(wc09mobile PUBLIC core ${CMAKE_DL_LIBS})
 if (ANDROID)
     target_link_libraries(wc09mobile PUBLIC GLESv3 EGL log)
-elseif (APPLE)
+elseif (APPLE AND MELONDS_GLES)   # iOS
     target_link_libraries(wc09mobile PUBLIC "-framework OpenGLES")
 elseif (MELONDS_GLES)
     find_library(GLES_LIB GLESv2 REQUIRED)
