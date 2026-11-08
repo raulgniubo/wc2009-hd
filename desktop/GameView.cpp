@@ -23,11 +23,18 @@ GameView::GameView(QWidget* parent) : QOpenGLWidget(parent)
     setMouseTracking(true);
     setAutoFillBackground(false);
     Clock.start();
+    // One repaint per DS frame, asked for by a timer. Repainting non-stop (update() from frameSwapped,
+    // or a 1 ms timer) keeps the event loop flooded, and on macOS clicks and keys then arrive late.
+    // With vsync the swap still lines each frame up with the display.
     Ticker.setTimerType(Qt::PreciseTimer);
-    Ticker.setInterval(1);
-    connect(&Ticker, &QTimer::timeout, this, [this] { if (Running || !PendingRom.isEmpty()) update(); });
-    // with vsync the display paces the frames: draw again as soon as the last one is shown
-    connect(this, &QOpenGLWidget::frameSwapped, this, [this] { if ((Running || !PendingRom.isEmpty()) && app::On("vsync")) update(); });
+    Ticker.setInterval(2);
+    connect(&Ticker, &QTimer::timeout, this, [this] {
+        if (!Running && PendingRom.isEmpty()) return;
+        const double now = Clock.nsecsElapsed() / 1e9, period = 1.0 / kDSFps;
+        if (now < NextPaint) return;
+        NextPaint = std::max(NextPaint + period, now - period / 2);   // steady cadence, no catch-up bursts
+        update();
+    });
     CursorTimer.setSingleShot(true);
     CursorTimer.setInterval(2500);
     connect(&CursorTimer, &QTimer::timeout, this, [this] { if (Running) setCursor(Qt::BlankCursor); });
@@ -45,7 +52,8 @@ void GameView::start(const QString& romPath, bool fresh)
     if (Running) stop();
     PendingRom = romPath;
     PendingFresh = fresh;
-    if (!app::On("vsync")) Ticker.start();
+    NextPaint = 0;
+    Ticker.start();
     update();
 }
 
@@ -107,6 +115,7 @@ void GameView::stop()
     if (app::On("resume")) wc09_save_state(kResumeSlot); else wc09_delete_state(kResumeSlot);
     wc09_flush_save();
     audio::Stop();
+    gamegl::ForgetFrames();
     wc09_shutdown();
     doneCurrent();
     Running = false;
@@ -147,6 +156,7 @@ void GameView::reset()
     makeCurrent();
     wc09_flush_save();
     audio::Stop();
+    gamegl::ForgetFrames();
     wc09_shutdown();
     doneCurrent();
     Running = false;
@@ -173,7 +183,7 @@ void GameView::applySettings(const QString& key)
     else if (key == "smooth2d" || key == "filter" || key == "hdMode") ApplyCoreOptions();
     else if (key == "volume") audio::SetVolume(app::Int("volume"));
     else if (key == "sound") audio::SetMuted(!app::On("sound"));
-    else if (key == "vsync") { if (app::On("vsync")) Ticker.stop(); else Ticker.start(); }
+
     update();
 }
 
@@ -291,7 +301,7 @@ void GameView::paintGL()
     }
     const qreal dpr = devicePixelRatioF();
     const int W = (int)std::round(width() * dpr), H = (int)std::round(height() * dpr);
-    if (Running) runFrames();
+    if (Running) { gamegl::WaitLastFrame(); runFrames(); }
     qint64 d0 = Clock.nsecsElapsed();
     gamegl::Clear(defaultFramebufferObject(), W, H);
     if (!Running) return;
@@ -299,6 +309,7 @@ void GameView::paintGL()
     if (TopRect.isValid()) wc09_draw_screen(0, TopRect.x(), TopRect.y(), TopRect.width(), TopRect.height(), W, H);
     if (BottomRect.isValid()) wc09_draw_screen(1, BottomRect.x(), BottomRect.y(), BottomRect.width(), BottomRect.height(), W, H);
     gamegl::Bind(defaultFramebufferObject());
+    gamegl::MarkFrame();
     DrawSum += (Clock.nsecsElapsed() - d0) / 1e6; DrawCount++;
 
     // the app's side for the debug report

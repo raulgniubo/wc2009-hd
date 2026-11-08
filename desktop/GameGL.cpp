@@ -18,6 +18,28 @@ void Clear(unsigned fbo, int w, int h)
 
 void Bind(unsigned fbo) { glBindFramebuffer(GL_FRAMEBUFFER, fbo); }
 
+static GLsync Fence = nullptr;
+
+void WaitLastFrame()
+{
+    if (!Fence) return;
+    glClientWaitSync(Fence, GL_SYNC_FLUSH_COMMANDS_BIT, 50000000);   // 50 ms at most
+    glDeleteSync(Fence);
+    Fence = nullptr;
+}
+
+void MarkFrame()
+{
+    if (Fence) glDeleteSync(Fence);
+    Fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+}
+
+void ForgetFrames()
+{
+    if (Fence) glDeleteSync(Fence);
+    Fence = nullptr;
+}
+
 void ResetForPainter(unsigned fbo)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);

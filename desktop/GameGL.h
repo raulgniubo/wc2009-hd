@@ -9,4 +9,9 @@ void Bind(unsigned fbo);
 // put back the GL state Qt's painter expects (the emulator leaves its own textures, samplers,
 // buffers and pixel-store settings bound, which garbles the overlay text otherwise)
 void ResetForPainter(unsigned fbo);
+// at most one frame queued on the GPU: wait for the last frame's work before starting the next one,
+// so what's on screen never trails the game (and its input) by a growing queue of frames
+void WaitLastFrame();
+void MarkFrame();
+void ForgetFrames();   // the GL context is going away
 }

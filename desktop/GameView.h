@@ -77,7 +77,8 @@ private:
     void stepFrame(unsigned keys);
     QElapsedTimer Clock;
     double Base = 0; long FramesRun = 0;
-    QTimer Ticker;                    // drives frames when vsync is off
+    QTimer Ticker;                    // asks for one repaint per DS frame
+    double NextPaint = 0;
     QString Toast; qint64 ToastUntil = 0;
     qint64 HostShown = 0; double DrawSum = 0; int DrawCount = 0;
 };
