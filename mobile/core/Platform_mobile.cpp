@@ -9,9 +9,14 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "Portable.h"
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -27,7 +32,7 @@ void SignalStop(StopReason, void*) {}
 
 std::string GetLocalFilePath(const std::string& filename)
 {
-    if (!filename.empty() && filename[0] == '/') return filename;
+    if (!filename.empty() && (filename[0] == '/' || (filename.size() > 2 && filename[1] == ':'))) return filename;
     return wc09m::LocalDir() + "/" + filename;
 }
 
@@ -46,20 +51,20 @@ FileHandle* OpenFile(const std::string& path, FileMode mode)
 {
     if ((mode & FileMode::ReadWrite) == FileMode::None) return nullptr;
     const char* m = ModeString(mode);
-    FILE* f = fopen(path.c_str(), m);
+    FILE* f = wc09p::Fopen(path, m);
     if (!f && (mode & FileMode::Write) && (mode & FileMode::Preserve) && !(mode & FileMode::NoCreate))
-        f = fopen(path.c_str(), "w+b");   // preserve, but create when missing
+        f = wc09p::Fopen(path, "w+b");   // preserve, but create when missing
     return (FileHandle*)f;
 }
 
 FileHandle* OpenLocalFile(const std::string& path, FileMode mode) { return OpenFile(GetLocalFilePath(path), mode); }
 
-bool FileExists(const std::string& name) { struct stat st; return stat(name.c_str(), &st) == 0; }
+bool FileExists(const std::string& name) { return wc09p::Exists(name); }
 bool LocalFileExists(const std::string& name) { return FileExists(GetLocalFilePath(name)); }
 
 bool CheckFileWritable(const std::string& filepath)
 {
-    FILE* f = fopen(filepath.c_str(), "ab");
+    FILE* f = wc09p::Fopen(filepath, "ab");
     if (!f) return false;
     fclose(f);
     return true;
@@ -69,11 +74,11 @@ bool CheckLocalFileWritable(const std::string& filepath) { return CheckFileWrita
 bool CloseFile(FileHandle* file) { return fclose((FILE*)file) == 0; }
 bool IsEndOfFile(FileHandle* file) { return feof((FILE*)file) != 0; }
 bool FileReadLine(char* str, int count, FileHandle* file) { return fgets(str, count, (FILE*)file) != nullptr; }
-u64 FilePosition(FileHandle* file) { return (u64)ftello((FILE*)file); }
+u64 FilePosition(FileHandle* file) { return (u64)wc09p::Tell((FILE*)file); }
 bool FileSeek(FileHandle* file, s64 offset, FileSeekOrigin origin)
 {
     int o = origin == FileSeekOrigin::Start ? SEEK_SET : origin == FileSeekOrigin::Current ? SEEK_CUR : SEEK_END;
-    return fseeko((FILE*)file, offset, o) == 0;
+    return wc09p::Seek((FILE*)file, offset, o);
 }
 void FileRewind(FileHandle* file) { rewind((FILE*)file); }
 u64 FileRead(void* data, u64 size, u64 count, FileHandle* file) { return fread(data, size, count, (FILE*)file); }
@@ -89,8 +94,8 @@ u64 FileWriteFormatted(FileHandle* file, const char* fmt, ...)
 u64 FileLength(FileHandle* file)
 {
     FILE* f = (FILE*)file;
-    off_t pos = ftello(f); fseeko(f, 0, SEEK_END);
-    off_t len = ftello(f); fseeko(f, pos, SEEK_SET);
+    int64_t pos = wc09p::Tell(f); wc09p::Seek(f, 0, SEEK_END);
+    int64_t len = wc09p::Tell(f); wc09p::Seek(f, pos, SEEK_SET);
     return (u64)len;
 }
 
@@ -186,8 +191,14 @@ void Addon_RumbleStop(void*) {}
 float Addon_MotionQuery(MotionQueryType, void*) { return 0.f; }
 
 // used by the JIT on Android (libandroid's ASharedMemory_create)
+#ifdef _WIN32
+DynamicLibrary* DynamicLibrary_Load(const char* lib) { return (DynamicLibrary*)LoadLibraryA(lib); }
+void DynamicLibrary_Unload(DynamicLibrary* lib) { if (lib) FreeLibrary((HMODULE)lib); }
+void* DynamicLibrary_LoadFunction(DynamicLibrary* lib, const char* name) { return lib ? (void*)GetProcAddress((HMODULE)lib, name) : nullptr; }
+#else
 DynamicLibrary* DynamicLibrary_Load(const char* lib) { return (DynamicLibrary*)dlopen(lib, RTLD_NOW | RTLD_LOCAL); }
 void DynamicLibrary_Unload(DynamicLibrary* lib) { if (lib) dlclose(lib); }
 void* DynamicLibrary_LoadFunction(DynamicLibrary* lib, const char* name) { return lib ? dlsym(lib, name) : nullptr; }
+#endif
 
 }

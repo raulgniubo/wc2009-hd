@@ -1,6 +1,7 @@
 // Mobile versions of the desktop WC09Overlay renderers (frontend/qt_sdl/WC09Overlay.cpp): same
 // layout and colours, drawn with canvas_ity, images decoded with stb_image.
 #include "WC09Render.h"
+#include "Portable.h"
 
 #include <cmath>
 #include <cstdio>
@@ -12,8 +13,6 @@
 #include <pthread/qos.h>
 #endif
 #include <memory>
-#include <sys/stat.h>
-#include <dirent.h>
 #include <thread>
 #include <unordered_set>
 #include <atomic>
@@ -39,11 +38,7 @@ std::vector<unsigned char> FontMedium, FontBold;
 std::vector<unsigned char> ReadAll(const std::string& path)
 {
     std::vector<unsigned char> d;
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return d;
-    fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-    if (n > 0) { d.resize(n); if (fread(d.data(), 1, n, f) != (size_t)n) d.clear(); }
-    fclose(f);
+    wc09p::ReadWhole(path, d);
     return d;
 }
 
@@ -383,7 +378,7 @@ bool LoadImageFile(const std::string& base, std::vector<u8>& rgba, int& w, int& 
     for (const char* ext : {".png", ".jpg", ".jpeg"})
     {
         std::string path = base + ext;
-        FILE* f = fopen(path.c_str(), "rb");
+        FILE* f = wc09p::Fopen(path, "rb");
         if (!f) continue;
         int n = 0;
         unsigned char* data = stbi_load_from_file(f, &w, &h, &n, 4);
@@ -414,21 +409,15 @@ std::string IndexedFolder;
 
 void ScanDir(const std::string& root, const std::string& rel, std::unordered_set<std::string>& out, int depth)
 {
-    DIR* d = opendir((root + "/" + rel).c_str());
-    if (!d) return;
-    while (dirent* e = readdir(d))
+    std::vector<std::string> dirs;
+    for (const std::string& n : wc09p::ListDir(rel.empty() ? root : root + "/" + rel, &dirs))
     {
-        std::string n = e->d_name;
-        if (n.empty() || n[0] == '.') continue;
         std::string r = rel.empty() ? n : rel + "/" + n;
-        bool isDir = e->d_type == DT_DIR;
-        if (e->d_type == DT_UNKNOWN) { struct stat st; isDir = stat((root + "/" + r).c_str(), &st) == 0 && S_ISDIR(st.st_mode); }
-        if (isDir) { if (depth < 4) ScanDir(root, r, out, depth + 1); continue; }
         size_t dot = r.rfind('.');
         size_t slash = r.rfind('/');
         if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) out.insert(r.substr(0, dot));
     }
-    closedir(d);
+    if (depth < 4) for (const std::string& d : dirs) ScanDir(root, rel.empty() ? d : rel + "/" + d, out, depth + 1);
 }
 }
 
@@ -545,29 +534,24 @@ void SetupHDProvider(const std::string& folder, const std::string& fontDir)
 
 std::string FindPack(const std::string& romDir, const char* gameCode)
 {
-    DIR* d = opendir(romDir.c_str());
-    if (!d) return "";
-    std::string found;
-    while (dirent* e = readdir(d))
+    std::vector<std::string> dirs;
+    wc09p::ListDir(romDir, &dirs);
+    for (const std::string& n : dirs)
     {
-        std::string n = e->d_name;
-        if (n.empty() || n[0] == '.') continue;
         std::string dir = romDir + "/" + n;
-        FILE* f = fopen((dir + "/pack.json").c_str(), "rb");
-        if (!f) continue;
-        std::string js; char buf[4096]; size_t got;
-        while ((got = fread(buf, 1, sizeof(buf), f)) > 0 && js.size() < 65536) js.append(buf, got);
-        fclose(f);
+        std::vector<unsigned char> raw;
+        if (!wc09p::ReadWhole(dir + "/pack.json", raw) || raw.size() > 65536) continue;
+        std::string js(raw.begin(), raw.end());
         // "game": "CY8"
         size_t k = js.find("\"game\"");
         if (k == std::string::npos) continue;
-        size_t q1 = js.find('"', js.find(':', k));
+        size_t colon = js.find(':', k);
+        size_t q1 = colon == std::string::npos ? colon : js.find('"', colon);
         size_t q2 = q1 == std::string::npos ? q1 : js.find('"', q1 + 1);
         if (q2 == std::string::npos) continue;
         std::string code = js.substr(q1 + 1, q2 - q1 - 1);
-        if (!code.empty() && strncmp(gameCode, code.c_str(), code.size()) == 0) { found = dir; break; }
+        if (!code.empty() && strncmp(gameCode, code.c_str(), code.size()) == 0) return dir;
     }
-    closedir(d);
-    return found;
+    return "";
 }
 }

@@ -8,24 +8,10 @@ concurrency:
   group: windows-${{ github.ref }}
   cancel-in-progress: true
 
-
-env:
-  MELONDS_GIT_BRANCH: ${{ github.ref }}
-  MELONDS_GIT_HASH: ${{ github.sha }}
-  MELONDS_BUILD_PROVIDER: GitHub Actions
-#  MELONDS_VERSION_SUFFIX: " RC"
-
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - name: x86_64
-            image: windows-2025-vs2026
-
-    name: ${{ matrix.arch.name }}
-    runs-on: ${{ matrix.arch.image }}
+    name: Dual HD (x86_64)
+    runs-on: windows-2025-vs2026
     env:
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
     steps:
@@ -35,8 +21,8 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ github.workspace }}/vcpkg_cache
-        key: vcpkg-${{ matrix.arch.name }}-windows-${{ hashFiles('vcpkg.json') }}
-        restore-keys: vcpkg-${{ matrix.arch.name }}-windows-
+        key: vcpkg-x86_64-windows-${{ hashFiles('vcpkg.json') }}
+        restore-keys: vcpkg-x86_64-windows-
     - name: Set up vcpkg
       uses: lukka/run-vcpkg@v11
       with:
@@ -44,19 +30,21 @@ jobs:
     - name: Build
       uses: lukka/run-cmake@v10
       with:
-        configurePreset: release-windows-${{ matrix.arch.name }}
-        configurePresetAdditionalArgs: "['-DENABLE_DEBUG_DEPS=OFF', '-DMELONDS_EMBED_BUILD_INFO=ON']"
-        buildPreset: release-windows-${{ matrix.arch.name }}
-    - name: Check JPEG support is linked
+        configurePreset: release-windows-x86_64
+        configurePresetAdditionalArgs: "['-DENABLE_DEBUG_DEPS=OFF', '-DBUILD_QT_SDL=OFF', '-DBUILD_DUALHD=ON', '-DENABLE_GDBSTUB=OFF']"
+        buildPreset: release-windows-x86_64
+    - name: Package
       shell: pwsh
       run: |
-        if (Select-String -Path .\build\release-windows-${{ matrix.arch.name }}\melonDS.exe -Pattern 'QJpegPlugin' -SimpleMatch -Quiet) { 'JPEG plugin linked' } else { 'JPEG plugin missing'; exit 1 }
+        $exe = Get-ChildItem -Path build\release-windows-x86_64 -Recurse -Filter "Dual HD.exe" | Select-Object -First 1
+        Write-Output "exe: $($exe.FullName)"
+        Copy-Item $exe.FullName "Dual HD.exe"
     - uses: actions/upload-artifact@v7
       with:
-        name: melonDS-windows-${{ matrix.arch.name }}
-        path: .\build\release-windows-${{ matrix.arch.name }}\melonDS.exe
+        name: DualHD-Windows
+        path: "Dual HD.exe"
     - name: Save vcpkg cache
       uses: actions/cache/save@v4
       with:
         path: ${{ github.workspace }}/vcpkg_cache
-        key: vcpkg-${{ matrix.arch.name }}-windows-${{ hashFiles('vcpkg.json') }}
+        key: vcpkg-x86_64-windows-${{ hashFiles('vcpkg.json') }}

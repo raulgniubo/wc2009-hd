@@ -9,8 +9,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
-#include <dirent.h>
-#include <sys/stat.h>
+#include "Portable.h"
 
 #include "NDS.h"
 #include "NDSCart.h"
@@ -27,6 +26,14 @@
 #include "WC09Cards.h"
 #include "WC09Render.h"
 
+#ifndef MELONDS_GLES
+// desktop OpenGL: the GL call counters only exist in the GLES wrapper
+namespace melonDS::GLES
+{
+struct Stats { unsigned draws, bufUploads, bufBytes, texUploads, texBytes, readbacks, passBreaks; };
+inline Stats& St() { static Stats s{}; return s; }
+}
+#endif
 using namespace melonDS;
 
 namespace wc09m
@@ -128,25 +135,19 @@ void FlushSave(bool force)
         if (!force && Platform::GetMSCount() - SaveStamp < 1500) return;
         copy = SaveData; SaveDirty = false;
     }
-    mkdir(SavesDir().c_str(), 0755);
+    wc09p::MakeDir(SavesDir());
     std::string path = SavesDir() + "/" + RomBase + ".sav", tmp = path + ".tmp";
-    if (FILE* f = fopen(tmp.c_str(), "wb"))
+    if (FILE* f = wc09p::Fopen(tmp, "wb"))
     {
         bool ok = fwrite(copy.data(), 1, copy.size(), f) == copy.size();
         ok = fclose(f) == 0 && ok;
-        if (ok) rename(tmp.c_str(), path.c_str());
+        if (ok) wc09p::Rename(tmp, path);   // replaces the old file in one step
     }
 }
 
 bool ReadFile(const std::string& path, std::vector<u8>& out)
 {
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return false;
-    fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-    out.resize(n > 0 ? n : 0);
-    bool ok = n > 0 && fread(out.data(), 1, n, f) == (size_t)n;
-    fclose(f);
-    return ok;
+    return wc09p::ReadWhole(path, out) && !out.empty();
 }
 
 // screen drawing
@@ -169,10 +170,15 @@ void ApplyHdOptions()
     WC09::SetSmooth2D(OptSmooth2D);
 }
 GLint LocLayer = -1, LocSwap = -1;
-const char* kVS = R"(#version 300 es
+#ifdef MELONDS_GLES
+#define WC09_GLSL "#version 300 es\n"
+#else
+#define WC09_GLSL "#version 330 core\n"   // desktop OpenGL (macOS 4.1 core, Windows)
+#endif
+const char* kVS = WC09_GLSL R"(
 in vec2 vPos; in vec2 vUV; out vec2 fUV;
 void main() { gl_Position = vec4(vPos, 0.0, 1.0); fUV = vUV; })";
-const char* kFS = R"(#version 300 es
+const char* kFS = WC09_GLSL R"(
 precision highp float; precision highp sampler2DArray;
 uniform sampler2DArray Tex; uniform float uLayer; uniform int uSwap; in vec2 fUV; out vec4 oColor;
 void main() { vec3 c = texture(Tex, vec3(fUV, uLayer)).rgb; oColor = vec4(uSwap != 0 ? c.bgr : c, 1.0); })";
@@ -226,23 +232,16 @@ int wc09_init(const char* gameDir, const char* dataDir, const char* fontDir)
 {
     GameDir = gameDir ? gameDir : ""; DataDir = dataDir ? dataDir : ""; FontDir = fontDir ? fontDir : "";
     while (!GameDir.empty() && GameDir.back() == '/') GameDir.pop_back();
-    mkdir(DataDir.c_str(), 0755);
+    wc09p::MakeDir(DataDir);
     return 0;
 }
 
 const char* wc09_find_rom(void)
 {
     FoundRom.clear();
-    if (DIR* d = opendir(GameDir.c_str()))
-    {
-        while (dirent* e = readdir(d))
-        {
-            std::string n = e->d_name;
-            if (n.size() > 4 && (n.compare(n.size() - 4, 4, ".nds") == 0 || n.compare(n.size() - 4, 4, ".NDS") == 0) && n[0] != '.')
-            { FoundRom = GameDir + "/" + n; break; }
-        }
-        closedir(d);
-    }
+    for (const std::string& n : wc09p::ListDir(GameDir))
+        if (n.size() > 4 && (n.compare(n.size() - 4, 4, ".nds") == 0 || n.compare(n.size() - 4, 4, ".NDS") == 0))
+        { FoundRom = GameDir + "/" + n; break; }
     return FoundRom.c_str();
 }
 
@@ -259,11 +258,10 @@ int wc09_load_rom(const char* path, int scale, int jit)
     Scale = scale > 0 ? scale : 4;
 
     // in-game save: Saves/<rom>.sav (one left next to the game is moved in)
-    mkdir(SavesDir().c_str(), 0755);
+    wc09p::MakeDir(SavesDir());
     std::string sav = SavesDir() + "/" + RomBase + ".sav";
     std::string old = GameDir + "/" + RomBase + ".sav";
-    struct stat st;
-    if (stat(sav.c_str(), &st) != 0 && stat(old.c_str(), &st) == 0) rename(old.c_str(), sav.c_str());
+    if (!wc09p::Exists(sav) && wc09p::Exists(old)) wc09p::Rename(old, sav);
     std::vector<u8> savdata;
     ReadFile(sav, savdata);
     {
@@ -303,7 +301,9 @@ int wc09_load_rom(const char* path, int scale, int jit)
         GLint units = 0, ublock = 0, fvec = 0;
         glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &units);
         glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &ublock);
+#ifdef GL_MAX_FRAGMENT_UNIFORM_VECTORS
         glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS, &fvec);
+#endif
         std::lock_guard<std::mutex> lk(LogLock);
         Report = std::string(soft ? "renderer: SOFTWARE (OpenGL failed)\n" : "renderer: OpenGL\n")
             + "GL: " + (const char*)glGetString(GL_VERSION) + " / " + (const char*)glGetString(GL_RENDERER) + "\n"
@@ -434,7 +434,8 @@ void wc09_draw_screen(int screen, int x, int y, int w, int h, int fbWidth, int f
         {
             glGenTextures(1, &SoftTex);
             glBindTexture(GL_TEXTURE_2D_ARRAY, SoftTex);
-            glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, 256, 192, 2);
+            glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, 256, 192, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
         }
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, SoftTex);
@@ -518,8 +519,8 @@ int wc09_save_state(int slot)
     if (!Nds) return 1;
     Savestate st;
     if (st.Error || !Nds->DoSavestate(&st) || st.Error) return 2;
-    mkdir(SavesDir().c_str(), 0755);
-    FILE* f = fopen(StatePath(slot).c_str(), "wb");
+    wc09p::MakeDir(SavesDir());
+    FILE* f = wc09p::Fopen(StatePath(slot), "wb");
     if (!f) return 3;
     bool ok = fwrite(st.Buffer(), 1, st.Length(), f) == st.Length();
     ok = fclose(f) == 0 && ok;
@@ -539,8 +540,8 @@ int wc09_load_state_file(const char* path)
     return 0;
 }
 
-int wc09_state_exists(int slot) { struct stat st; return stat(StatePath(slot).c_str(), &st) == 0; }
-int wc09_delete_state(int slot) { return remove(StatePath(slot).c_str()) == 0 ? 0 : 1; }
+int wc09_state_exists(int slot) { return wc09p::Exists(StatePath(slot)) ? 1 : 0; }
+int wc09_delete_state(int slot) { return wc09p::Remove(StatePath(slot)) ? 0 : 1; }
 
 void wc09_flush_save(void) { FlushSave(true); }
 
@@ -591,7 +592,7 @@ const char* wc09_renderer_report(int* software)
 int wc09_rom_code(const char* path, char* code)
 {
     code[0] = 0;
-    FILE* f = fopen(path, "rb");
+    FILE* f = wc09p::Fopen(path, "rb");
     if (!f) return 1;
     bool ok = fseek(f, 0x0C, SEEK_SET) == 0 && fread(code, 1, 4, f) == 4;
     fclose(f);
@@ -605,7 +606,7 @@ int wc09_rom_info(const char* path, char* title, int titleCap, unsigned char* rg
 {
     if (title && titleCap > 0) title[0] = 0;
     if (rgba) memset(rgba, 0, 32 * 32 * 4);
-    FILE* f = fopen(path, "rb");
+    FILE* f = wc09p::Fopen(path, "rb");
     if (!f) return 1;
     u8 hdr[0x200];
     u8 banner[0x840];

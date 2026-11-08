@@ -1,0 +1,53 @@
+# Dual HD for Mac and Windows: Qt 6 + SDL 2 on the shared emulator core (mobile/core, desktop OpenGL)
+# the emulator core gets its OpenGL declarations from glad
+set(MELONDS_GL_HEADER \"frontend/glad/glad.h\" CACHE STRING "Header with the OpenGL declarations")
+target_compile_definitions(core PUBLIC MELONDS_GL_HEADER=${MELONDS_GL_HEADER})
+target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/frontend)
+find_package(Qt6 COMPONENTS Core Gui Widgets Network OpenGL OpenGLWidgets REQUIRED)
+find_package(PkgConfig REQUIRED)
+if (BUILD_STATIC)
+    list(APPEND PKG_CONFIG_EXECUTABLE "--static")
+endif()
+pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+
+set(SOURCES main.cpp App.cpp MainWindow.cpp Library.cpp GameView.cpp SettingsDialog.cpp PauseMenu.cpp Pads.cpp res/dualhd.qrc)
+
+if (APPLE)
+    set(ICON ${CMAKE_CURRENT_SOURCE_DIR}/res/icon.icns)
+    set_source_files_properties(${ICON} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    add_executable(DualHD MACOSX_BUNDLE ${SOURCES} ${ICON})
+    set_target_properties(DualHD PROPERTIES
+        OUTPUT_NAME "Dual HD"
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/res/Info.plist.in)
+    find_library(OPENGL_LIB OpenGL)
+    target_link_libraries(DualHD PRIVATE ${OPENGL_LIB})
+    target_compile_definitions(DualHD PRIVATE GL_SILENCE_DEPRECATION)
+elseif (WIN32)
+    add_executable(DualHD WIN32 ${SOURCES} res/dualhd.rc)
+    set_target_properties(DualHD PROPERTIES OUTPUT_NAME "Dual HD")
+    target_link_libraries(DualHD PRIVATE opengl32)
+    target_link_libraries(DualHD PRIVATE ws2_32 iphlpapi winmm imm32 version setupapi)
+    if (USE_VCPKG AND NOT MINGW AND NOT TARGET m)
+        add_library(m STATIC)   # some static libraries ask for libm, which MSVC doesn't have
+        target_link_libraries(DualHD PUBLIC m)
+    endif()
+else()
+    add_executable(DualHD ${SOURCES})
+    set_target_properties(DualHD PROPERTIES OUTPUT_NAME "dualhd")
+endif()
+
+target_link_libraries(DualHD PRIVATE wc09mobile Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets PkgConfig::SDL2)
+target_include_directories(DualHD PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/frontend)
+
+if (BUILD_STATIC)
+    if (WIN32)
+        qt_import_plugins(DualHD INCLUDE Qt::QModernWindowsStylePlugin)
+    endif()
+    if (USE_VCPKG AND UNIX AND NOT APPLE)
+        pkg_check_modules(ALSA REQUIRED IMPORTED_TARGET alsa)
+        target_link_libraries(DualHD PRIVATE PkgConfig::ALSA)
+    endif()
+endif()

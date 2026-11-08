@@ -8,6 +8,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 #include <string>
 #include <cstdlib>
 #include <cstring>
@@ -78,7 +83,14 @@ bool IsActive() { return Active; }
 bool LoadCardTable(const std::string& path)
 {
     TexHashes.clear(); Passcodes.clear(); NumCards = 0;
+#ifdef _WIN32
+    // UTF-8 path (the folder may have accented letters)
+    std::wstring wp;
+    { int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0); wp.resize(n > 0 ? n - 1 : 0); if (n > 0) MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wp.data(), n); }
+    FILE* f = _wfopen(wp.c_str(), L"rb");
+#else
     FILE* f = fopen(path.c_str(), "rb");
+#endif
     if (!f) return false;
     bool ok = false;
     char magic[4]; u32 ver = 0, n = 0;

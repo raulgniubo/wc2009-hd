@@ -8,39 +8,25 @@ concurrency:
   group: macos-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  MELONDS_GIT_BRANCH: ${{ github.ref }}
-  MELONDS_GIT_HASH: ${{ github.sha }}
-  MELONDS_BUILD_PROVIDER: GitHub Actions
-#  MELONDS_VERSION_SUFFIX: " RC"
-
 jobs:
   build-macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [arm64]
-
-    name: ${{ matrix.arch }}
+    name: Dual HD (arm64)
     runs-on: macos-26
-
     env:
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
-
     steps:
       - name: Check out sources
         uses: actions/checkout@v6
       - name: Install dependencies for package building
-        run: |
-          brew install autoconf automake autoconf-archive libtool python-setuptools
+        run: brew install autoconf automake autoconf-archive libtool python-setuptools
       - name: Set up CMake
         uses: lukka/get-cmake@latest
       - name: Restore vcpkg cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-${{ matrix.arch }}-osx-${{ hashFiles('vcpkg.json') }}
-          restore-keys: vcpkg-${{ matrix.arch }}-osx-
+          key: vcpkg-arm64-osx-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-arm64-osx-
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
@@ -48,31 +34,26 @@ jobs:
       - name: Build
         uses: lukka/run-cmake@v10
         with:
-          configurePreset: release-mac-${{ matrix.arch }}
-          buildPreset: release-mac-${{ matrix.arch }}
-          configurePresetAdditionalArgs: "['-DMELONDS_EMBED_BUILD_INFO=ON']"
-      - name: Check JPEG support is linked
+          configurePreset: release-mac-arm64
+          buildPreset: release-mac-arm64
+          configurePresetAdditionalArgs: "['-DBUILD_QT_SDL=OFF', '-DBUILD_DUALHD=ON', '-DENABLE_GDBSTUB=OFF']"
+      - name: Package the app
         shell: bash
         run: |
-          strings build/release-mac-${{ matrix.arch }}/melonDS.app/Contents/MacOS/melonDS > strings.txt
-          grep -q "QJpegPlugin" strings.txt || (echo "JPEG plugin missing" && exit 1)
-          echo "JPEG plugin linked"
-      - name: Compress app bundle
-        shell: bash
-        run: |
-          cd build/release-mac-${{ matrix.arch }}
-          codesign -s - --deep --force melonDS.app
-          zip -r -y ../../macOS-${{ matrix.arch }}.zip melonDS.app
+          APP=$(find build/release-mac-arm64 -maxdepth 3 -name "Dual HD.app" -type d | head -1)
+          echo "app: $APP"
+          cd "$(dirname "$APP")"
+          codesign -s - --deep --force "Dual HD.app"
+          ditto -c -k --keepParent "Dual HD.app" "$GITHUB_WORKSPACE/Dual HD for Mac.zip"
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: macOS-${{ matrix.arch }}
-          path: macOS-${{ matrix.arch }}.zip
+          name: DualHD-Mac
+          path: "Dual HD for Mac.zip"
           retention-days: 14
           archive: false
       - name: Save vcpkg cache
         uses: actions/cache/save@v4
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-${{ matrix.arch }}-osx-${{ hashFiles('vcpkg.json') }}
-
+          key: vcpkg-arm64-osx-${{ hashFiles('vcpkg.json') }}

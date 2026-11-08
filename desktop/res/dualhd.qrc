@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="icon.png">icon.png</file>
+        <file alias="check.png">check.png</file>
+        <file alias="dot.png">dot.png</file>
+        <file alias="fonts/Inter-Medium.ttf">Inter-Medium.ttf</file>
+        <file alias="fonts/Inter-Bold.ttf">Inter-Bold.ttf</file>
+    </qresource>
+</RCC>
