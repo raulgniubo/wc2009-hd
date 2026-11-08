@@ -1,4 +1,4 @@
-#include "glad/glad.h"   // before any Qt OpenGL header
+#include "GL.h"   // before any Qt OpenGL header
 #include "GameView.h"
 #include "App.h"
 #include "Pads.h"

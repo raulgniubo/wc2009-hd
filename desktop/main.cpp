@@ -1,5 +1,5 @@
 // Dual HD for Mac and Windows.
-#include "glad/glad.h"
+#include "GL.h"
 #include "MainWindow.h"
 #include "App.h"
 #include "Pads.h"
