@@ -445,9 +445,10 @@ final class LibraryView extends LinearLayout {
             setLayoutParams(new AbsListView.LayoutParams(-1, -2));
             art = new Art(c);
             addView(art, new LayoutParams(-1, -2));
-            title = Ui.text(c, "", 14, 0xDDFFFFFF, false);
-            title.setMaxLines(3);
-            title.setEllipsize(TextUtils.TruncateAt.END);
+            // the whole name, however many lines it takes (the grid row grows to fit)
+            title = Ui.text(c, "", 13.5f, 0xDDFFFFFF, false);
+            title.setMaxLines(6);
+            title.setMinLines(2);
             title.setGravity(Gravity.CENTER_HORIZONTAL);
             title.setPadding(Ui.dp(c, 4), Ui.dp(c, 10), Ui.dp(c, 4), Ui.dp(c, 6));
             addView(title, new LayoutParams(-1, -2));

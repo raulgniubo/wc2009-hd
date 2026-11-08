@@ -7,6 +7,7 @@
 #pragma once
 
 #include <mutex>
+#include <string>
 #include <vector>
 #include "types.h"
 
@@ -77,6 +78,10 @@ bool GetHDTextEnabled();
 // Smooth (xBR) upscaling of 2D layers in the OpenGL renderer. On by default.
 void SetSmooth2D(bool on);
 bool GetSmooth2D();
+
+// The card table from the HD pack (data/cardtable.bin); without it no card is recognised.
+bool LoadCardTable(const std::string& path);
+bool HasCardTable();
 
 // Card index -> passcode (0 if none), or 0 when out of range.
 u32 PasscodeOf(u16 card);

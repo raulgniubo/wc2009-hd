@@ -26,6 +26,7 @@
 #include "third_party/stb_image.h"
 
 #include "WC09Battle.h"
+#include "WC09Cards.h"
 
 using namespace melonDS;
 
@@ -431,6 +432,27 @@ void ScanDir(const std::string& root, const std::string& rel, std::unordered_set
 }
 }
 
+// where a picture lives in the pack: cards/ (card art), hd/ (HD versions that look like the
+// original), redesign/ (the modern redesign, only in that mode; it wins over hd/ there)
+static void Candidates(const std::string& name, std::string* out, int& n)
+{
+    n = 0;
+    bool card = name == "cardback" || name.compare(0, 5, "card_") == 0 ||
+                (!name.empty() && name.find_first_not_of("0123456789") == std::string::npos);
+    if (card) { out[n++] = "cards/" + name; return; }
+    if (name.compare(0, 6, "tiles/") == 0) { out[n++] = "redesign/" + name; return; }   // redesign-only data
+    if (WC09::GetRedesignEnabled()) out[n++] = "redesign/" + name;
+    out[n++] = "hd/" + name;
+}
+
+static bool MirrorName(const std::string& name, std::string& r)
+{
+    // left-facing battle pictures are mostly mirrors of the right-facing ones
+    if (name.compare(0, 14, "BattleMonsterL") != 0 || name.size() < 2 || name.compare(name.size() - 2, 2, "_l") != 0) return false;
+    r = "BattleMonsterR" + name.substr(14, name.size() - 14 - 2) + "_r";
+    return true;
+}
+
 void SetupHDProvider(const std::string& folder, const std::string& fontDir)
 {
     {
@@ -456,10 +478,11 @@ void SetupHDProvider(const std::string& folder, const std::string& fontDir)
         std::shared_ptr<const std::unordered_set<std::string>> idx;
         { std::lock_guard<std::mutex> lk(IndexLock); idx = Index; }
         if (!idx) return -1;
-        if (idx->count(name)) return 1;
-        // left-facing battle pictures can be mirrored from the right-facing ones
-        if (name.compare(0, 14, "BattleMonsterL") == 0 && name.size() > 2 && name.compare(name.size() - 2, 2, "_l") == 0)
-            return idx->count("BattleMonsterR" + name.substr(14, name.size() - 14 - 2) + "_r") ? 1 : 0;
+        std::string c[3]; int n;
+        Candidates(name, c, n);
+        for (int i = 0; i < n; i++) if (idx->count(c[i])) return 1;
+        std::string r;
+        if (MirrorName(name, r)) { Candidates(r, c, n); for (int i = 0; i < n; i++) if (idx->count(c[i])) return 1; }
         return 0;
     });
     if (FontMedium.empty()) FontMedium = ReadAll(fontDir + "/Inter-Medium.ttf");
@@ -499,12 +522,16 @@ void SetupHDProvider(const std::string& folder, const std::string& fontDir)
             return !rgba.empty();
         }
         if (f.empty()) return false;
-        if (LoadImageFile(f + "/" + name, rgba, w, h)) return true;
-        // left-facing battle images are mostly mirrors of the right-facing ones
-        if (starts("BattleMonsterL") && name.size() > 2 && name.compare(name.size() - 2, 2, "_l") == 0)
+        std::string c[3]; int n;
+        Candidates(name, c, n);
+        for (int i = 0; i < n; i++) if (LoadImageFile(f + "/" + c[i], rgba, w, h)) return true;
+        std::string r;
+        if (MirrorName(name, r))
         {
-            std::string r = "BattleMonsterR" + name.substr(14, name.size() - 14 - 2) + "_r";
-            if (LoadImageFile(f + "/" + r, rgba, w, h))
+            Candidates(r, c, n);
+            bool got = false;
+            for (int i = 0; i < n && !got; i++) got = LoadImageFile(f + "/" + c[i], rgba, w, h);
+            if (got)
             {
                 for (int y = 0; y < h; y++)
                     for (int x = 0; x < w / 2; x++)
@@ -514,5 +541,33 @@ void SetupHDProvider(const std::string& folder, const std::string& fontDir)
         }
         return false;
     });
+}
+
+std::string FindPack(const std::string& romDir, const char* gameCode)
+{
+    DIR* d = opendir(romDir.c_str());
+    if (!d) return "";
+    std::string found;
+    while (dirent* e = readdir(d))
+    {
+        std::string n = e->d_name;
+        if (n.empty() || n[0] == '.') continue;
+        std::string dir = romDir + "/" + n;
+        FILE* f = fopen((dir + "/pack.json").c_str(), "rb");
+        if (!f) continue;
+        std::string js; char buf[4096]; size_t got;
+        while ((got = fread(buf, 1, sizeof(buf), f)) > 0 && js.size() < 65536) js.append(buf, got);
+        fclose(f);
+        // "game": "CY8"
+        size_t k = js.find("\"game\"");
+        if (k == std::string::npos) continue;
+        size_t q1 = js.find('"', js.find(':', k));
+        size_t q2 = q1 == std::string::npos ? q1 : js.find('"', q1 + 1);
+        if (q2 == std::string::npos) continue;
+        std::string code = js.substr(q1 + 1, q2 - q1 - 1);
+        if (!code.empty() && strncmp(gameCode, code.c_str(), code.size()) == 0) { found = dir; break; }
+    }
+    closedir(d);
+    return found;
 }
 }

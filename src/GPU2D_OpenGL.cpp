@@ -542,8 +542,7 @@ GLuint GLRenderer2D::GetHDTexture(int image)
     {
         // big text panels take a while to render: done on a worker thread, the layer keeps its
         // previous panel meanwhile (see the compositor)
-        std::string nm = WC09::FaithfulName(WC09::BattleImageName(image));
-        if (nm.empty()) { HDMissing[image] = WC09::FrameNum(); return 0; }
+        std::string nm = WC09::BattleImageName(image);
         if (nm.rfind("decktext/", 0) == 0 || nm.rfind("deckname/", 0) == 0 || nm.rfind("textpanel/", 0) == 0)
         {
             int r = WC09::LoadHDImageAsync(nm, rgba, w, h);

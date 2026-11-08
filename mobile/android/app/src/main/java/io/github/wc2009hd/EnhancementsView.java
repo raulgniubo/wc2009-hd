@@ -102,7 +102,7 @@ final class EnhancementsView extends LinearLayout {
                 String code = Native.romCode(f.getAbsolutePath());
                 if (code == null || !code.startsWith(pack.code)) continue;
                 found++;
-                boolean ok = new java.io.File(gameDir, pack.needs).isDirectory();
+                boolean ok = new java.io.File(new java.io.File(gameDir, pack.needs), "pack.json").isFile();
                 LinearLayout r = new LinearLayout(c);
                 r.setPadding(0, Ui.dp(c, 6), 0, Ui.dp(c, 6));
                 TextView ic = Ui.text(c, ok ? "✓" : "!", 15, 0xFF06111F, true);

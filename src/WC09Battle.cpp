@@ -281,7 +281,7 @@ static bool KnownMissing(const std::string& name)
 // of a menu folder starts a background load of the whole folder.
 namespace
 {
-struct PrefetchedImage { std::vector<u8> Rgba; int W = 0, H = 0; };
+struct PrefetchedImage { std::vector<u8> Rgba; int W = 0, H = 0; u32 Gen = 0; };   // Gen: HD mode it was loaded in
 std::mutex PrefLock;
 std::unordered_map<std::string, PrefetchedImage> Prefetched;
 std::vector<std::string> PrefQueue;
@@ -330,13 +330,14 @@ void PrefetchLoop()
         HDImageProvider p;
         { std::lock_guard<std::mutex> lk(Lock); p = Provider; }
         PrefetchedImage im;
+        im.Gen = HDSettingsGeneration();
         bool ok;
         if (name.rfind("cardimg/", 0) == 0) ok = LoadCardImage(atoi(name.c_str() + 8), im.Rgba, im.W, im.H);
         else ok = p && p(name, im.Rgba, im.W, im.H);
         std::lock_guard<std::mutex> lk(PrefLock);
         AsyncPending.erase(name);
-        if (ok) Prefetched[name] = std::move(im);
-        else Prefetched[name] = PrefetchedImage{};   // failed: an empty entry says so
+        if (!ok) { u32 g = im.Gen; im = PrefetchedImage{}; im.Gen = g; }   // failed: an empty entry says so
+        Prefetched[name] = std::move(im);
     }
 }
 
@@ -373,6 +374,13 @@ int LoadHDImageAsync(const std::string& name, std::vector<u8>& rgba, int& w, int
     if (KnownMissing(name)) return -1;
     std::lock_guard<std::mutex> lk(PrefLock);
     auto it = Prefetched.find(name);
+    if (it != Prefetched.end() && it->second.Gen != HDSettingsGeneration())
+    {
+        // loaded for another HD mode (it may come from another folder of the pack): load again
+        Prefetched.erase(it);
+        PrefFolders.clear();
+        it = Prefetched.end();
+    }
     if (it != Prefetched.end())
     {
         bool ok = it->second.W > 0;
@@ -427,7 +435,7 @@ bool LoadHDImage(const std::string& name, std::vector<u8>& rgba, int& w, int& h)
     {
         std::lock_guard<std::mutex> lk(PrefLock);
         auto it = Prefetched.find(name);
-        if (it != Prefetched.end() && it->second.W > 0)
+        if (it != Prefetched.end() && it->second.W > 0 && it->second.Gen == HDSettingsGeneration())
         {
             rgba = std::move(it->second.Rgba); w = it->second.W; h = it->second.H;
             Prefetched.erase(it);   // the renderer keeps its own texture from here on
@@ -642,48 +650,14 @@ void ReleaseROM()
     IndexReady = false;
 }
 
-bool IsRedesignName(const std::string& name)
-{
-    static const std::unordered_set<std::string> names = {
-#include "WC09Redesign.inc"
-    };
-    // pictures drawn by the app itself in a modern style, and redesigns keyed by texture structure
-    static const char* const kMade[] = {"lppanel/", "statpanel/", "decktext/", "deckname/", "textpanel/",
-                                        "tex3d/s_", "tex3d/h_", "tex3d/phase_", "tex3d/corner_"};
-    for (const char* m : kMade) if (name.compare(0, strlen(m), m) == 0) return true;
-    return names.count(name) > 0;
-}
-
-std::string FaithfulName(const std::string& name)
-{
-    if (GetRedesignEnabled() || !IsRedesignName(name)) return name;
-    // the HD pack keeps an HD version that looks like the original for some of them
-    if (name.compare(0, 6, "tex3d/") == 0 && name.compare(0, 8, "tex3d/s_") != 0 && name.compare(0, 8, "tex3d/h_") != 0 &&
-        name.compare(0, 12, "tex3d/phase_") != 0 && name.compare(0, 13, "tex3d/corner_") != 0)
-        return "orig/" + name;
-    if (name.find('/') != std::string::npos && name.compare(0, 6, "tex3d/") != 0 &&
-        name.compare(0, 8, "lppanel/") != 0 && name.compare(0, 10, "statpanel/") != 0 && name.compare(0, 9, "decktext/") != 0 &&
-        name.compare(0, 9, "deckname/") != 0 && name.compare(0, 10, "textpanel/") != 0)
-        return "orig/" + name;
-    return "";
-}
-
 bool HDImageAllowed(int image)
 {
     if (image < 0) return false;
     if (IsCardImage(image) || IsCardSet(image)) return GetHDCardsEnabled();
+    // the panels drawn in a modern style are part of the redesign
     if (image >= kTextPanelBase && image < kSpriteImageBase) return GetHDTextEnabled() && GetRedesignEnabled();
-    if (!GetHDPackEnabled()) return false;
-    if (GetRedesignEnabled()) return true;
-    // faithful HD: redesigned pictures only where an HD version of the original exists
-    static std::unordered_map<int, bool> cache;
-    static u32 cacheGen = 0;
-    if (cacheGen != HDSettingsGeneration()) { cache.clear(); cacheGen = HDSettingsGeneration(); }
-    auto it = cache.find(image);
-    if (it != cache.end()) return it->second;
-    bool ok = !FaithfulName(BattleImageName(image)).empty();
-    cache[image] = ok;
-    return ok;
+    // everything else: the pack's hd/ folder, plus redesign/ in the redesign mode (see the provider)
+    return GetHDPackEnabled();
 }
 
 bool HideSprite(int engine, int x, int y, int w, int h, bool affine)

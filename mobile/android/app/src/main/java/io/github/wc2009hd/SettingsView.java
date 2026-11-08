@@ -25,7 +25,7 @@ final class SettingsView extends LinearLayout {
     static boolean on(SharedPreferences p, String key) {
         switch (key) {
             case "boxart": case "hdAll": case "jit": case "filter": case "smooth2d": case "hdCards": case "hdText": case "buttons":
-            case "haptics": case "resume": case "sound": return p.getBoolean(key, true);
+            case "haptics": case "resume": case "sound": case "padHide": return p.getBoolean(key, true);
             default: return p.getBoolean(key, false);
         }
     }
@@ -139,6 +139,46 @@ final class SettingsView extends LinearLayout {
         })));
         ct.addView(Ui.divider(c));
         ct.addView(toggle("haptics", "Vibration", "A light tap when you press a button."));
+
+        // ---- game controllers
+        LinearLayout pc = section("Game controllers");
+        String padName = Pad.connected((android.hardware.input.InputManager) c.getSystemService(Context.INPUT_SERVICE));
+        pc.addView(label(padName != null ? padName : "No controller connected",
+                "Pair a controller in Android's Bluetooth settings. Xbox, PlayStation, Switch Pro and other gamepads work as soon as they're connected."));
+        pc.addView(Ui.divider(c));
+        pc.addView(label("Face buttons", Pad.byPosition(prefs)
+                ? "Match DS positions: the right button is A and the bottom one B, as on a DS. Best for Xbox and PlayStation controllers."
+                : "Match letters: A is A, B is B. Best for Switch-style controllers."));
+        pc.addView(pad(Ui.chips(c, new String[] {"Match letters", "Match DS positions"}, Pad.byPosition(prefs) ? 1 : 0, i -> {
+            prefs.edit().putInt("padLayout", i).apply(); listener.settingChanged("padLayout");
+        })));
+        pc.addView(Ui.divider(c));
+        pc.addView(toggle("padHide", "Hide on-screen buttons", "While a controller is connected, the game gets the whole screen."));
+        for (int b = 0; b < Pad.COUNT; b++) {
+            final int btn = b;
+            pc.addView(Ui.divider(c));
+            LinearLayout row = new LinearLayout(c);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
+            row.setBackground(Ui.pressable(c, Ui.CARD, 0));
+            row.addView(Ui.text(c, Pad.BUTTON_NAMES[b], 16, Ui.TEXT, false), new LayoutParams(0, -2, 1));
+            row.addView(Ui.text(c, Pad.ACTION_NAMES[Pad.action(prefs, b)] + "   ›", 15, Ui.TEXT_DIM, false));
+            row.setOnClickListener(v -> new android.app.AlertDialog.Builder(c, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(Pad.BUTTON_NAMES[btn])
+                    .setSingleChoiceItems(Pad.ACTION_NAMES, Pad.action(prefs, btn), (d, which) -> {
+                        Pad.setAction(prefs, btn, which); d.dismiss(); listener.settingChanged("padMap");
+                    })
+                    .setNegativeButton("Cancel", null).show());
+            pc.addView(row);
+        }
+        pc.addView(Ui.divider(c));
+        TextView reset = Ui.text(c, "Reset buttons to defaults", 15, 0xFFF87171, true);
+        reset.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
+        reset.setOnClickListener(v -> { Pad.reset(prefs); listener.settingChanged("padMap"); });
+        pc.addView(reset);
+        TextView pn = Ui.text(c, "Tap a button to change what it does. By default Home and the left stick click open the Dual HD menu, and holding the right stick click fast-forwards. Menus work with the D-pad, A and B.", 13, Ui.TEXT_DIM, false);
+        pn.setPadding(Ui.dp(c, 6), Ui.dp(c, 8), Ui.dp(c, 6), 0);
+        list.addView(pn);
 
         // ---- gameplay
         LinearLayout gp = section("Gameplay");

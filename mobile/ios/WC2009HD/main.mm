@@ -448,9 +448,17 @@ static void RegisterDefaults()
 {
     [Prefs() registerDefaults:@{
         @"boxart": @YES, @"sort": @"recent", @"perf": @NO, @"perfDetail": @NO, @"hdAll": @YES, @"hdMode": @2, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
-        @"buttons": @YES, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
+        @"buttons": @YES, @"padHide": @YES, @"padLayout": @0, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
     }];
     MigratePrefs();
+    // controllers coming and going: pages and the game screen update themselves
+    for (NSNotificationName n in @[GCControllerDidConnectNotification, GCControllerDidDisconnectNotification])
+        [NSNotificationCenter.defaultCenter addObserverForName:n object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification* note) {
+            GCController* c = note.object;
+            // the Home button opens the Dual HD menu instead of the system's game overlay
+            if (@available(iOS 14.0, *)) if (c.extendedGamepad.buttonHome) c.extendedGamepad.buttonHome.preferredSystemGestureState = GCSystemGestureStateDisabled;
+            PostChange(@"pads");
+        }];
 }
 
 // older versions had one on/off switch for the enhancements: off becomes the Original mode
@@ -485,6 +493,72 @@ static UIColor* Accent() { return [UIColor colorWithRed:0.29 green:0.64 blue:1.0
 static UIColor* AppBackground() { return [UIColor colorWithRed:0.04 green:0.055 blue:0.086 alpha:1]; }
 static UIColor* RGB(int hex) { return [UIColor colorWithRed:((hex >> 16) & 255) / 255.0 green:((hex >> 8) & 255) / 255.0 blue:(hex & 255) / 255.0 alpha:1]; }
 
+// ---- game controllers ----
+// Controller buttons (as the GameController framework names them: A is the bottom face button,
+// B the right one, X the left one, Y the top one) and what they do in the game.
+enum { PB_A, PB_B, PB_X, PB_Y, PB_L1, PB_R1, PB_L2, PB_R2, PB_L3, PB_R3, PB_MENU, PB_OPTIONS, PB_HOME, PB_COUNT };
+enum { PA_NONE, PA_A, PA_B, PA_X, PA_Y, PA_L, PA_R, PA_START, PA_SELECT, PA_MENU, PA_FFWD, PA_COUNT };
+static NSString* PadActionName(int a)
+{
+    static NSString* const n[PA_COUNT] = {@"Nothing", @"A", @"B", @"X", @"Y", @"L", @"R", @"START", @"SELECT", @"Dual HD Menu", @"Fast Forward (hold)"};
+    return a >= 0 && a < PA_COUNT ? n[a] : @"";
+}
+static GCControllerButtonInput* PadElement(GCExtendedGamepad* g, int b)
+{
+    switch (b)
+    {
+    case PB_A: return g.buttonA; case PB_B: return g.buttonB; case PB_X: return g.buttonX; case PB_Y: return g.buttonY;
+    case PB_L1: return g.leftShoulder; case PB_R1: return g.rightShoulder; case PB_L2: return g.leftTrigger; case PB_R2: return g.rightTrigger;
+    case PB_L3: return g.leftThumbstickButton; case PB_R3: return g.rightThumbstickButton;
+    case PB_MENU: return g.buttonMenu; case PB_OPTIONS: return g.buttonOptions; case PB_HOME: return g.buttonHome;
+    }
+    return nil;
+}
+// the name printed on the controller (Cross, Circle… on PlayStation pads)
+static NSString* PadButtonName(int b)
+{
+    GCExtendedGamepad* g = GCController.controllers.firstObject.extendedGamepad;
+    GCControllerButtonInput* e = g ? PadElement(g, b) : nil;
+    if (e.localizedName.length) return e.localizedName;
+    static NSString* const n[PB_COUNT] = {@"A", @"B", @"X", @"Y", @"L1", @"R1", @"L2", @"R2", @"Left Stick Click", @"Right Stick Click", @"Menu", @"Options", @"Home"};
+    return n[b];
+}
+// "Match DS positions": the face buttons keep their place on a DS (A right, B bottom, X top, Y left)
+static BOOL PadByPosition() { return [Prefs() integerForKey:@"padLayout"] == 1; }
+static int PadDefaultAction(int b)
+{
+    BOOL pos = PadByPosition();
+    switch (b)
+    {
+    case PB_A: return pos ? PA_B : PA_A;
+    case PB_B: return pos ? PA_A : PA_B;
+    case PB_X: return pos ? PA_Y : PA_X;
+    case PB_Y: return pos ? PA_X : PA_Y;
+    case PB_L1: case PB_L2: return PA_L;
+    case PB_R1: case PB_R2: return PA_R;
+    case PB_MENU: return PA_START;
+    case PB_OPTIONS: return PA_SELECT;
+    case PB_HOME: case PB_L3: return PA_MENU;
+    case PB_R3: return PA_FFWD;
+    }
+    return PA_NONE;
+}
+static int PadAction(int b)
+{
+    NSDictionary* m = [Prefs() dictionaryForKey:@"padMap"];
+    NSNumber* v = m[[NSString stringWithFormat:@"%d", b]];
+    return v ? v.intValue : PadDefaultAction(b);
+}
+static void PadSetAction(int b, int a)
+{
+    NSMutableDictionary* m = [[Prefs() dictionaryForKey:@"padMap"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    m[[NSString stringWithFormat:@"%d", b]] = @(a);
+    [Prefs() setObject:m forKey:@"padMap"];
+}
+static BOOL PadConnected() { for (GCController* c in GCController.controllers) if (c.extendedGamepad) return YES; return NO; }
+// on-screen buttons: off in full screen, and while a controller is connected (if so set)
+static BOOL ShowOnScreenButtons() { return [Prefs() boolForKey:@"buttons"] && !([Prefs() boolForKey:@"padHide"] && PadConnected()); }
+
 // Game enhancement packs: extra improvements made for one game, on by themselves when it runs.
 static NSArray<NSDictionary*>* EnhancementPacks()
 {
@@ -499,9 +573,9 @@ static NSArray<NSDictionary*>* EnhancementPacks()
             @"Sharper game text, with the same look",
             @"Optional redesign: new life point panel, duel buttons and icons, card text in a clean font",
         ],
-        @"needs": @"HDCards",
-        @"needsTitle": @"HD pack (HDCards folder)",
-        @"needsDetail": @"The enhancements use an HD pack: a folder named HDCards with the card art and the redesigned screens (about 1 GB). It isn't part of the game file, so it has to sit right next to it.",
+        @"needs": @"WC2009-HD",
+        @"needsTitle": @"HD pack (WC2009-HD folder)",
+        @"needsDetail": @"The enhancements use an HD pack: a folder named WC2009-HD with the card art, the HD pictures and the redesign (about 1 GB). It isn't part of the game file, so it has to sit right next to it.",
         @"master": @"hdMode",
         @"options": @[],
     }];
@@ -580,7 +654,7 @@ static FolderPicker* gFolderPicker;
 @end
 
 // Copies of a pack's game in the library (Documents and games folders, one level deep):
-// path -> YES if the pack's folder (e.g. HDCards) is next to it
+// path -> YES if the pack's folder (e.g. WC2009-HD, with its pack.json) is next to it
 static NSDictionary<NSString*, NSNumber*>* PackInstalls(NSDictionary* pack)
 {
     NSMutableDictionary* out = [NSMutableDictionary dictionary];
@@ -595,7 +669,7 @@ static NSDictionary<NSString*, NSNumber*>* PackInstalls(NSDictionary* pack)
         {
             BOOL isDir = NO;
             NSString* p = [r stringByAppendingPathComponent:f];
-            if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir && ![@[@"Saves", @"HDCards", @"Covers"] containsObject:f]) [dirs addObject:p];
+            if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir && ![@[@"Saves", @"HDCards", @"WC2009-HD", @"Covers"] containsObject:f]) [dirs addObject:p];
         }
     }
     for (NSString* d in dirs)
@@ -605,8 +679,7 @@ static NSDictionary<NSString*, NSNumber*>* PackInstalls(NSDictionary* pack)
             NSString* p = [d stringByAppendingPathComponent:f];
             char code[5];
             if (wc09_rom_code(p.fileSystemRepresentation, code) != 0 || ![[NSString stringWithUTF8String:code] hasPrefix:pack[@"code"]]) continue;
-            BOOL isDir = NO;
-            out[p] = @([fm fileExistsAtPath:[d stringByAppendingPathComponent:pack[@"needs"]] isDirectory:&isDir] && isDir);
+            out[p] = @([fm fileExistsAtPath:[[d stringByAppendingPathComponent:pack[@"needs"]] stringByAppendingPathComponent:@"pack.json"]]);
         }
     return out;
 }
@@ -699,7 +772,7 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(changed:) name:kSettingsChanged object:nil];
 }
 
-- (void)changed:(NSNotification*)n { if ([n.object isEqualToString:@"folders"]) [self refresh]; }
+- (void)changed:(NSNotification*)n { if ([@[@"folders", @"padMap", @"pads"] containsObject:n.object]) [self refresh]; }
 
 - (void)refresh
 {
@@ -727,7 +800,8 @@ static UIImage* SettingsIcon(NSString* symbol, UIColor* color)
         UIImageSymbolConfiguration* sc = [UIImageSymbolConfiguration configurationWithPointSize:15 weight:UIImageSymbolWeightSemibold];
         c.image = [[UIImage systemImageNamed:@"checkmark.circle.fill" withConfiguration:sc] imageWithTintColor:RGB(0x22C55E) renderingMode:UIImageRenderingModeAlwaysOriginal];
     }
-    else if ([type isEqualToString:@"choice"] || [type isEqualToString:@"info"] || ([type isEqualToString:@"link"] && row[@"value"]))
+    else if ([type isEqualToString:@"choice"] || [type isEqualToString:@"info"] || ([type isEqualToString:@"link"] && row[@"value"]) ||
+             ([type isEqualToString:@"action"] && row[@"value"]))
     {
         c = [UIListContentConfiguration valueCellConfiguration];
         if ([type isEqualToString:@"choice"])
@@ -900,6 +974,58 @@ static NSString* DebugReportText()
     return [head stringByAppendingString:[NSString stringWithUTF8String:wc09_debug_report()]];
 }
 
+/** Game controller options: layout, hiding the on-screen buttons, what each button does. */
+static OptionsViewController* ControllerPage()
+{
+    OptionsViewController* vc = [OptionsViewController new];
+    vc.title = @"Game Controllers";
+    vc.build = ^NSArray* {
+        GCController* c = GCController.controllers.firstObject;
+        NSMutableArray* buttons = [NSMutableArray array];
+        for (int b = 0; b < PB_COUNT; b++)
+        {
+            if (b == PB_HOME && c.extendedGamepad && !c.extendedGamepad.buttonHome) continue;
+            [buttons addObject:@{@"type": @"action", @"title": PadButtonName(b), @"value": PadActionName(PadAction(b)),
+                @"action": [^(UIViewController* host) {
+                    UIAlertController* a = [UIAlertController alertControllerWithTitle:PadButtonName(b) message:@"What this button does in the game" preferredStyle:UIAlertControllerStyleActionSheet];
+                    int cur = PadAction(b);
+                    for (int act = 0; act < PA_COUNT; act++)
+                    {
+                        NSString* t = act == cur ? [@"✓  " stringByAppendingString:PadActionName(act)] : PadActionName(act);
+                        [a addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
+                            PadSetAction(b, act);
+                            PostChange(@"padMap");
+                        }]];
+                    }
+                    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+                    a.popoverPresentationController.sourceView = host.view;
+                    a.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(host.view.bounds), CGRectGetMidY(host.view.bounds), 1, 1);
+                    [host presentViewController:a animated:YES completion:nil];
+                } copy]}];
+        }
+        return @[
+            @{@"title": @"Controller", @"rows": @[
+                @{@"type": @"info", @"title": c ? (c.vendorName ?: @"Controller") : @"No controller connected",
+                  @"symbol": @"gamecontroller.fill", @"color": c ? RGB(0x22C55E) : RGB(0x64748B), @"value": c ? @"Connected" : @""}],
+              @"footer": @"Pair a controller in the Settings app under Bluetooth. It works as soon as it's connected."},
+            @{@"title": @"Layout", @"rows": @[
+                @{@"type": @"choice", @"key": @"padLayout", @"title": @"Face Buttons", @"symbol": @"circle.grid.cross", @"color": RGB(0x8B5CF6),
+                  @"choices": @[
+                      @{@"title": @"Match Letters", @"detail": @"A is A, B is B. Best for Switch-style controllers", @"value": @0},
+                      @{@"title": @"Match DS Positions", @"detail": @"The right button is A, the bottom one is B, as on a DS. Best for Xbox and PlayStation controllers", @"value": @1}]},
+                @{@"type": @"switch", @"key": @"padHide", @"title": @"Hide On-Screen Buttons", @"symbol": @"eye.slash", @"color": RGB(0xF97316),
+                  @"detail": @"While a controller is connected, the game gets the whole screen. They come back when it disconnects."}]},
+            @{@"title": @"Buttons", @"rows": buttons,
+              @"footer": @"Tap a button to change what it does. By default the Home button and the left stick click open the Dual HD menu, and holding the right stick click fast-forwards. In the menu, use the D-pad, A to choose and B to go back."},
+            @{@"rows": @[@{@"type": @"action", @"title": @"Reset to Defaults", @"destructive": @YES, @"action": [^(UIViewController*) {
+                [Prefs() removeObjectForKey:@"padMap"];
+                PostChange(@"padMap");
+            } copy]}]},
+        ];
+    };
+    return vc;
+}
+
 /** The settings, in a navigation controller ready to present. */
 static UINavigationController* SettingsNavigation(void (^onDone)(void))
 {
@@ -965,8 +1091,11 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
                 @{@"type": @"choice", @"key": @"opacity", @"title": @"Button Opacity", @"symbol": @"circle.lefthalf.filled", @"color": RGB(0x64748B),
                   @"choices": PercentChoices()},
                 @{@"type": @"switch", @"key": @"haptics", @"title": @"Vibration", @"symbol": @"hand.tap.fill", @"color": RGB(0x6366F1),
-                  @"detail": @"A light tap when you press a button."}],
-              @"footer": @"Game controllers (Xbox, PlayStation, MFi) work too."},
+                  @"detail": @"A light tap when you press a button."},
+                @{@"type": @"link", @"title": @"Game Controllers", @"symbol": @"gamecontroller", @"color": RGB(0x0EA5E9),
+                  @"value": PadConnected() ? (GCController.controllers.firstObject.vendorName ?: @"Connected") : @"",
+                  @"open": [^UIViewController* { return ControllerPage(); } copy]}],
+              @"footer": @"Xbox, PlayStation, Switch Pro and MFi controllers work: pair them in the Settings app under Bluetooth."},
             @{@"title": @"Gameplay", @"rows": @[
                 @{@"type": @"switch", @"key": @"resume", @"title": @"Resume Where You Left Off", @"symbol": @"play.circle.fill", @"color": RGB(0x22C55E),
                   @"detail": @"Leaving a game saves a resume point; opening it again continues from there."},
@@ -1003,12 +1132,18 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
 @interface MenuPanel : UIView
 - (instancetype)initWithTitle:(NSString*)title message:(NSString*)msg items:(NSArray<NSDictionary*>*)items onCancel:(void (^)(void))cancel;
 - (void)show;
+// game controller navigation
+- (void)moveSelection:(int)step;
+- (void)activateSelection;
+- (void)cancel;
 @end
 
 @implementation MenuPanel
 {
     UIVisualEffectView* _card;
     void (^_cancel)(void);
+    NSMutableArray<UIButton*>* _buttons;
+    NSInteger _sel;
 }
 
 - (instancetype)initWithTitle:(NSString*)title message:(NSString*)msg items:(NSArray<NSDictionary*>*)items onCancel:(void (^)(void))cancel
@@ -1042,6 +1177,8 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
     }
     NSMutableArray* all = [items mutableCopy];
     [all addObject:@{@"title": @"Cancel", @"symbol": @"", @"cancel": @YES}];
+    _buttons = [NSMutableArray array];
+    _sel = -1;
     for (NSDictionary* it in all)
     {
         BOOL isCancel = [it[@"cancel"] boolValue], destructive = [it[@"destructive"] boolValue];
@@ -1064,7 +1201,9 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
         }]];
         b.contentHorizontalAlignment = isCancel ? UIControlContentHorizontalAlignmentCenter : UIControlContentHorizontalAlignmentLeading;
         if (isCancel) [st setCustomSpacing:10 afterView:st.arrangedSubviews.lastObject];
+        b.layer.cornerRadius = 12;
         [st addArrangedSubview:b];
+        [_buttons addObject:b];
     }
 
     UIScrollView* sv = [UIScrollView new];
@@ -1112,6 +1251,25 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
     }];
 }
 
+- (void)moveSelection:(int)step
+{
+    if (!_buttons.count) return;
+    _sel = _sel < 0 ? 0 : (_sel + step + (NSInteger)_buttons.count) % (NSInteger)_buttons.count;
+    for (NSUInteger i = 0; i < _buttons.count; i++)
+        _buttons[i].backgroundColor = (NSInteger)i == _sel ? [UIColor colorWithWhite:1 alpha:0.16] : UIColor.clearColor;
+    UIButton* b = _buttons[_sel];
+    UIScrollView* sv = (UIScrollView*)b.superview.superview;
+    if ([sv isKindOfClass:UIScrollView.class]) [sv scrollRectToVisible:[b convertRect:b.bounds toView:sv] animated:YES];
+}
+
+- (void)activateSelection
+{
+    if (_sel < 0) { [self moveSelection:0]; return; }   // first press: show where the selection is
+    [_buttons[_sel] sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
+}
+
+- (void)cancel { if (self.userInteractionEnabled) [self hideThen:nil cancelled:YES]; }
+
 - (void)backgroundTap:(UITapGestureRecognizer*)g
 {
     if (!CGRectContainsPoint(_card.frame, [g locationInView:self])) [self hideThen:nil cancelled:YES];
@@ -1142,6 +1300,9 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
     long _framesRun;
     AVAudioEngine* _engine;
     AVAudioSourceNode* _source;
+    unsigned _padPrev;               // controller buttons held last frame (bit per PB_)
+    BOOL _padHush;                   // a menu just closed: ignore the controller until everything is let go
+    __weak MenuPanel* _panel;        // the in-game menu on screen, if any (controller navigation)
 }
 
 static std::atomic<bool> gMuted{false};
@@ -1171,7 +1332,7 @@ static std::atomic<bool> gMuted{false};
     _controls.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _controls.delegate = self;
     _controls.layout = &_layout;
-    _controls.showButtons = [Prefs() boolForKey:@"buttons"];
+    _controls.showButtons = ShowOnScreenButtons();
     _controls.opacity = [Prefs() floatForKey:@"opacity"];
     _controls.haptics = [Prefs() boolForKey:@"haptics"];
     [self.view addSubview:_controls];
@@ -1227,7 +1388,7 @@ static std::atomic<bool> gMuted{false};
         CGFloat v = MAX(safe.top, safe.bottom), h = MAX(safe.left, safe.right);
         safe = UIEdgeInsetsMake(v, h, v, h);
     }
-    BOOL buttons = [Prefs() boolForKey:@"buttons"];
+    BOOL buttons = ShowOnScreenButtons();
     if (!buttons)
     {
         // full screen really is the whole display: only the menu button keeps out of the system's areas
@@ -1319,7 +1480,7 @@ static std::atomic<bool> gMuted{false};
     NSString* key = n.object;
     if ([key isEqualToString:@"scale"]) { if (_started) { [EAGLContext setCurrentContext:_ctx]; wc09_set_scale(PrefScale()); } }
     else if ([@[@"filter", @"smooth2d", @"hdCards", @"hdText", @"hdAll", @"hdMode"] containsObject:key]) ApplyCoreOptions();
-    else if ([key isEqualToString:@"buttons"]) { _controls.showButtons = [Prefs() boolForKey:@"buttons"]; [self.view setNeedsLayout]; }
+    else if ([@[@"buttons", @"padHide", @"pads"] containsObject:key]) { _controls.showButtons = ShowOnScreenButtons(); [self.view setNeedsLayout]; }
     else if ([key isEqualToString:@"opacity"]) { _controls.opacity = [Prefs() floatForKey:@"opacity"]; [_controls setNeedsDisplay]; }
     else if ([key isEqualToString:@"haptics"]) _controls.haptics = [Prefs() boolForKey:@"haptics"];
     else if ([key isEqualToString:@"sound"]) gMuted = ![Prefs() boolForKey:@"sound"];
@@ -1447,22 +1608,61 @@ static std::atomic<bool> gMuted{false};
 
 - (void)pollControllers
 {
-    GCExtendedGamepad* g = GCController.controllers.firstObject.extendedGamepad;
-    if (!g) return;
-    unsigned k = 0;
-    if (g.buttonA.pressed) k |= WC09_KEY_A;
-    if (g.buttonB.pressed) k |= WC09_KEY_B;
-    if (g.buttonX.pressed) k |= WC09_KEY_X;
-    if (g.buttonY.pressed) k |= WC09_KEY_Y;
-    if (g.leftShoulder.pressed || g.leftTrigger.pressed) k |= WC09_KEY_L;
-    if (g.rightShoulder.pressed || g.rightTrigger.pressed) k |= WC09_KEY_R;
-    if (g.buttonMenu.pressed) k |= WC09_KEY_START;
-    if (g.buttonOptions.pressed) k |= WC09_KEY_SELECT;
+    GCExtendedGamepad* g = nil;
+    for (GCController* c in GCController.controllers) if ((g = c.extendedGamepad)) break;
+    if (!g) { if (_padPrev) { _padPrev = 0; gInput.setPadKeys(0); } return; }
+    unsigned held = 0;
+    for (int b = 0; b < PB_COUNT; b++) { GCControllerButtonInput* e = PadElement(g, b); if (e.pressed) held |= 1u << b; }
     float x = g.dpad.xAxis.value + g.leftThumbstick.xAxis.value, y = g.dpad.yAxis.value + g.leftThumbstick.yAxis.value;
-    if (x < -0.5f) k |= WC09_KEY_LEFT;
-    if (x > 0.5f) k |= WC09_KEY_RIGHT;
-    if (y > 0.5f) k |= WC09_KEY_UP;
-    if (y < -0.5f) k |= WC09_KEY_DOWN;
+    unsigned dirs = 0;
+    if (x < -0.5f) dirs |= WC09_KEY_LEFT;
+    if (x > 0.5f) dirs |= WC09_KEY_RIGHT;
+    if (y > 0.5f) dirs |= WC09_KEY_UP;
+    if (y < -0.5f) dirs |= WC09_KEY_DOWN;
+    unsigned pressed = held & ~_padPrev;
+    static unsigned prevDirs = 0;
+    unsigned newDirs = dirs & ~prevDirs;
+    prevDirs = dirs;
+    _padPrev = held;
+
+    // the in-game menu is open: the controller drives it
+    if (_panel)
+    {
+        _padHush = YES;
+        gInput.setPadKeys(0);
+        if (newDirs & WC09_KEY_UP) [_panel moveSelection:-1];
+        if (newDirs & WC09_KEY_DOWN) [_panel moveSelection:1];
+        for (int b = 0; b < PB_COUNT; b++)
+        {
+            if (!(pressed & (1u << b))) continue;
+            int a = PadAction(b);
+            if (a == PA_A || (b == PB_A && !PadByPosition()) || (b == PB_B && PadByPosition())) { [_panel activateSelection]; break; }
+            if (a == PA_B || a == PA_MENU) { [_panel cancel]; break; }
+        }
+        return;
+    }
+    if (_padHush)
+    {
+        if (held || dirs) { gInput.setPadKeys(0); return; }
+        _padHush = NO;
+    }
+    unsigned k = dirs;
+    BOOL ffwd = NO;
+    for (int b = 0; b < PB_COUNT; b++)
+    {
+        if (!(held & (1u << b))) continue;
+        switch (PadAction(b))
+        {
+        case PA_A: k |= WC09_KEY_A; break; case PA_B: k |= WC09_KEY_B; break;
+        case PA_X: k |= WC09_KEY_X; break; case PA_Y: k |= WC09_KEY_Y; break;
+        case PA_L: k |= WC09_KEY_L; break; case PA_R: k |= WC09_KEY_R; break;
+        case PA_START: k |= WC09_KEY_START; break; case PA_SELECT: k |= WC09_KEY_SELECT; break;
+        case PA_FFWD: ffwd = YES; break;
+        case PA_MENU: if (pressed & (1u << b)) { gInput.setPadKeys(0); [self controlsMenu]; return; } break;
+        }
+    }
+    static BOOL padFfwd = NO;
+    if (ffwd != padFfwd) { padFfwd = ffwd; [self controlsFastForward:ffwd]; }
     gInput.setPadKeys(k);
 }
 
@@ -1478,6 +1678,7 @@ static std::atomic<bool> gMuted{false};
 {
     __weak GameViewController* me = self;
     MenuPanel* p = [[MenuPanel alloc] initWithTitle:title message:msg items:items onCancel:^{ [me resume]; }];
+    _panel = p;
     p.frame = self.view.bounds;
     p.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:p];
@@ -1837,6 +2038,16 @@ static UIColor* Mix(UIColor* a, UIColor* b, CGFloat t)
 @property (nonatomic, strong) GameEntry* game;
 @end
 
+static UIFont* GameTitleFont() { return [UIFont systemFontOfSize:13.5 weight:UIFontWeightMedium]; }
+// height of a game's name wrapped to the cell width
+static CGFloat GameTitleHeight(NSString* t, CGFloat w)
+{
+    if (!t.length) return 0;
+    CGRect r = [t boundingRectWithSize:CGSizeMake(w - 4, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin
+                            attributes:@{NSFontAttributeName: GameTitleFont()} context:nil];
+    return ceil(r.size.height);
+}
+
 @implementation GameCell
 {
     UIView *_art, *_shine;
@@ -1880,8 +2091,9 @@ static UILabel* Badge(NSString* text, UIColor* color)
         _star.layer.cornerRadius = 11; _star.clipsToBounds = YES;
         for (UIView* v in @[_badge, _hd, _star]) [_art addSubview:v];
         _title = [UILabel new];
-        _title.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-        _title.textColor = [UIColor colorWithWhite:1 alpha:0.86]; _title.numberOfLines = 3;
+        _title.font = GameTitleFont();
+        _title.textColor = [UIColor colorWithWhite:1 alpha:0.86]; _title.numberOfLines = 0;
+        _title.lineBreakMode = NSLineBreakByWordWrapping;
         _title.textAlignment = NSTextAlignmentCenter;
         _sub = [UILabel new];
         _sub.font = [UIFont systemFontOfSize:12.5];
@@ -1923,8 +2135,9 @@ static UILabel* Badge(NSString* text, UIColor* color)
     _badge.frame = CGRectMake(bw - 6 - 62, 6, 62, 20);
     _star.frame = CGRectMake(6, 6, 22, 22);
     _hd.frame = CGRectMake(6, art.size.height - 6 - 20, 42, 20);
-    CGSize ts = [_title sizeThatFits:CGSizeMake(w - 4, 60)];
-    _title.frame = CGRectMake(2, areaH + 10, w - 4, MIN(ts.height, 60));
+    // the whole name, however many lines it takes (the grid makes every row tall enough)
+    CGSize ts = [_title sizeThatFits:CGSizeMake(w - 4, CGFLOAT_MAX)];
+    _title.frame = CGRectMake(2, areaH + 10, w - 4, MIN(ts.height, self.contentView.bounds.size.height - areaH - 10));
     _sub.frame = CGRectZero;
 }
 
@@ -2084,13 +2297,14 @@ static UILabel* Badge(NSString* text, UIColor* color)
     [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
 }
 
-static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
+static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger), CGFloat (^titleHeight)(CGFloat cellW))
 {
     return [[UICollectionViewCompositionalLayout alloc] initWithSectionProvider:^NSCollectionLayoutSection*(NSInteger s, id<NSCollectionLayoutEnvironment> env) {
         CGFloat w = env.container.effectiveContentSize.width;
         NSInteger cols = MAX(2, (NSInteger)((w - 40) / 168));
         CGFloat cellW = floor((w - 40 - (cols - 1) * 16) / cols);
-        CGFloat cellH = floor(cellW * 0.9) + 74;
+        // every cell tall enough for the longest name in the library (two lines at least)
+        CGFloat cellH = floor(cellW * 0.9) + 10 + MAX(titleHeight(cellW), ceil(GameTitleFont().lineHeight * 2)) + 12;
         NSCollectionLayoutItem* item = [NSCollectionLayoutItem itemWithLayoutSize:
             [NSCollectionLayoutSize sizeWithWidthDimension:[NSCollectionLayoutDimension absoluteDimension:cellW] heightDimension:[NSCollectionLayoutDimension absoluteDimension:cellH]]];
         NSCollectionLayoutGroup* group = [NSCollectionLayoutGroup horizontalGroupWithLayoutSize:
@@ -2120,6 +2334,11 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
     _grid = GridLayout(^BOOL(NSInteger s) {
         LibraryViewController* me = weakSelf;
         return me && me->_sectionTitles.count > (NSUInteger)s && me->_sectionTitles[s].length > 0;
+    }, ^CGFloat(CGFloat cellW) {
+        LibraryViewController* me = weakSelf;
+        CGFloat h = 0;
+        if (me) for (NSArray<GameEntry*>* sec in me->_sections) for (GameEntry* e in sec) h = MAX(h, GameTitleHeight(e.title, cellW));
+        return MIN(h, ceil(GameTitleFont().lineHeight * 6));
     });
     return self;
 }
@@ -2217,7 +2436,8 @@ static UICollectionViewLayout* GridLayout(BOOL (^hasHeader)(NSInteger))
             {
                 NSString* p = [root stringByAppendingPathComponent:f];
                 BOOL isDir = NO;
-                if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir && ![@[@"Saves", @"HDCards", @"Covers", @"Inbox"] containsObject:f]) scan(p);
+                if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir && ![@[@"Saves", @"HDCards", @"WC2009-HD", @"Covers", @"Inbox"] containsObject:f] &&
+                    ![fm fileExistsAtPath:[p stringByAppendingPathComponent:@"pack.json"]]) scan(p);
             }
         }
         NSMutableArray<GameEntry*>* games = [NSMutableArray array];

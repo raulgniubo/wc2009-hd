@@ -252,13 +252,10 @@ GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone, co
         char an[40]; snprintf(an, sizeof(an), "tex3d/h_%016llx", (unsigned long long)halfHash); names.push_back(an);
     }
     names.push_back(name);
-    // faithful HD mode: no redesigns, the original-style HD version where the pack has one
+    // (the structure-keyed names are redesigns only: not looked for in the faithful HD mode)
     if (!WC09::GetRedesignEnabled())
-    {
-        std::vector<std::string> keep;
-        for (auto& n : names) { std::string f = WC09::FaithfulName(n); if (!f.empty()) keep.push_back(f); }
-        names.swap(keep);
-    }
+        names.erase(std::remove_if(names.begin(), names.end(), [](const std::string& n) {
+            return n.compare(0, 8, "tex3d/s_") == 0 || n.compare(0, 8, "tex3d/h_") == 0; }), names.end());
     // the pictures are decoded on the worker thread (big PNGs would stall the game for a moment):
     // the original texture shows until the HD one is ready
     int& stage = HD3DStage[hash];

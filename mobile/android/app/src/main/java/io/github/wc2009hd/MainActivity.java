@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.hardware.input.InputManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -83,6 +84,7 @@ public final class MainActivity extends Activity
         root.setBackgroundColor(Ui.BG);
         setContentView(root);
         copyFonts();
+        ((InputManager) getSystemService(INPUT_SERVICE)).registerInputDeviceListener(padListener, null);
         route();
     }
 
@@ -220,7 +222,7 @@ public final class MainActivity extends Activity
                 access, access ? null : (v -> requestAccess())));
         String dir = gameDir();
         col.addView(step("2", "Choose your games folder",
-                "A folder with your .nds files, for example Download/DS Games. For Yu-Gi-Oh! 5D's WC2009, put its HDCards folder in there too."
+                "A folder with your .nds files, for example Download/DS Games. For Yu-Gi-Oh! 5D's WC2009, put its WC2009-HD folder in there too."
                         + (dir.isEmpty() ? "" : "\n\nCurrent: " + dir),
                 false, access ? (v -> pickFolder()) : null));
 
@@ -567,14 +569,33 @@ public final class MainActivity extends Activity
         pickFolder();
     }
 
+    /** rebuild the settings screen in place (rows whose text depends on other settings) */
+    void refreshSettings() {
+        if (settings == null) return;
+        int idx = root.indexOfChild(settings);
+        ScrollView old = findScroll(settings);
+        int y = old != null ? old.getScrollY() : 0;
+        root.removeView(settings);
+        settings = new SettingsView(this, prefs, this, gameDir());
+        root.addView(settings, idx, new FrameLayout.LayoutParams(-1, -1));
+        ScrollView sv = findScroll(settings);
+        if (sv != null) sv.post(() -> sv.scrollTo(0, y));
+    }
+
+    private static ScrollView findScroll(ViewGroup g) {
+        for (int i = 0; i < g.getChildCount(); i++) if (g.getChildAt(i) instanceof ScrollView) return (ScrollView) g.getChildAt(i);
+        return null;
+    }
+
     @Override
     public void settingChanged(String key) {
+        if (key.equals("padLayout") || key.equals("padMap")) { refreshSettings(); return; }
         if (game == null) return;
         switch (key) {
             case "scale": { int s = SettingsView.scale(prefs); game.queueEvent(() -> Native.setScale(s)); break; }
             case "filter": case "smooth2d": case "hdCards": case "hdText": case "hdAll": case "hdMode":
                 game.queueEvent(this::applyOptions); break;
-            case "buttons": controls.setShowButtons(SettingsView.on(prefs, "buttons")); relayout(); break;
+            case "buttons": case "padHide": controls.setShowButtons(showButtons()); relayout(); break;
             case "opacity": controls.setOpacity(SettingsView.opacity(prefs)); break;
             case "haptics": controls.setHaptics(SettingsView.on(prefs, "haptics")); break;
             case "sound": Native.setMuted(!SettingsView.on(prefs, "sound")); break;
@@ -600,7 +621,7 @@ public final class MainActivity extends Activity
         game = new GameView(this, this, layout, input);
         game.setFastForwardSpeed(SettingsView.ffSpeed(prefs));
         controls = new ControlsView(this, layout, input, this);
-        controls.setShowButtons(SettingsView.on(prefs, "buttons"));
+        controls.setShowButtons(showButtons());
         controls.setOpacity(SettingsView.opacity(prefs));
         controls.setHaptics(SettingsView.on(prefs, "haptics"));
         root.setBackgroundColor(Color.BLACK);
@@ -629,7 +650,7 @@ public final class MainActivity extends Activity
 
     private void relayout() {
         if (controls == null) return;
-        layout.compute(root.getWidth(), root.getHeight(), getResources().getDisplayMetrics().density, SettingsView.on(prefs, "buttons"));
+        layout.compute(root.getWidth(), root.getHeight(), getResources().getDisplayMetrics().density, showButtons());
         controls.invalidate();
     }
 
@@ -796,18 +817,24 @@ public final class MainActivity extends Activity
 
     // ================================================================ gamepads
 
-    private int padKeys, stickKeys;
+    private int padHeld, dirKeys, stickKeys, trigHeld;   // controller buttons held (bit per Pad button), D-pad, stick
+    private boolean padFfwd;
 
-    private static int mapKey(int code) {
+    private void applyPad() {
+        int held = padHeld | trigHeld, k = dirKeys | stickKeys;
+        boolean ffwd = false;
+        for (int b = 0; b < Pad.COUNT; b++) {
+            if ((held & (1 << b)) == 0) continue;
+            int a = Pad.action(prefs, b);
+            k |= Pad.ACTION_KEYS[a];
+            if (a == Pad.FFWD) ffwd = true;
+        }
+        if (ffwd != padFfwd) { padFfwd = ffwd; game.setFastForward(ffwd); controls.setFastForward(ffwd); }
+        input.setPadKeys(k);
+    }
+
+    private static int dirKey(int code) {
         switch (code) {
-            case KeyEvent.KEYCODE_BUTTON_A: return Native.A;
-            case KeyEvent.KEYCODE_BUTTON_B: return Native.B;
-            case KeyEvent.KEYCODE_BUTTON_X: return Native.X;
-            case KeyEvent.KEYCODE_BUTTON_Y: return Native.Y;
-            case KeyEvent.KEYCODE_BUTTON_L1: return Native.L;
-            case KeyEvent.KEYCODE_BUTTON_R1: return Native.R;
-            case KeyEvent.KEYCODE_BUTTON_START: return Native.START;
-            case KeyEvent.KEYCODE_BUTTON_SELECT: return Native.SELECT;
             case KeyEvent.KEYCODE_DPAD_UP: return Native.UP;
             case KeyEvent.KEYCODE_DPAD_DOWN: return Native.DOWN;
             case KeyEvent.KEYCODE_DPAD_LEFT: return Native.LEFT;
@@ -819,21 +846,29 @@ public final class MainActivity extends Activity
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         if (game != null && settings == null) {
-            if (e.getKeyCode() == KeyEvent.KEYCODE_BUTTON_MODE && e.getAction() == KeyEvent.ACTION_DOWN) { onMenu(); return true; }
-            int k = mapKey(e.getKeyCode());
-            if (k != 0) {
-                if (e.getAction() == KeyEvent.ACTION_DOWN) padKeys |= k;
-                else if (e.getAction() == KeyEvent.ACTION_UP) padKeys &= ~k;
-                input.setPadKeys(padKeys | stickKeys);
-                return true;
+            int b = Pad.fromKeyCode(e.getKeyCode());
+            int d = dirKey(e.getKeyCode());
+            if (b < 0 && d == 0) return super.dispatchKeyEvent(e);
+            boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+            if (b >= 0) {
+                if (down && e.getRepeatCount() == 0 && Pad.action(prefs, b) == Pad.MENU) {
+                    padHeld = 0; applyPad(); onMenu(); return true;
+                }
+                if (down) padHeld |= 1 << b;
+                else if (e.getAction() == KeyEvent.ACTION_UP) padHeld &= ~(1 << b);
+            } else {
+                if (down) dirKeys |= d;
+                else if (e.getAction() == KeyEvent.ACTION_UP) dirKeys &= ~d;
             }
+            applyPad();
+            return true;
         }
         return super.dispatchKeyEvent(e);
     }
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent e) {
-        if (game != null && (e.getSource() & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+        if (game != null && settings == null && (e.getSource() & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
                 && e.getAction() == MotionEvent.ACTION_MOVE) {
             float x = e.getAxisValue(MotionEvent.AXIS_HAT_X) + e.getAxisValue(MotionEvent.AXIS_X);
             float y = e.getAxisValue(MotionEvent.AXIS_HAT_Y) + e.getAxisValue(MotionEvent.AXIS_Y);
@@ -842,12 +877,31 @@ public final class MainActivity extends Activity
             if (x > 0.5f) k |= Native.RIGHT;
             if (y < -0.5f) k |= Native.UP;
             if (y > 0.5f) k |= Native.DOWN;
-            if (e.getAxisValue(MotionEvent.AXIS_LTRIGGER) > 0.5f) k |= Native.L;
-            if (e.getAxisValue(MotionEvent.AXIS_RTRIGGER) > 0.5f) k |= Native.R;
             stickKeys = k;
-            input.setPadKeys(padKeys | stickKeys);
+            int t = 0;
+            if (Math.max(e.getAxisValue(MotionEvent.AXIS_LTRIGGER), e.getAxisValue(MotionEvent.AXIS_BRAKE)) > 0.5f) t |= 1 << Pad.L2;
+            if (Math.max(e.getAxisValue(MotionEvent.AXIS_RTRIGGER), e.getAxisValue(MotionEvent.AXIS_GAS)) > 0.5f) t |= 1 << Pad.R2;
+            trigHeld = t;
+            applyPad();
             return true;
         }
         return super.dispatchGenericMotionEvent(e);
+    }
+
+    // ---- controllers coming and going: the on-screen buttons hide while one is connected
+    private final InputManager.InputDeviceListener padListener = new InputManager.InputDeviceListener() {
+        @Override public void onInputDeviceAdded(int id) { padsChanged(); }
+        @Override public void onInputDeviceRemoved(int id) { padHeld = 0; trigHeld = 0; stickKeys = 0; dirKeys = 0; if (game != null) applyPad(); padsChanged(); }
+        @Override public void onInputDeviceChanged(int id) { padsChanged(); }
+    };
+
+    private void padsChanged() {
+        if (controls != null) { controls.setShowButtons(showButtons()); relayout(); }
+        refreshSettings();
+    }
+
+    /** on-screen buttons: off in full screen, and while a controller is connected (if so set) */
+    boolean showButtons() {
+        return SettingsView.on(prefs, "buttons") && !(SettingsView.on(prefs, "padHide") && Pad.connected((InputManager) getSystemService(INPUT_SERVICE)) != null);
     }
 }

@@ -85,6 +85,7 @@ std::string Report;
 u64 PerfFrames = 0, PerfUs = 0, PerfStart = 0, PerfMaxUs = 0;
 char PerfText[256] = "";
 int PerfFps = 0;
+std::string PackDir;   // the HD pack in use ("" = none)
 u64 PerfLastCall = 0, PerfMaxGapUs = 0, PerfRender0 = 0, PerfRender3D0 = 0, PerfUploads0 = 0;
 
 // debug report: one sample per second, the last 15 minutes
@@ -326,11 +327,18 @@ int wc09_load_rom(const char* path, int scale, int jit)
     Nds->Reset();
     Nds->SetupDirectBoot(file);
 
-    // the WC2009 HD work: on for this game
+    // the WC2009 HD work: on for this game when its HD pack sits next to the ROM (a folder with a
+    // pack.json for the game: cards/, hd/, redesign/, data/cardtable.bin)
     const char* gc = Nds->NDSCartSlot.GetCart()->GetHeader().GameCode;
-    WC09::SetActive(gc[0] == 'C' && gc[1] == 'Y' && gc[2] == '8');
+    std::string romDir = RomPath.substr(0, RomPath.rfind('/'));
+    PackDir = FindPack(romDir, gc);
+    if (PackDir.empty()) PackDir = FindPack(GameDir, gc);
+    bool wc09 = gc[0] == 'C' && gc[1] == 'Y' && gc[2] == '8' && !PackDir.empty() &&
+                WC09::LoadCardTable(PackDir + "/data/cardtable.bin");
+    if (!wc09) PackDir.clear();
+    WC09::SetActive(wc09);
     ApplyHdOptions();
-    SetupHDProvider(GameDir + "/HDCards", FontDir);
+    SetupHDProvider(PackDir, FontDir);
 
     Nds->Start();
     InitScreenProgram();

@@ -5,7 +5,7 @@ final class Packs {
     static final class Option { final String key, title, detail; Option(String k, String t, String d) { key = k; title = t; detail = d; } }
     static final class Pack {
         final String code, title, shortTitle, about, needs, master;
-        final String needsDetail = "The enhancements use an HD pack: a folder named HDCards with the card art and the redesigned screens (about 1 GB). It isn't part of the game file, so it has to sit right next to it.";
+        final String needsDetail = "The enhancements use an HD pack: a folder named WC2009-HD with the card art, the HD pictures and the redesign (about 1 GB). It isn't part of the game file, so it has to sit right next to it.";
         final String[] features;
         final Option[] options;
         Pack(String code, String title, String shortTitle, String about, String[] features, String needs, String master, Option... options) {
@@ -23,7 +23,7 @@ final class Packs {
                     "Sharper game text, with the same look",
                     "Optional redesign: new life point panel, duel buttons and icons, card text in a clean font",
                 },
-                "HDCards",
+                "WC2009-HD",
                 "hdMode"),
     };
 

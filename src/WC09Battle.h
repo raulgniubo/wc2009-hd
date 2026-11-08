@@ -86,11 +86,7 @@ inline bool IsCardSet(int image) { return image >= kCardSetBase; }
 bool HDImageAllowed(int image);
 // before the ROM is freed (leaving the game, loading another one)
 void ReleaseROM();
-// redesigned pictures of the HD pack (left out in the faithful HD mode)
-bool IsRedesignName(const std::string& name);
-// the picture to load for `name` in the current mode: itself, its original-style HD version
-// (orig/...), or "" for none
-std::string FaithfulName(const std::string& name);
+
 struct CardSetItem { int Card; int X, Y; };   // position inside the set's rect, in BG pixels
 bool GetCardSet(int image, std::vector<CardSetItem>& items, int& w, int& h);
 

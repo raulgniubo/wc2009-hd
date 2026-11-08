@@ -1,5 +1,4 @@
 #include "WC09Cards.h"
-#include "WC09CardTable.h"
 #include "WC09Battle.h"
 #include "GPU.h"
 #include "GPU3D.h"
@@ -34,11 +33,18 @@ constexpr float FaceS0 = 20.f / 128.f, FaceS1 = 108.f / 128.f;
 constexpr float ArtU0 = (33.f - 20.f) / 88.f, ArtU1 = (95.f - 20.f) / 88.f;
 constexpr float ArtV0 = 24.f / 128.f, ArtV1 = 90.f / 128.f;
 
+// the card table comes with the HD pack (data/cardtable.bin): which texture is which card, and
+// each card's passcode (the name of its HD picture)
+struct TexHashEntry { u64 Hash; u16 Card; u8 Size; };
+std::vector<TexHashEntry> TexHashes;
+std::vector<u32> Passcodes;
+u32 NumCards = 0;
+
 const TexHashEntry* Find(u64 hash, u32 size)
 {
-    auto it = std::lower_bound(std::begin(TexHashes), std::end(TexHashes), hash,
+    auto it = std::lower_bound(TexHashes.begin(), TexHashes.end(), hash,
                                [](const TexHashEntry& e, u64 h) { return e.Hash < h; });
-    if (it != std::end(TexHashes) && it->Hash == hash && it->Size == size) return it;
+    if (it != TexHashes.end() && it->Hash == hash && it->Size == size) return &*it;
     return nullptr;
 }
 
@@ -68,6 +74,42 @@ bool GetSmooth2D() { return Smooth2D; }
 
 void SetActive(bool active) { Active = active; }
 bool IsActive() { return Active; }
+
+bool LoadCardTable(const std::string& path)
+{
+    TexHashes.clear(); Passcodes.clear(); NumCards = 0;
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return false;
+    bool ok = false;
+    char magic[4]; u32 ver = 0, n = 0;
+    if (fread(magic, 1, 4, f) == 4 && !memcmp(magic, "WC9T", 4) && fread(&ver, 4, 1, f) == 1 && ver == 1 &&
+        fread(&n, 4, 1, f) == 1 && n < 1000000)
+    {
+        TexHashes.resize(n);
+        ok = true;
+        for (u32 i = 0; i < n && ok; i++)
+        {
+            u8 rec[12];
+            if (fread(rec, 1, 12, f) != 12) { ok = false; break; }
+            TexHashEntry& e = TexHashes[i];
+            memcpy(&e.Hash, rec, 8); memcpy(&e.Card, rec + 8, 2); e.Size = rec[10];
+        }
+        u32 c = 0;
+        if (ok && fread(&c, 4, 1, f) == 1 && c < 100000)
+        {
+            Passcodes.resize(c);
+            ok = fread(Passcodes.data(), 4, c, f) == c;
+            NumCards = ok ? c : 0;
+        }
+        else ok = false;
+    }
+    fclose(f);
+    if (!ok) { TexHashes.clear(); Passcodes.clear(); NumCards = 0; }
+    std::sort(TexHashes.begin(), TexHashes.end(), [](const TexHashEntry& a, const TexHashEntry& b) { return a.Hash < b.Hash; });
+    return ok;
+}
+
+bool HasCardTable() { return NumCards > 0; }
 
 u32 PasscodeOf(u16 card) { return card < NumCards ? Passcodes[card] : 0; }
 
