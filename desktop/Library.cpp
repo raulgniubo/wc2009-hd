@@ -30,6 +30,7 @@
 #include <QTimer>
 #include <thread>
 #include <algorithm>
+#include <functional>
 
 static QString Key(const QString& prefix, const QString& file) { return prefix + "/" + QString(file).replace('/', '_'); }
 static QString ArtDir() { QString d = app::DataDir() + "/boxart"; QDir().mkpath(d); return d; }
@@ -295,6 +296,9 @@ Library::Library(QWidget* parent) : QWidget(parent)
     connect(addMenu->addAction("Add Games Folder…"), &QAction::triggered, this, &Library::addFolder);
     connect(addMenu->addAction("Open a Game File…"), &QAction::triggered, this, &Library::openFile);
     add->setMenu(addMenu);
+    QToolButton* refresh = tool(QString::fromUtf8("\u21bb"), "Refresh the Library");
+    refresh->setPopupMode(QToolButton::DelayedPopup);
+    connect(refresh, &QToolButton::clicked, this, &Library::reload);
     QToolButton* gear = tool(QString::fromUtf8("⚙"), "Settings");
     gear->setPopupMode(QToolButton::DelayedPopup);
     connect(gear, &QToolButton::clicked, this, &Library::openSettings);
@@ -378,7 +382,56 @@ Library::Library(QWidget* parent) : QWidget(parent)
     connect(&app::Notifier::I(), &app::Notifier::changed, this, [this](const QString& k) {
         if (k == "folders" || k == "boxart") reload();
     });
+    // a game added to or removed from a games folder shows up by itself (debounced: copies take a moment)
+    ReloadSoon.setSingleShot(true);
+    ReloadSoon.setInterval(1200);
+    connect(&ReloadSoon, &QTimer::timeout, this, &Library::refreshIfChanged);
+    connect(&Watcher, &QFileSystemWatcher::directoryChanged, this, [this] { ReloadSoon.start(); });
     reload();
+}
+
+// the .nds files (with size and date) in the games folders: what decides whether to rescan
+static QString FolderSignature(const QStringList& folders)
+{
+    QString sig;
+    std::function<void(const QString&, int)> walk = [&](const QString& dir, int depth) {
+        QDir d(dir);
+        for (const QFileInfo& fi : d.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name))
+            if (fi.suffix().compare("nds", Qt::CaseInsensitive) == 0 || fi.suffix().compare("png", Qt::CaseInsensitive) == 0 || fi.suffix().compare("jpg", Qt::CaseInsensitive) == 0)
+                sig += fi.absoluteFilePath() + '|' + QString::number(fi.size()) + '|' + QString::number(fi.lastModified().toSecsSinceEpoch()) + '\n';
+        if (depth <= 0) return;
+        for (const QFileInfo& sub : d.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+        {
+            QString n = sub.fileName();
+            if (n == "Saves" || n == "HDCards" || QFileInfo::exists(sub.absoluteFilePath() + "/pack.json")) continue;
+            walk(sub.absoluteFilePath(), depth - 1);
+        }
+    };
+    for (const QString& f : folders) walk(f, 1);
+    return sig;
+}
+
+void Library::refreshIfChanged()
+{
+    if (FolderSignature(app::Folders()) != LastSignature) reload();
+}
+
+void Library::watchFolders()
+{
+    if (!Watcher.directories().isEmpty()) Watcher.removePaths(Watcher.directories());
+    QStringList dirs;
+    for (const QString& f : app::Folders())
+    {
+        if (!QFileInfo(f).isDir()) continue;
+        dirs << f;
+        for (const QFileInfo& sub : QDir(f).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
+        {
+            QString n = sub.fileName();
+            if (n == "Saves" || n == "HDCards" || QFileInfo::exists(sub.absoluteFilePath() + "/pack.json")) continue;
+            dirs << sub.absoluteFilePath();
+        }
+    }
+    if (!dirs.isEmpty()) Watcher.addPaths(dirs);
 }
 
 void Library::loadCover(GameEntry& g)
@@ -415,9 +468,18 @@ void Library::reload()
         g.Title = !custom.isEmpty() ? custom : !tdb.isEmpty() ? tdb : g.BannerTitle;
         loadCover(g);
     }
+    QString keep = selectedRom();
     Model->reset(all, Search->text());
     for (int i = 0; i < Model->All.size(); i++) { fetchInfo(i); fetchArt(i); }
     relayout();
+    // keep the same game selected
+    for (int r = 0; !keep.isEmpty() && r < Model->rowCount(); r++)
+    {
+        const GameEntry* g = Model->at(Model->index(r));
+        if (g && g->Path == keep) { Grid->setCurrentIndex(Model->index(r)); break; }
+    }
+    LastSignature = FolderSignature(folders);
+    watchFolders();
 }
 
 void Library::applySort() { Model->refilter(Search->text()); relayout(); }

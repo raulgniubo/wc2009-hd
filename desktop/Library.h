@@ -3,6 +3,8 @@
 #pragma once
 #include <QWidget>
 #include <QSet>
+#include <QFileSystemWatcher>
+#include <QTimer>
 #include <QImage>
 #include <QAbstractListModel>
 #include <QStyledItemDelegate>
@@ -51,6 +53,7 @@ class Library : public QWidget
 public:
     explicit Library(QWidget* parent = nullptr);
     void reload();                       // rescan the folders
+    void refreshIfChanged();             // cheap check (folder contents), rescan only if something changed
     void moveSelection(int dx, int dy);  // controller navigation
     void playSelected();
     QString selectedRom() const;
@@ -84,4 +87,8 @@ private:
     QStackedWidget* Stack;
     QToolButton* SortBtn;
     QLabel* Count;
+    QFileSystemWatcher Watcher;   // the games folders: new or removed games show up by themselves
+    QTimer ReloadSoon;
+    QString LastSignature;
+    void watchFolders();
 };

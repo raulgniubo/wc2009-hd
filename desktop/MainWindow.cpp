@@ -66,6 +66,8 @@ MainWindow::MainWindow()
     // pause while in the background (if so set)
     connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState s) {
         Game->setAutoPause(app::On("pauseUnfocused") && s != Qt::ApplicationActive);
+        // back in the app: pick up games copied in meanwhile
+        if (s == Qt::ApplicationActive && Stack->currentWidget() == Lib) Lib->refreshIfChanged();
     });
 
     // controllers: navigate the library and the pause menu
@@ -85,6 +87,8 @@ void MainWindow::buildMenus()
     QAction* open = file->addAction("Open a Game File…", Lib, &Library::openFile);
     open->setShortcut(QKeySequence::Open);
     file->addAction("Add Games Folder…", Lib, &Library::addFolder);
+    QAction* refresh = file->addAction("Refresh Library", Lib, &Library::reload);
+    refresh->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
     file->addSeparator();
     QAction* prefs = file->addAction("Settings…", this, [this] { openSettings(); });
     prefs->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
