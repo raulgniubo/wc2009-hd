@@ -25,6 +25,7 @@
 #include <QTextDocument>
 #include <QStandardPaths>
 #include <QResizeEvent>
+#include <QKeyEvent>
 #include <QScrollBar>
 #include <QTimer>
 #include <thread>
@@ -295,6 +296,7 @@ Library::Library(QWidget* parent) : QWidget(parent)
                         "QScrollBar::add-line,QScrollBar::sub-line{height:0;}");
     connect(Grid, &QListView::activated, this, [this](const QModelIndex& i) { if (const GameEntry* g = Model->at(i)) emit play(g->Path, false); });
     connect(Grid, &QListView::customContextMenuRequested, this, &Library::contextMenu);
+    Grid->installEventFilter(this);
     Stack->addWidget(Grid);
 
     // empty state
@@ -411,6 +413,17 @@ void Library::relayout()
     Grid->setGridSize(QSize(cellW, cellH));
     Grid->doItemsLayout();
     Grid->viewport()->update();
+}
+
+bool Library::eventFilter(QObject* o, QEvent* e)
+{
+    // Return / Enter plays the selected game (the list doesn't do it on every platform)
+    if (o == Grid && e->type() == QEvent::KeyPress)
+    {
+        auto* k = static_cast<QKeyEvent*>(e);
+        if (k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) { playSelected(); return true; }
+    }
+    return QWidget::eventFilter(o, e);
 }
 
 void Library::resizeEvent(QResizeEvent* e) { QWidget::resizeEvent(e); QTimer::singleShot(0, this, [this] { relayout(); }); }

@@ -22,6 +22,10 @@
 #include <QKeyEvent>
 #include <QWindow>
 #include <QRegularExpression>
+#include <QMimeData>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QUrl>
 
 MainWindow::MainWindow()
 {
@@ -30,6 +34,7 @@ MainWindow::MainWindow()
     setMinimumSize(520, 420);
     QPalette pal = palette(); pal.setColor(QPalette::Window, app::Bg()); setPalette(pal);
 
+    setAcceptDrops(true);
     Stack = new QStackedWidget;
     setCentralWidget(Stack);
     Lib = new Library;
@@ -178,7 +183,7 @@ void MainWindow::buildMenus()
 
 void MainWindow::applyHotkeys()
 {
-    ActFull->setShortcut(app::HotkeySeq(app::HK_FULLSCREEN));
+    ActFull->setShortcuts({app::HotkeySeq(app::HK_FULLSCREEN), QKeySequence(Qt::ALT | Qt::Key_Return)});
     ActPause->setShortcut(app::HotkeySeq(app::HK_PAUSE));
     ActFfwd->setShortcut(app::HotkeySeq(app::HK_FFWD_TOGGLE));
     ActReset->setShortcut(app::HotkeySeq(app::HK_RESET));
@@ -390,6 +395,27 @@ void MainWindow::pollPads()
 }
 
 bool MainWindow::eventFilter(QObject* o, QEvent* e) { return QMainWindow::eventFilter(o, e); }
+
+// a .nds dropped on the window: play it (its folder joins the library)
+void MainWindow::dragEnterEvent(QDragEnterEvent* e)
+{
+    for (const QUrl& u : e->mimeData()->urls())
+        if (u.isLocalFile() && u.toLocalFile().endsWith(".nds", Qt::CaseInsensitive)) { e->acceptProposedAction(); return; }
+}
+
+void MainWindow::dropEvent(QDropEvent* e)
+{
+    for (const QUrl& u : e->mimeData()->urls())
+    {
+        QString p = u.toLocalFile();
+        if (!p.endsWith(".nds", Qt::CaseInsensitive)) continue;
+        QString d = QFileInfo(p).absolutePath();
+        QStringList f = app::Folders();
+        if (!f.contains(d)) { f << d; app::SetFolders(f); }
+        openRom(p);
+        return;
+    }
+}
 
 void MainWindow::changeEvent(QEvent* e)
 {

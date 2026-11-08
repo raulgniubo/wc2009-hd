@@ -66,6 +66,7 @@ public slots:
 
 protected:
     void resizeEvent(QResizeEvent* e) override;
+    bool eventFilter(QObject* o, QEvent* e) override;
 
 private:
     void relayout();
