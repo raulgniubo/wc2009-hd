@@ -633,6 +633,14 @@ std::atomic<int> BadgeX0[2], BadgeY0[2], BadgeX1[2], BadgeY1[2];
 
 bool LpPanelShown(int engine) { return LpBand[engine & 1].On; }
 
+bool HDImageAllowed(int image)
+{
+    if (image < 0) return false;
+    if (IsCardImage(image) || IsCardSet(image)) return GetHDCardsEnabled();
+    if (image >= kTextPanelBase && image < kSpriteImageBase) return GetHDTextEnabled();
+    return GetHDPackEnabled();
+}
+
 bool HideSprite(int engine, int x, int y, int w, int h, bool affine)
 {
     {
@@ -1182,7 +1190,7 @@ void OnVBlankBattle(GPU& gpu)
             fclose(f);
         }
     BGReplacement found[2][4];
-    if (IsActive() && GetHDCardsEnabled())
+    if (IsActive() && (GetHDCardsEnabled() || GetHDPackEnabled() || GetHDTextEnabled()))
     {
         auto* cart = gpu.NDS.NDSCartSlot.GetCart();
         if (cart && cart->GetROM() != IndexedROM)
@@ -1479,7 +1487,7 @@ void OnVBlankBattle(GPU& gpu)
 
     // life point panel: BG1 shows the gauge image -> redraw the whole panel in HD
     RectHide lpBand[2];
-    if (IndexReady && IsActive() && GetHDCardsEnabled())
+    if (IndexReady && IsActive() && GetHDTextEnabled())
         for (int e = 0; e < 2; e++)
         {
             BGReplacement& rep = found[e][1];
@@ -1543,7 +1551,7 @@ void OnVBlankBattle(GPU& gpu)
         bool updated[2][4] = {};
         static const bool perf = getenv("WC09_PERF") != nullptr;
         auto tp0 = std::chrono::steady_clock::now();
-        if ((HDTilesReady || dumpNow) && IsActive() && GetHDCardsEnabled())
+        if ((HDTilesReady || dumpNow) && IsActive() && GetHDPackEnabled())
             for (int e = 0; e < 2; e++)
             {
                 const GPU2D& u = e == 0 ? gpu.GPU2D_A : gpu.GPU2D_B;

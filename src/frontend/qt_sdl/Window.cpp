@@ -577,6 +577,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
             connect(actWC09HDCards, &QAction::triggered, this, [this](bool on) {
                 windowCfg.SetBool("WC09NoHDCards", !on);
                 melonDS::WC09::SetHDCardsEnabled(on);
+                melonDS::WC09::SetHDPackEnabled(on);
             });
 
             actWC09HDText = menu->addAction("HD card text (Yu-Gi-Oh! WC2009)");
@@ -752,6 +753,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
         actScreenFiltering->setChecked(windowCfg.GetBool("ScreenFilter"));
         actWC09HDCards->setChecked(!windowCfg.GetBool("WC09NoHDCards"));
         melonDS::WC09::SetHDCardsEnabled(!windowCfg.GetBool("WC09NoHDCards"));
+        melonDS::WC09::SetHDPackEnabled(!windowCfg.GetBool("WC09NoHDCards"));
         actWC09HDText->setChecked(!windowCfg.GetBool("WC09NoHDText"));
         melonDS::WC09::SetHDTextEnabled(!windowCfg.GetBool("WC09NoHDText"));
         actWC09Smooth2D->setChecked(!windowCfg.GetBool("WC09NoSmooth2D"));

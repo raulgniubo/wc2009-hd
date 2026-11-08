@@ -55,7 +55,8 @@ enum
     WC09_OPT_HD_TEXT = 1,       // WC2009: card text and panels in a real font (default 1)
     WC09_OPT_SMOOTH_2D = 2,     // smooth upscaling of 2D graphics (default 1)
     WC09_OPT_LINEAR_FILTER = 3, // 1 = smooth screen scaling, 0 = sharp pixels (default 1)
-    WC09_OPT_HD_ALL = 4,        // WC2009: master switch; 0 = the game exactly as on the DS (default 1)
+    WC09_OPT_HD_ALL = 4,        // WC2009: old master switch (0 = mode 0, 1 = mode 2)
+    WC09_OPT_HD_MODE = 5,       // WC2009: 0 = exactly as on the DS, 1 = original game + HD card art, 2 = everything (default 2)
 };
 void wc09_set_option(int option, int value);
 int wc09_is_hd_game(void);

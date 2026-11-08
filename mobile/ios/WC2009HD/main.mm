@@ -443,21 +443,40 @@ static NSUserDefaults* Prefs() { return NSUserDefaults.standardUserDefaults; }
 static int PrefScale() { return (int)[Prefs() integerForKey:@"scale"]; }
 static void PostChange(NSString* key) { [NSNotificationCenter.defaultCenter postNotificationName:kSettingsChanged object:key]; }
 
+static void MigratePrefs();
 static void RegisterDefaults()
 {
     [Prefs() registerDefaults:@{
-        @"boxart": @YES, @"sort": @"recent", @"perf": @NO, @"perfDetail": @NO, @"hdAll": @YES, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
+        @"boxart": @YES, @"sort": @"recent", @"perf": @NO, @"perfDetail": @NO, @"hdAll": @YES, @"hdMode": @2, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
         @"buttons": @YES, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
     }];
+    MigratePrefs();
 }
+
+// older versions had one on/off switch for the enhancements: off becomes the Original mode
+static void MigratePrefs()
+{
+    NSUserDefaults* d = Prefs();
+    NSDictionary* saved = [d persistentDomainForName:NSBundle.mainBundle.bundleIdentifier];
+    if (saved[@"hdMode"] == nil && saved[@"hdAll"] != nil && ![saved[@"hdAll"] boolValue]) [d setInteger:0 forKey:@"hdMode"];
+}
+
+// enhancement modes for packs: 0 original, 1 HD cards only, 2 everything
+static NSArray* HDModeChoices()
+{
+    return @[@{@"title": @"Full HD", @"detail": @"HD cards plus the redesigned panels, menus, backgrounds and 3D textures. Needs the most from your phone.", @"value": @2},
+             @{@"title": @"HD Cards", @"detail": @"The original game, with HD art for every card. Lighter, good for older phones.", @"value": @1},
+             @{@"title": @"Original", @"detail": @"The game exactly as on the DS. Resolution and smoothing settings still apply.", @"value": @0}];
+}
+static NSString* HDModeName(NSInteger m) { return m == 0 ? @"Original" : m == 1 ? @"HD Cards" : @"Full HD"; }
 
 static void ApplyCoreOptions()
 {
-    wc09_set_option(WC09_OPT_HD_CARDS, [Prefs() boolForKey:@"hdCards"]);
+    wc09_set_option(WC09_OPT_HD_CARDS, 1);   // the mode decides (an older separate switch is ignored)
     wc09_set_option(WC09_OPT_HD_TEXT, [Prefs() boolForKey:@"hdText"]);
     wc09_set_option(WC09_OPT_SMOOTH_2D, [Prefs() boolForKey:@"smooth2d"]);
     wc09_set_option(WC09_OPT_LINEAR_FILTER, [Prefs() boolForKey:@"filter"]);
-    wc09_set_option(WC09_OPT_HD_ALL, [Prefs() boolForKey:@"hdAll"]);
+    wc09_set_option(WC09_OPT_HD_MODE, (int)[Prefs() integerForKey:@"hdMode"]);
 }
 
 static UIColor* Accent() { return [UIColor colorWithRed:0.29 green:0.64 blue:1.0 alpha:1]; }
@@ -481,10 +500,9 @@ static NSArray<NSDictionary*>* EnhancementPacks()
         @"needs": @"HDCards",
         @"needsTitle": @"HD pack (HDCards folder)",
         @"needsDetail": @"The enhancements use an HD pack: a folder named HDCards with the card art and the redesigned screens (about 1 GB). It isn't part of the game file, so it has to sit right next to it.",
-        @"master": @"hdAll",
+        @"master": @"hdMode",
         @"options": @[
-            @{@"key": @"hdCards", @"title": @"HD card art", @"detail": @"Real card images, from the HDCards folder next to the game."},
-            @{@"key": @"hdText", @"title": @"HD text and menus", @"detail": @"Card names, descriptions and panels in a clean font."},
+            @{@"key": @"hdText", @"title": @"HD text and panels", @"detail": @"Full HD mode: card names, descriptions and duel panels in a clean font."},
         ],
     }];
 }
@@ -833,7 +851,7 @@ static OptionsViewController* EnhancementsPage(NSDictionary* pack)
     vc.build = ^NSArray* {
         NSMutableArray* opts = [NSMutableArray array];
         for (NSDictionary* o in pack[@"options"])
-            [opts addObject:@{@"type": @"switch", @"key": o[@"key"], @"title": o[@"title"], @"detail": o[@"detail"], @"requires": pack[@"master"]}];
+            [opts addObject:@{@"type": @"switch", @"key": o[@"key"], @"title": o[@"title"], @"detail": o[@"detail"]}];
         NSMutableArray* feats = [NSMutableArray array];
         for (NSString* f in pack[@"features"]) [feats addObject:@{@"type": @"bullet", @"title": f}];
 
@@ -853,9 +871,9 @@ static OptionsViewController* EnhancementsPage(NSDictionary* pack)
                            pack[@"needsDetail"], pack[@"short"], pack[@"needs"], pack[@"needs"]];
         return @[
             @{@"title": pack[@"title"], @"rows": @[
-                @{@"type": @"switch", @"key": pack[@"master"], @"title": @"Enhancements", @"symbol": @"sparkles", @"color": RGB(0xF2A93B),
-                  @"detail": @"Off plays the game exactly like the original DS. You can also switch it from the in-game menu to compare."}],
-              @"footer": pack[@"about"]},
+                @{@"type": @"choice", @"key": pack[@"master"], @"title": @"Mode", @"symbol": @"sparkles", @"color": RGB(0xF2A93B),
+                  @"choices": HDModeChoices()}],
+              @"footer": [pack[@"about"] stringByAppendingString:@"\n\nFull HD: everything below. HD Cards: the original game with just the card art in HD. Original: exactly like the DS. You can switch from the in-game menu too, even mid-game."]},
             @{@"title": @"What's improved", @"rows": feats},
             @{@"title": [@"What you need: " stringByAppendingString:pack[@"needsTitle"]], @"rows": need, @"footer": where},
             @{@"title": @"Fine-tune", @"rows": opts},
@@ -876,9 +894,9 @@ static NSString* DebugReportText()
 {
     struct utsname u; uname(&u);
     NSUserDefaults* d = Prefs();
-    NSString* head = [NSString stringWithFormat:@"device %s, iOS %@, app %@\nsettings: scale %ldx, HD look %@, smooth 2D %@, filter %@, screen buttons %@\n",
+    NSString* head = [NSString stringWithFormat:@"device %s, iOS %@, app %@\nsettings: scale %ldx, HD mode %@, HD text %@, smooth 2D %@, filter %@, screen buttons %@\n",
         u.machine, UIDevice.currentDevice.systemVersion, [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"],
-        (long)[d integerForKey:@"scale"], [d boolForKey:@"hdAll"] ? @"on" : @"off", [d boolForKey:@"smooth2d"] ? @"on" : @"off",
+        (long)[d integerForKey:@"scale"], HDModeName([d integerForKey:@"hdMode"]), [d boolForKey:@"hdText"] ? @"on" : @"off", [d boolForKey:@"smooth2d"] ? @"on" : @"off",
         [d boolForKey:@"filter"] ? @"smooth" : @"sharp", [d boolForKey:@"buttons"] ? @"on" : @"off"];
     return [head stringByAppendingString:[NSString stringWithUTF8String:wc09_debug_report()]];
 }
@@ -894,7 +912,7 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
         NSMutableArray* packs = [NSMutableArray array];
         for (NSDictionary* p in EnhancementPacks())
             [packs addObject:@{@"type": @"link", @"title": p[@"short"], @"symbol": @"sparkles", @"color": RGB(0xF2A93B),
-                               @"value": [Prefs() boolForKey:p[@"master"]] ? @"On" : @"Off",
+                               @"value": HDModeName([Prefs() integerForKey:p[@"master"]]),
                                @"open": [^UIViewController* { return EnhancementsPage(p); } copy]}];
         NSMutableArray* lib = [NSMutableArray array];
         for (NSUInteger i = 0; i < gFolders.count; i++)
@@ -923,9 +941,10 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
               @"footer": @"Pick a folder in Files (On My iPhone, iCloud Drive, a USB drive…) and every game in it shows up in your Library, with its saves kept next to it. Games you import go into Dual HD's own folder."},
             @{@"title": @"Display", @"rows": @[
                 @{@"type": @"choice", @"key": @"scale", @"title": @"Resolution", @"symbol": @"tv", @"color": RGB(0x3B82F6),
-                  @"footer": @"Higher is sharper. Each step renders the DS screens at that many times their size.",
+                  @"footer": @"Higher is sharper. Each step renders the DS screens at that many times their size; 1x is the original DS picture.",
                   @"choices": @[
-                      @{@"title": @"2x", @"detail": @"Fastest, longest battery life", @"value": @2},
+                      @{@"title": @"1x (Off)", @"short": @"1x", @"detail": @"The DS's own resolution, no upscaling. Lightest of all", @"value": @1},
+                      @{@"title": @"2x", @"detail": @"Fast, long battery life", @"value": @2},
                       @{@"title": @"3x", @"detail": @"Sharp on smaller screens", @"value": @3},
                       @{@"title": @"4x", @"detail": @"Recommended. Crisp on every iPhone", @"value": @4},
                       @{@"title": @"5x", @"detail": @"Extra sharp", @"value": @5},
@@ -1300,7 +1319,7 @@ static std::atomic<bool> gMuted{false};
 {
     NSString* key = n.object;
     if ([key isEqualToString:@"scale"]) { if (_started) { [EAGLContext setCurrentContext:_ctx]; wc09_set_scale(PrefScale()); } }
-    else if ([@[@"filter", @"smooth2d", @"hdCards", @"hdText", @"hdAll"] containsObject:key]) ApplyCoreOptions();
+    else if ([@[@"filter", @"smooth2d", @"hdCards", @"hdText", @"hdAll", @"hdMode"] containsObject:key]) ApplyCoreOptions();
     else if ([key isEqualToString:@"buttons"]) { _controls.showButtons = [Prefs() boolForKey:@"buttons"]; [self.view setNeedsLayout]; }
     else if ([key isEqualToString:@"opacity"]) { _controls.opacity = [Prefs() floatForKey:@"opacity"]; [_controls setNeedsDisplay]; }
     else if ([key isEqualToString:@"haptics"]) _controls.haptics = [Prefs() boolForKey:@"haptics"];
@@ -1487,13 +1506,8 @@ static NSDictionary* Item(NSString* title, NSString* symbol, BOOL destructive, v
     })];
     if (wc09_is_hd_game())
     {
-        BOOL hd = [Prefs() boolForKey:@"hdAll"];
-        [items addObject:Item(hd ? @"Switch to Original Look" : @"Switch to HD Look", hd ? @"sparkles.rectangle.stack" : @"sparkles", NO, ^{
-            [Prefs() setBool:!hd forKey:@"hdAll"];
-            ApplyCoreOptions();
-            [me toast:hd ? @"Original look" : @"HD look"];
-            [me resume];
-        })];
+        NSString* cur = HDModeName([Prefs() integerForKey:@"hdMode"]);
+        [items addObject:Item([@"Look: " stringByAppendingString:cur], @"sparkles", NO, ^{ [me hdModeMenu]; })];
     }
     [items addObject:Item(@"Settings", @"gearshape", NO, ^{ [me openSettings]; })];
     [items addObject:Item(@"Restart from In-Game Save", @"arrow.counterclockwise", NO, ^{ [me restartAsk]; })];
@@ -1505,6 +1519,24 @@ static NSDictionary* Item(NSString* title, NSString* symbol, BOOL destructive, v
 {
     __weak GameViewController* me = self;
     [self presentViewController:SettingsNavigation(^{ [me resume]; }) animated:YES completion:nil];
+}
+
+- (void)hdModeMenu
+{
+    __weak GameViewController* me = self;
+    NSInteger cur = [Prefs() integerForKey:@"hdMode"];
+    NSMutableArray* items = [NSMutableArray array];
+    for (NSDictionary* ch in HDModeChoices())
+    {
+        NSInteger m = [ch[@"value"] integerValue];
+        [items addObject:Item(ch[@"title"], m == cur ? @"checkmark.circle.fill" : @"circle", NO, ^{
+            [Prefs() setInteger:m forKey:@"hdMode"];
+            ApplyCoreOptions();
+            [me toast:HDModeName(m)];
+            [me resume];
+        })];
+    }
+    [self panel:@"Look" message:@"Full HD: everything redesigned. HD Cards: the original game with HD card art. Original: exactly like the DS." items:items];
 }
 
 - (void)stateMenu:(BOOL)save

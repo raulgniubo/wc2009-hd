@@ -59,7 +59,14 @@ FrameCards GetLatest(bool all = false);   // all: include cards the GL renderers
 void SetHDCardsEnabled(bool on);
 bool GetHDCardsEnabled();
 
-// Redraw the duel card-detail name/description in a real font. On by default.
+// Everything else from the HD pack: menus, backgrounds, characters, 3D textures (the "redesign").
+// Off with HD cards on = the original game with just the card art in HD. On by default.
+void SetHDPackEnabled(bool on);
+bool GetHDPackEnabled();
+// Changes whenever one of these switches does (renderers redraw instead of reusing a frame).
+u32 HDSettingsGeneration();
+
+// Redraw the duel card-detail name/description (and the other HD panels) in a real font. On by default.
 void SetHDTextEnabled(bool on);
 bool GetHDTextEnabled();
 

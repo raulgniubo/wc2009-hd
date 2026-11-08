@@ -51,11 +51,16 @@ u32 FrameCounter = 0;
 std::atomic<bool> Smooth2D{true};
 std::atomic<bool> HDCards{true};
 std::atomic<bool> HDText{true};
-void SetHDTextEnabled(bool on) { HDText = on; }
+std::atomic<bool> HDPack{true};
+std::atomic<u32> HDGen{1};
+void SetHDTextEnabled(bool on) { if (HDText != on) { HDText = on; HDGen++; } }
 bool GetHDTextEnabled() { return HDText; }
-void SetHDCardsEnabled(bool on) { HDCards = on; }
+void SetHDCardsEnabled(bool on) { if (HDCards != on) { HDCards = on; HDGen++; } }
 bool GetHDCardsEnabled() { return HDCards; }
-void SetSmooth2D(bool on) { Smooth2D = on; }
+void SetHDPackEnabled(bool on) { if (HDPack != on) { HDPack = on; HDGen++; } }
+bool GetHDPackEnabled() { return HDPack; }
+u32 HDSettingsGeneration() { return HDGen; }
+void SetSmooth2D(bool on) { if (Smooth2D != on) { Smooth2D = on; HDGen++; } }
 bool GetSmooth2D() { return Smooth2D; }
 
 void SetActive(bool active) { Active = active; }
@@ -248,7 +253,7 @@ void MarkHandled2D(size_t index)
 
 void OnPolygon(GPU& gpu, u32 texParam, const Polygon* poly, int nverts)
 {
-    if (!Active) return;
+    if (!Active || !HDCards) return;   // card detection only matters with HD cards on
     if (((texParam >> 26) & 7) != 5) return;               // tex4x4 only
     u32 w = 8 << ((texParam >> 20) & 7), h = 8 << ((texParam >> 23) & 7);
     if (w != h || (w != 128 && w != 64 && w != 32)) return;
@@ -354,7 +359,7 @@ u16 ReadBG(GPU& gpu, int engine, u32 addr)
 
 void OnVBlank2D(GPU& gpu)
 {
-    if (!Active) return;
+    if (!Active || !HDCards) return;
     std::vector<CardQuad> found;
 
     for (int engine = 0; engine < 2; engine++)

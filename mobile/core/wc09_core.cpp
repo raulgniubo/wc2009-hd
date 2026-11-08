@@ -151,15 +151,19 @@ bool ReadFile(const std::string& path, std::vector<u8>& out)
 // screen drawing
 GLuint Prog = 0, Vao = 0, Vbo = 0;
 bool LinearFilter = true;
-bool OptHdAll = true, OptHdCards = true, OptHdText = true, OptSmooth2D = true;
+bool OptHdCards = true, OptHdText = true, OptSmooth2D = true;
+int OptHdMode = 2;
 
 // the master switch off = the original game: no HD layers, and no 2D smoothing for it either
 void ApplyHdOptions()
 {
-    bool all = OptHdAll || !WC09::IsActive();
-    WC09::SetHDCardsEnabled(all && OptHdCards);
-    WC09::SetHDTextEnabled(all && OptHdText);
-    WC09::SetSmooth2D(all && OptSmooth2D);
+    // modes: 0 = the game as on the DS, 1 = + HD card art, 2 = + everything else in the HD pack.
+    // Smooth 2D is a general picture setting, the same in every mode.
+    int mode = WC09::IsActive() ? OptHdMode : 2;
+    WC09::SetHDCardsEnabled(mode >= 1 && OptHdCards);
+    WC09::SetHDPackEnabled(mode >= 2);
+    WC09::SetHDTextEnabled(mode >= 2 && OptHdText);
+    WC09::SetSmooth2D(OptSmooth2D);
 }
 GLint LocLayer = -1, LocSwap = -1;
 const char* kVS = R"(#version 300 es
@@ -550,7 +554,8 @@ void wc09_set_option(int option, int value)
     case WC09_OPT_HD_CARDS: OptHdCards = value != 0; break;
     case WC09_OPT_HD_TEXT: OptHdText = value != 0; break;
     case WC09_OPT_SMOOTH_2D: OptSmooth2D = value != 0; break;
-    case WC09_OPT_HD_ALL: OptHdAll = value != 0; break;
+    case WC09_OPT_HD_ALL: OptHdMode = value ? 2 : 0; break;
+    case WC09_OPT_HD_MODE: OptHdMode = std::clamp(value, 0, 2); break;
     case WC09_OPT_LINEAR_FILTER: LinearFilter = value != 0; break;
     }
     ApplyHdOptions();

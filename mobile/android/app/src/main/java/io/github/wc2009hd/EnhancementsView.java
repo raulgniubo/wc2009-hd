@@ -51,14 +51,26 @@ final class EnhancementsView extends LinearLayout {
         list.addView(about);
 
         LinearLayout card = card(c, list);
-        boolean on = prefs.getBoolean(pack.master, true);
-        card.addView(row(c, prefs, pack.master, "Enhancements",
-                "Off plays the game exactly like the original DS. You can also switch it from the in-game menu to compare.",
-                true, (key, v) -> {
-                    listener.settingChanged(key);
-                    for (Switch s : details) s.setEnabled(v);
-                    for (View r : detailRows) r.setAlpha(v ? 1f : 0.45f);
-                }));
+        boolean on = true;
+        // mode: Full HD / HD Cards / Original
+        card.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
+        card.addView(Ui.text(c, "Mode", 16, Ui.TEXT, true));
+        final int[] order = {2, 1, 0};
+        String[] labels = new String[3];
+        int sel = 0;
+        for (int i = 0; i < 3; i++) { labels[i] = SettingsView.HD_MODES[order[i]]; if (order[i] == SettingsView.hdMode(prefs)) sel = i; }
+        TextView md = Ui.text(c, SettingsView.HD_MODE_DETAILS[SettingsView.hdMode(prefs)], 13, Ui.TEXT_DIM, false);
+        LinearLayout chips = Ui.chips(c, labels, sel, i -> {
+            prefs.edit().putInt(pack.master, order[i]).apply();
+            md.setText(SettingsView.HD_MODE_DETAILS[order[i]]);
+            listener.settingChanged(pack.master);
+        });
+        chips.setPadding(0, Ui.dp(c, 10), 0, Ui.dp(c, 8));
+        card.addView(chips);
+        card.addView(md);
+        TextView mx = Ui.text(c, "You can switch from the in-game menu too, even mid-game.", 13, Ui.TEXT_DIM, false);
+        mx.setPadding(0, Ui.dp(c, 6), 0, 0);
+        card.addView(mx);
 
         TextView wh = Ui.text(c, "WHAT'S IMPROVED", 12.5f, Ui.TEXT_DIM, true);
         wh.setLetterSpacing(0.06f);

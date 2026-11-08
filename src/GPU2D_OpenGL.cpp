@@ -1575,7 +1575,7 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
         if (sprdbg && (ypos & 0xFF) >= 130 && (ypos & 0xFF) < 192)
         { static u64 lastf = 0; u64 f = WC09::FrameNum(); if (f % 60 == 0) { if (lastf != f) { printf("--- spr frame %llu\n", (unsigned long long)f); lastf = f; }
           printf("spr e%d #%d %d,%d %dx%d tile%d pal%d prio%d\n", GPU2D.Num, sprnum, xpos, ypos & 0xFF, width, height, attrib[2] & 0x3FF, attrib[2] >> 12, (attrib[2] >> 10) & 3); fflush(stdout); } }
-        if (WC09::IsActive() && WC09::GetHDCardsEnabled() && WC09::HideSprite(GPU2D.Num, xpos, ypos & 0xFF, width, height, (sprtype & 1) != 0))
+        if (WC09::IsActive() && WC09::GetHDTextEnabled() && WC09::HideSprite(GPU2D.Num, xpos, ypos & 0xFF, width, height, (sprtype & 1) != 0))
             continue;
 
         bool yc0 = ((ypos + boundheight) > ystart) && (ypos < yend);
@@ -1603,7 +1603,7 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
         auto& sprcfg = cfg.uOAM[NumSprites];
         // WC09: the portraits beside the life-point panel have a 1 px coloured edge that belonged
         // to the original panel; it's cut away where the HD panel now sits
-        WC09LpEdge[NumSprites] = WC09::IsActive() && WC09::GetHDCardsEnabled() && WC09::LpPanelShown(GPU2D.Num) &&
+        WC09LpEdge[NumSprites] = WC09::IsActive() && WC09::GetHDTextEnabled() && WC09::LpPanelShown(GPU2D.Num) &&
             (ypos & 0xFF) + height > WC09::kLpY && (ypos & 0xFF) < WC09::kLpY + WC09::kLpH &&
             ((xpos <= WC09::kLpX && xpos + width > WC09::kLpX) || (xpos <= WC09::kLpX + WC09::kLpW - 1 && xpos + width > WC09::kLpX + WC09::kLpW - 1));
         if (sprdbg && WC09LpEdge[NumSprites] && WC09::FrameNum() % 60 == 0) { printf("lpedge #%d %d,%d %dx%d\n", sprnum, xpos, ypos & 0xFF, width, height); fflush(stdout); }
@@ -1755,7 +1755,7 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
             }
 
             WC09Spr[NumSprites] = {};
-            if ((GPU2D.DispCnt & (1<<4)) && WC09::IsActive() && WC09::GetHDCardsEnabled() && WC09::IsIndexReady())
+            if ((GPU2D.DispCnt & (1<<4)) && WC09::IsActive() && (WC09::GetHDCardsEnabled() || WC09::GetHDPackEnabled() || WC09::GetHDTextEnabled()) && WC09::IsIndexReady())
             {
                 // identify once per frame per OAM entry (UpdateOAM runs for several line ranges)
                 auto& key = WC09SprCache[sprnum];
@@ -1773,6 +1773,8 @@ void GLRenderer2D::UpdateOAM(int ystart, int yend)
                                 memcpy(out + i, &v, 4);
                             }
                         });
+                    // only what the current HD mode allows (card art only / everything)
+                    if (WC09SprCached[sprnum].Image >= 0 && !WC09::HDImageAllowed(WC09SprCached[sprnum].Image)) WC09SprCached[sprnum].Image = -1;
                     // not an HD image: maybe anti-aliased text (speech bubbles, labels...)
                     if (WC09SprCached[sprnum].Image < 0 && WC09::GetHDTextEnabled())
                     {
@@ -2202,7 +2204,7 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
         {
             reps[i] = WC09::GetBGReplacement(GPU2D.Num, i);
             bool isPanel = reps[i].Image >= WC09::kTextPanelBase && reps[i].Image < WC09::kSpriteImageBase;
-            bool allowed = isPanel ? WC09::GetHDTextEnabled() : WC09::GetHDCardsEnabled();
+            bool allowed = WC09::HDImageAllowed(reps[i].Image);
             HDLastPending = false;
             texs[i] = (reps[i].Image >= 0 && allowed) ? GetHDTexture(reps[i].Image) : 0;
             if (texs[i] && isPanel) { WC09::NotePanelRendered(); LastPanelTex[i] = texs[i]; LastPanelRep[i] = reps[i]; LastPanelImage[i] = reps[i].Image; }
@@ -2239,7 +2241,7 @@ void GLRenderer2D::RenderScreen(int ystart, int yend)
                 if (mask.size() == 64 * 64) for (int k = 0; k < 64 * 64; k++) rows[k * 4] = mask[k];
             }
             bool tilesAny = false;
-            if (!texs[i] || reps[i].ScreenSpace)
+            if ((!texs[i] || reps[i].ScreenSpace) && WC09::GetHDPackEnabled())
             {
                 static std::vector<u16> tmap;
                 WC09::GetHDTileMap(GPU2D.Num, i, tmap, tilesAny);

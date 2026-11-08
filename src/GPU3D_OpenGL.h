@@ -109,6 +109,8 @@ private:
     struct HD3DEntry { GLuint Tex; bool Valid; u64 LastUse; };
     u64 HD3DFrame = 0;
     std::unordered_map<u64, HD3DEntry> HD3D;
+    u32 LastHDGen = 0;
+    bool HDPending = false;   // an HD picture was still loading in the last scene
     std::unordered_map<u64, int> HD3DStage;   // which name the async lookup is on
     GLuint GetHD3D(u64 hash, u64 alphaHash = 0, u64 halfHash = 0, u16 tone = 0, const u32* px = nullptr, int pw = 0, int ph = 0);
     // WC09: HD card face built into the card texture's own layout (keyed by content hash)

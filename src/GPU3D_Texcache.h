@@ -272,11 +272,16 @@ public:
             }
         }
 
+        // WC09: only what the current HD mode uses is worked out (nothing at all with it off)
+        const bool wcCards = WC09::IsActive() && WC09::GetHDCardsEnabled();
+        const bool wcPack = WC09::IsActive() && WC09::GetHDPackEnabled();
+        entry.ContentHash = 0; entry.AlphaHash = 0; entry.HalfHash = 0; entry.Tone = 0;
         // WC09: hash of the decoded texels, independent of where the texture sits in VRAM
-        entry.ContentHash = XXH64(DecodingBuffer, (size_t)width * height * 4, ((u64)width << 16) | height);
+        if (wcCards || wcPack) entry.ContentHash = XXH64(DecodingBuffer, (size_t)width * height * 4, ((u64)width << 16) | height);
         LastContentHash = entry.ContentHash;
         // WC09: structure hash, the same for any recolouring (palette swaps, pulsing colours):
         // each texel becomes the order in which its colour first appeared (0 = transparent)
+        if (wcPack)
         {
             static u16 ids[1024 * 1024];
             static std::unordered_map<u32, u16> seen;
@@ -326,13 +331,13 @@ public:
         LastAlphaHash = entry.AlphaHash;
         // WC09: card faces are identified by their raw tex4x4 texel words (see WC09Cards)
         entry.Card = -1;
-        if (fmt == 5 && width == height && (width == 128 || width == 64 || width == 32))
+        if (wcCards && fmt == 5 && width == height && (width == 128 || width == 64 || width == 32))
         {
             u32 n = width * height / 4;
             if (addr + n <= sizeof(GPU.VRAMFlat_Texture))
                 entry.Card = WC09::CardFromTexHash(XXH64(&GPU.VRAMFlat_Texture[addr], n, 0), width);
         }
-        if (fmt == 4 && width == 32 && height == 32 && addr + 1024 <= sizeof(GPU.VRAMFlat_Texture) && WC09::IsIndexReady())
+        if (wcCards && fmt == 4 && width == 32 && height == 32 && addr + 1024 <= sizeof(GPU.VRAMFlat_Texture) && WC09::IsIndexReady())
         {
             // card thumbnails in list windows (graveyard, extra deck...): bit 16 marks the layout
             int c = WC09::CardFromThumbTexture(XXH64(&GPU.VRAMFlat_Texture[addr], 1024, 0));

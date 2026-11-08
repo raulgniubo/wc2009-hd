@@ -259,7 +259,7 @@ GLuint GLRenderer3D::GetHD3D(u64 hash, u64 alphaHash, u64 halfHash, u16 tone, co
     while (stage < (int)names.size())
     {
         int r = WC09::LoadHDImageAsync(names[stage], rgba, w, h);
-        if (r == 0) return 0;              // still loading
+        if (r == 0) { HDPending = true; return 0; }   // still loading
         if (r > 0 && w > 0 && h > 0) { ok = true; break; }
         stage++;                           // not there: next name
     }
@@ -308,7 +308,7 @@ GLuint GLRenderer3D::GetHDCard(u64 hash, int card, u32 size, const u32* newPixel
     const bool thumb = card & 0x10000;
     card &= 0xFFFF;
     int lr = WC09::LoadCardImageAsync(card, src, sw, sh);
-    if (lr == 0) return 0;   // loading on the worker thread: the original texture meanwhile
+    if (lr == 0) { HDPending = true; return 0; }   // loading on the worker thread: the original texture meanwhile
     if (lr > 0 && sw > 1 && sh > 1)
     {
         const u32* orig = px->second.Px.data();
@@ -781,7 +781,9 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
     GLuint curtexid = 0;
     u32 curtexlayer = (u32)-1;
     GLuint curhd = 0; int curhdmode = 0;
-    const bool hdon = WC09::IsActive() && WC09::GetHDCardsEnabled();
+    HDPending = false;
+    const bool hdcards = WC09::IsActive() && WC09::GetHDCardsEnabled();
+    const bool hdpack = WC09::IsActive() && WC09::GetHDPackEnabled();
     // keep GPU memory in check: drop HD textures not used for a while (they reload when needed)
     if (++HD3DFrame % 60 == 0 && HD3D.size() > 128)
     {
@@ -864,14 +866,18 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
                     u32* halp;
                     Texcache.GetTexture(texparam, texpal, curtexid, curtexlayer, halp);
                     curtexlayer |= 0xFFFF0000;
-                    if (hdon && Texcache.LastCard >= 0)
+                    if (Texcache.LastCard >= 0)
                     {
+                        curhd = 0; curhdmode = 0;
+                        if (hdcards)
+                        {
                         curhd = GetHDCard(Texcache.LastContentHash, Texcache.LastCard, texwidth, Texcache.LastNewPixels);
                         curhdmode = 1;
+                        }
                     }
                     else
                     {
-                        curhd = hdon && !AnimatedTexture(texparam, Texcache.LastContentHash, texwidth, TextureHeight(texparam), textype) ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash, Texcache.LastTone, (textype >= 2 && textype <= 4) ? Texcache.LastNewPixels : nullptr, (int)texwidth, (int)TextureHeight(texparam)) : 0;
+                        curhd = hdpack && !AnimatedTexture(texparam, Texcache.LastContentHash, texwidth, TextureHeight(texparam), textype) ? GetHD3D(Texcache.LastContentHash, Texcache.LastAlphaHash, Texcache.LastHalfHash, Texcache.LastTone, (textype >= 2 && textype <= 4) ? Texcache.LastNewPixels : nullptr, (int)texwidth, (int)TextureHeight(texparam)) : 0;
                         curhdmode = (textype == 1 || textype == 6) ? 2 : 1;
                     }
                 }
@@ -892,7 +898,7 @@ void GLRenderer3D::BuildPolygons(GLRenderer3D::RendererPolygon* polygons, int np
         rp->HDMode = curhdmode;
         // WC09: duel UI pieces the game animates (phase bar, corner buttons) come in many
         // colour/lighting frames; anything without its own HD image is matched by where it sits
-        if (hdon && !rp->HDTex && curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF && ((poly->TexParam >> 26) & 7) == 4)
+        if (hdpack && !rp->HDTex && curtexlayer != (u32)-1 && (curtexlayer >> 16) == 0xFFFF && ((poly->TexParam >> 26) & 7) == 4)
         {
             u32 tw = TextureWidth(poly->TexParam), th = TextureHeight(poly->TexParam);
             if (tw == 32 && (th == 16 || th == 32))
@@ -1659,7 +1665,15 @@ void GLRenderer3D::RenderFrame()
     // WC09: this renderer draws HD cards itself, even on frames that reuse the last scene
     if (WC09::IsActive() && WC09::GetHDCardsEnabled()) WC09::NoteCards3DRendered();
     u8 clrBitmapDirty;
-    if (!Texcache.Update(clrBitmapDirty) && GPU3D.RenderFrameIdentical)
+    // a changed HD switch must show at once, even on a scene the game doesn't redraw
+    u32 hdgen = WC09::HDSettingsGeneration();
+    bool hdChanged = hdgen != LastHDGen;
+    // decode the textures again: HD cards are built from freshly decoded card textures
+    if (hdChanged && LastHDGen != 0) Texcache.Reset();
+    LastHDGen = hdgen;
+    // HD pictures still loading last time: draw again until they're all in
+    bool hdWaiting = HDPending;
+    if (!Texcache.Update(clrBitmapDirty) && GPU3D.RenderFrameIdentical && !hdChanged && !hdWaiting)
     {
         return;
     }

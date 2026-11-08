@@ -24,9 +24,8 @@ final class Packs {
                     "High-resolution menus, backgrounds and dialogs",
                 },
                 "HDCards",
-                "hdAll",
-                new Option("hdCards", "HD card art", "Real card images, from the HDCards folder next to the game."),
-                new Option("hdText", "HD text and menus", "Card names, descriptions and panels in a clean font.")),
+                "hdMode",
+                new Option("hdText", "HD text and panels", "Full HD mode: card names, descriptions and duel panels in a clean font.")),
     };
 
     static Pack forCode(String code) {

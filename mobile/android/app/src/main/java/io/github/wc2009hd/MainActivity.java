@@ -572,7 +572,7 @@ public final class MainActivity extends Activity
         if (game == null) return;
         switch (key) {
             case "scale": { int s = SettingsView.scale(prefs); game.queueEvent(() -> Native.setScale(s)); break; }
-            case "filter": case "smooth2d": case "hdCards": case "hdText": case "hdAll":
+            case "filter": case "smooth2d": case "hdCards": case "hdText": case "hdAll": case "hdMode":
                 game.queueEvent(this::applyOptions); break;
             case "buttons": controls.setShowButtons(SettingsView.on(prefs, "buttons")); relayout(); break;
             case "opacity": controls.setOpacity(SettingsView.opacity(prefs)); break;
@@ -584,11 +584,11 @@ public final class MainActivity extends Activity
     }
 
     private void applyOptions() {
-        Native.setOption(Native.OPT_HD_CARDS, SettingsView.on(prefs, "hdCards") ? 1 : 0);
+        Native.setOption(Native.OPT_HD_CARDS, 1);   // the mode decides (an older separate switch is ignored)
         Native.setOption(Native.OPT_HD_TEXT, SettingsView.on(prefs, "hdText") ? 1 : 0);
         Native.setOption(Native.OPT_SMOOTH_2D, SettingsView.on(prefs, "smooth2d") ? 1 : 0);
         Native.setOption(Native.OPT_LINEAR_FILTER, SettingsView.on(prefs, "filter") ? 1 : 0);
-        Native.setOption(Native.OPT_HD_ALL, SettingsView.on(prefs, "hdAll") ? 1 : 0);
+        Native.setOption(Native.OPT_HD_MODE, SettingsView.hdMode(prefs));
     }
 
     // ================================================================ game
@@ -702,15 +702,37 @@ public final class MainActivity extends Activity
     @Override
     public void onFastForward(boolean on) { game.setFastForward(on); }
 
+    private void lookDialog() {
+        final int[] order = {2, 1, 0};
+        String[] labels = new String[3];
+        int sel = 0;
+        for (int i = 0; i < 3; i++) {
+            labels[i] = SettingsView.HD_MODES[order[i]] + "\n" + SettingsView.HD_MODE_DETAILS[order[i]];
+            if (order[i] == SettingsView.hdMode(prefs)) sel = i;
+        }
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Look")
+                .setSingleChoiceItems(labels, sel, (d, which) -> {
+                    prefs.edit().putInt("hdMode", order[which]).apply();
+                    settingChanged("hdMode");
+                    toast(SettingsView.HD_MODES[order[which]]);
+                    d.dismiss();
+                    game.setPaused(false);
+                })
+                .setOnCancelListener(d -> game.setPaused(false))
+                .show();
+    }
+
     @Override
     public void onMenu() {
         if (game == null || settings != null) return;
         game.setPaused(true);
-        boolean hdGame = Native.isHdGame(), hd = SettingsView.on(prefs, "hdAll");
+        boolean hdGame = Native.isHdGame();
+        int mode = SettingsView.hdMode(prefs);
         boolean full = !SettingsView.on(prefs, "buttons");
         String fs = full ? "Exit full screen" : "Full screen (hide buttons)";
         String[] items = hdGame
-                ? new String[] {fs, "Save state", "Load state", hd ? "Switch to original look" : "Switch to HD look", "Settings", "Restart from in-game save", "Back to library"}
+                ? new String[] {fs, "Save state", "Load state", "Look: " + SettingsView.HD_MODES[mode], "Settings", "Restart from in-game save", "Back to library"}
                 : new String[] {fs, "Save state", "Load state", "Settings", "Restart from in-game save", "Back to library"};
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(currentRom != null ? currentRom.getName().replaceAll("\\.nds$", "") : "Menu")
@@ -723,13 +745,7 @@ public final class MainActivity extends Activity
                     }
                     which--;
                     if (hdGame) {
-                        if (which == 2) {
-                            prefs.edit().putBoolean("hdAll", !hd).apply();
-                            settingChanged("hdAll");
-                            toast(hd ? "Original look" : "HD look");
-                            game.setPaused(false);
-                            return;
-                        }
+                        if (which == 2) { lookDialog(); return; }
                         if (which > 2) which--;
                     }
                     switch (which) {

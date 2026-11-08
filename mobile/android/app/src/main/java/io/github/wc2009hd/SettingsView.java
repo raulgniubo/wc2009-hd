@@ -29,6 +29,18 @@ final class SettingsView extends LinearLayout {
             default: return p.getBoolean(key, false);
         }
     }
+    /** enhancement mode for packs: 0 original, 1 HD cards only, 2 everything */
+    static int hdMode(SharedPreferences p) {
+        if (!p.contains("hdMode") && p.contains("hdAll") && !p.getBoolean("hdAll", true)) return 0;   // older on/off switch
+        return p.getInt("hdMode", 2);
+    }
+    static final String[] HD_MODES = {"Original", "HD Cards", "Full HD"};
+    static final String[] HD_MODE_DETAILS = {
+        "The game exactly as on the DS. Resolution and smoothing settings still apply.",
+        "The original game, with HD art for every card. Lighter, good for older phones.",
+        "HD cards plus the redesigned panels, menus, backgrounds and 3D textures. Needs the most from your phone.",
+    };
+
     static float opacity(SharedPreferences p) { return p.getFloat("opacity", 0.55f); }
     static int ffSpeed(SharedPreferences p) { return p.getInt("ffSpeed", 3); }
 
@@ -68,11 +80,11 @@ final class SettingsView extends LinearLayout {
 
         // ---- graphics
         LinearLayout g = section("Display");
-        final int[] scales = {2, 3, 4, 5, 6, 8};
-        int sel = 2;
+        final int[] scales = {1, 2, 3, 4, 5, 6, 8};
+        int sel = 3;
         for (int i = 0; i < scales.length; i++) if (scales[i] == scale(prefs)) sel = i;
-        g.addView(label("Resolution", "Higher is sharper. 4x looks great on most phones; 6x and 8x need a fast phone and use more battery."));
-        g.addView(pad(Ui.chips(c, new String[] {"2x", "3x", "4x", "5x", "6x", "8x"}, sel, i -> {
+        g.addView(label("Resolution", "Higher is sharper. 4x looks great on most phones; 6x and 8x need a fast phone and use more battery. 1x is the original DS picture, no upscaling."));
+        g.addView(pad(Ui.chips(c, new String[] {"1x", "2x", "3x", "4x", "5x", "6x", "8x"}, sel, i -> {
             prefs.edit().putInt("scale", scales[i]).apply(); listener.settingChanged("scale");
         })));
         g.addView(Ui.divider(c));
@@ -103,7 +115,7 @@ final class SettingsView extends LinearLayout {
             TextView t = Ui.text(c, p.shortTitle, 16, Ui.TEXT, false);
             t.setPadding(Ui.dp(c, 14), 0, 0, 0);
             row.addView(t, new LayoutParams(0, -2, 1));
-            row.addView(Ui.text(c, (prefs.getBoolean(p.master, true) ? "On" : "Off") + "   ›", 15, Ui.TEXT_DIM, false));
+            row.addView(Ui.text(c, HD_MODES[hdMode(prefs)] + "   ›", 15, Ui.TEXT_DIM, false));
             row.setOnClickListener(v -> listener.openEnhancements(p));
             w.addView(row);
         }
@@ -169,7 +181,7 @@ final class SettingsView extends LinearLayout {
         copy.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 14));
         copy.setOnClickListener(v -> {
             String report = "device " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + ", Android " + android.os.Build.VERSION.RELEASE
-                    + "\nsettings: scale " + scale(prefs) + "x, HD look " + (on(prefs, "hdAll") ? "on" : "off") + ", smooth 2D " + (on(prefs, "smooth2d") ? "on" : "off")
+                    + "\nsettings: scale " + scale(prefs) + "x, HD mode " + HD_MODES[hdMode(prefs)] + ", HD text " + (on(prefs, "hdText") ? "on" : "off") + ", smooth 2D " + (on(prefs, "smooth2d") ? "on" : "off")
                     + ", filter " + (on(prefs, "filter") ? "smooth" : "sharp") + ", screen buttons " + (on(prefs, "buttons") ? "on" : "off") + "\n"
                     + Native.debugReport();
             android.content.ClipboardManager cm = (android.content.ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);

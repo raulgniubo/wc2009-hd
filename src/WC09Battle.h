@@ -82,6 +82,8 @@ inline bool IsCardImage(int image) { return image >= kCardImageBase && image < 7
 // Image ids at or above this are several 2D cards on one background, composed into one image.
 constexpr int kCardSetBase = 7000000;
 inline bool IsCardSet(int image) { return image >= kCardSetBase; }
+// whether the current HD switches allow drawing this image (card art / panels / the rest of the pack)
+bool HDImageAllowed(int image);
 struct CardSetItem { int Card; int X, Y; };   // position inside the set's rect, in BG pixels
 bool GetCardSet(int image, std::vector<CardSetItem>& items, int& w, int& h);
 
