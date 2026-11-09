@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QDateTime>
+#include <QLocale>
 #include <QGuiApplication>
 #include <cmath>
 
@@ -72,6 +73,15 @@ static void ApplyCoreOptions()
     wc09_set_option(WC09_OPT_SMOOTH_2D, app::On("smooth2d") ? 1 : 0);
     wc09_set_option(WC09_OPT_LINEAR_FILTER, app::On("filter") ? 1 : 0);
     wc09_set_option(WC09_OPT_HD_MODE, app::Int("hdMode"));
+    // console language (DS codes); -1 follows the computer's language
+    int lang = app::Int("language");
+    if (lang < 0 || lang > 5)
+    {
+        static const QStringList order = {"ja", "en", "fr", "de", "it", "es"};
+        lang = order.indexOf(QLocale::system().name().left(2));
+        if (lang < 0) lang = 1;
+    }
+    wc09_set_option(WC09_OPT_LANGUAGE, lang);
 }
 
 bool GameView::doStart()

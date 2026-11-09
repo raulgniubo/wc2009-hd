@@ -366,6 +366,11 @@ QWidget* SettingsDialog::buildPlay()
     b->addWidget(Card(c));
     c->addWidget(Row("Resume where you left off", Toggle("resume"), "Leaving a game saves a resume point; opening it again continues from there. The game's own saves always stay."));
     c->addWidget(Row("Pause in the background", Toggle("pauseUnfocused"), "Pauses the game while Dual HD isn't the active window."));
+    c->addWidget(Row("Console language", Choice("language", {{"Same as this computer", -1}, {"English", 1}, {"Français", 2},
+                                                              {"Deutsch", 3}, {"Italiano", 4}, {"Español", 5}, {QString::fromUtf8("日本語"), 0}}),
+        "The language the DS is set to. Games that include it switch to it; others ignore it. It applies when a game starts fresh: "
+        "the resume point and save states keep the language they were saved in. HD packs are made for the English version, "
+        "so in other languages some screens show the original graphics."));
     c->addWidget(Row("Fast forward speed", Choice("ffSpeed", {{"2x", 2}, {"3x", 3}, {"4x", 4}, {"As fast as possible", 0}}),
         "Hold Tab (or Shift+Tab to turn it on and off)."));
     b->addStretch(1);

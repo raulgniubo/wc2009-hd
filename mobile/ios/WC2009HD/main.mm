@@ -447,7 +447,7 @@ static void MigratePrefs();
 static void RegisterDefaults()
 {
     [Prefs() registerDefaults:@{
-        @"boxart": @YES, @"sort": @"recent", @"perf": @NO, @"perfDetail": @NO, @"hdAll": @YES, @"hdMode": @2, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
+        @"boxart": @YES, @"sort": @"recent", @"perf": @NO, @"perfDetail": @NO, @"hdAll": @YES, @"hdMode": @2, @"language": @1, @"scale": @4, @"filter": @YES, @"smooth2d": @YES, @"hdCards": @YES, @"hdText": @YES,
         @"buttons": @YES, @"padHide": @YES, @"padLayout": @0, @"opacity": @0.55f, @"haptics": @YES, @"resume": @YES, @"sound": @YES, @"ffSpeed": @3,
     }];
     MigratePrefs();
@@ -480,6 +480,17 @@ static NSArray* HDModeChoices()
 }
 static NSString* HDModeName(NSInteger m) { return m == 0 ? @"Original" : m == 1 ? @"HD Cards" : m == 3 ? @"HD + Redesign" : @"HD"; }
 
+// console language the game sees (DS firmware codes); -1 = the iPhone's language
+static int ConsoleLanguage()
+{
+    NSInteger l = [Prefs() integerForKey:@"language"];
+    if (l >= 0 && l <= 5) return (int)l;
+    NSString* code = [NSLocale.preferredLanguages.firstObject ?: @"en" substringToIndex:2];
+    NSArray* order = @[@"ja", @"en", @"fr", @"de", @"it", @"es"];
+    NSUInteger i = [order indexOfObject:code.lowercaseString];
+    return i == NSNotFound ? 1 : (int)i;
+}
+
 static void ApplyCoreOptions()
 {
     wc09_set_option(WC09_OPT_HD_CARDS, 1);   // the mode decides (an older separate switch is ignored)
@@ -487,6 +498,7 @@ static void ApplyCoreOptions()
     wc09_set_option(WC09_OPT_SMOOTH_2D, [Prefs() boolForKey:@"smooth2d"]);
     wc09_set_option(WC09_OPT_LINEAR_FILTER, [Prefs() boolForKey:@"filter"]);
     wc09_set_option(WC09_OPT_HD_MODE, (int)[Prefs() integerForKey:@"hdMode"]);
+    wc09_set_option(WC09_OPT_LANGUAGE, ConsoleLanguage());
 }
 
 static UIColor* Accent() { return [UIColor colorWithRed:0.29 green:0.64 blue:1.0 alpha:1]; }
@@ -1100,6 +1112,10 @@ static UINavigationController* SettingsNavigation(void (^onDone)(void))
                 @{@"type": @"switch", @"key": @"resume", @"title": @"Resume Where You Left Off", @"symbol": @"play.circle.fill", @"color": RGB(0x22C55E),
                   @"detail": @"Leaving a game saves a resume point; opening it again continues from there."},
                 @{@"type": @"switch", @"key": @"sound", @"title": @"Sound", @"symbol": @"speaker.wave.2.fill", @"color": RGB(0xEF4444)},
+                @{@"type": @"choice", @"key": @"language", @"title": @"Console Language", @"symbol": @"globe", @"color": RGB(0x0EA5E9),
+                  @"footer": @"The language the DS is set to. Games that include it switch to it; others ignore it. It applies when a game starts fresh: the resume point and save states keep the language they were saved in. HD packs are made for the English version, so in other languages some screens show the original graphics.",
+                  @"choices": @[@{@"title": @"Same as iPhone", @"value": @-1}, @{@"title": @"English", @"value": @1}, @{@"title": @"Français", @"value": @2},
+                                @{@"title": @"Deutsch", @"value": @3}, @{@"title": @"Italiano", @"value": @4}, @{@"title": @"Español", @"value": @5}, @{@"title": @"日本語", @"value": @0}]},
                 @{@"type": @"choice", @"key": @"ffSpeed", @"title": @"Fast Forward Speed", @"symbol": @"forward.fill", @"color": RGB(0xEAB308),
                   @"choices": @[@{@"title": @"2x", @"value": @2}, @{@"title": @"3x", @"value": @3}, @{@"title": @"4x", @"value": @4}]}],
               @"footer": @"Saves and save states are kept in a Saves folder next to your games, in the same format as melonDS on a computer."},
@@ -1479,7 +1495,7 @@ static std::atomic<bool> gMuted{false};
 {
     NSString* key = n.object;
     if ([key isEqualToString:@"scale"]) { if (_started) { [EAGLContext setCurrentContext:_ctx]; wc09_set_scale(PrefScale()); } }
-    else if ([@[@"filter", @"smooth2d", @"hdCards", @"hdText", @"hdAll", @"hdMode"] containsObject:key]) ApplyCoreOptions();
+    else if ([@[@"filter", @"smooth2d", @"hdCards", @"hdText", @"hdAll", @"hdMode", @"language"] containsObject:key]) ApplyCoreOptions();
     else if ([@[@"buttons", @"padHide", @"pads"] containsObject:key]) { _controls.showButtons = ShowOnScreenButtons(); [self.view setNeedsLayout]; }
     else if ([key isEqualToString:@"opacity"]) { _controls.opacity = [Prefs() floatForKey:@"opacity"]; [_controls setNeedsDisplay]; }
     else if ([key isEqualToString:@"haptics"]) _controls.haptics = [Prefs() boolForKey:@"haptics"];

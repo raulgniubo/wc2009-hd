@@ -57,6 +57,8 @@ enum
     WC09_OPT_LINEAR_FILTER = 3, // 1 = smooth screen scaling, 0 = sharp pixels (default 1)
     WC09_OPT_HD_ALL = 4,        // WC2009: old master switch (0 = mode 0, 1 = mode 2)
     WC09_OPT_HD_MODE = 5,       // WC2009: 0 = exactly as on the DS, 1 = + HD card art, 2 = all in HD, original look (default), 3 = + redesign
+    WC09_OPT_LANGUAGE = 6,      // console language the game sees, read when a game starts: 0 Japanese, 1 English (default),
+                                // 2 French, 3 German, 4 Italian, 5 Spanish
 };
 void wc09_set_option(int option, int value);
 int wc09_is_hd_game(void);

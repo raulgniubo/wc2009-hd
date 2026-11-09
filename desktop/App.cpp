@@ -20,7 +20,7 @@ static const QHash<QString, QVariant>& Defaults()
     static const QHash<QString, QVariant> d = {
         {"scale", 4}, {"filter", true}, {"smooth2d", true}, {"vsync", true}, {"layout", 0}, {"gap", 0},
         {"integer", false}, {"swap", false}, {"perf", false}, {"perfDetail", false}, {"hdMode", 2},
-        {"resume", true}, {"sound", true}, {"volume", 100}, {"ffSpeed", 3}, {"pauseUnfocused", true},
+        {"resume", true}, {"sound", true}, {"volume", 100}, {"ffSpeed", 3}, {"language", 1}, {"pauseUnfocused", true},
         {"boxart", true}, {"padLayout", 0}, {"jit", true}, {"sort", "recent"}, {"menuBarFull", false},
     };
     return d;

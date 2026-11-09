@@ -46,6 +46,13 @@ final class SettingsView extends LinearLayout {
 
     static float opacity(SharedPreferences p) { return p.getFloat("opacity", 0.55f); }
     static int ffSpeed(SharedPreferences p) { return p.getInt("ffSpeed", 3); }
+    /** Console language the game sees (DS codes 0 Japanese .. 5 Spanish); "language" = -1 follows the phone. */
+    static int language(SharedPreferences p) {
+        int l = p.getInt("language", 1);
+        if (l >= 0 && l <= 5) return l;
+        int i = java.util.Arrays.asList("ja", "en", "fr", "de", "it", "es").indexOf(java.util.Locale.getDefault().getLanguage());
+        return i < 0 ? 1 : i;
+    }
 
     private final SharedPreferences prefs;
     private final Listener listener;
@@ -189,6 +196,19 @@ final class SettingsView extends LinearLayout {
         final int[] ffs = {2, 3, 4};
         int fsel = 1;
         for (int i = 0; i < ffs.length; i++) if (ffs[i] == ffSpeed(prefs)) fsel = i;
+        // console language: Auto, then DS codes in the order shown
+        final int[] langs = {-1, 1, 2, 3, 4, 5, 0};
+        final String[] langNames = {"Same as phone", "English", "Français", "Deutsch", "Italiano", "Español", "日本語"};
+        int lsel = 1;
+        for (int i = 0; i < langs.length; i++) if (langs[i] == prefs.getInt("language", 1)) lsel = i;
+        final View langLabel = label("Console language: " + langNames[lsel],
+                "Games that include this language switch to it; others ignore it. Applies when a game starts fresh (the resume point and save states keep their language). HD packs are made for the English version, so other languages show some screens with the original graphics.");
+        gp.addView(langLabel);
+        gp.addView(pad(Ui.chips(c, new String[] {"Auto", "EN", "FR", "DE", "IT", "ES", "JA"}, lsel, i -> {
+            prefs.edit().putInt("language", langs[i]).apply(); listener.settingChanged("language");
+            setLabelTitle(langLabel, "Console language: " + langNames[i]);
+        })));
+        gp.addView(Ui.divider(c));
         gp.addView(label("Fast forward speed", null));
         gp.addView(pad(Ui.chips(c, new String[] {"2x", "3x", "4x"}, fsel, i -> {
             prefs.edit().putInt("ffSpeed", ffs[i]).apply(); listener.settingChanged("ffSpeed");
@@ -278,6 +298,11 @@ final class SettingsView extends LinearLayout {
             l.addView(d);
         }
         return l;
+    }
+
+    /** Changes the title line of a row made by label(). */
+    private static void setLabelTitle(View label, String title) {
+        ((TextView) ((LinearLayout) label).getChildAt(0)).setText(title);
     }
 
     private View pad(View v) {

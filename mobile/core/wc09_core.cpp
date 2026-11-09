@@ -153,6 +153,7 @@ bool ReadFile(const std::string& path, std::vector<u8>& out)
 // screen drawing
 GLuint Prog = 0, Vao = 0, Vbo = 0;
 bool LinearFilter = true;
+int OptLanguage = 1;   // DS firmware language code
 bool OptHdCards = true, OptHdText = true, OptSmooth2D = true;
 int OptHdMode = 2;
 
@@ -281,7 +282,7 @@ int wc09_load_rom(const char* path, int scale, int jit)
         memset(ud.Nickname, 0, sizeof(ud.Nickname));
         for (int i = 0; i < 7; i++) ud.Nickname[i] = name[i];
         ud.NameLength = 7;
-        ud.Settings = (ud.Settings & ~Firmware::Language::Reserved) | Firmware::Language::English;
+        ud.Settings = (ud.Settings & ~Firmware::Language::Reserved) | (Firmware::Language)OptLanguage;
         fw.UpdateChecksums();
     }
 
@@ -575,6 +576,7 @@ void wc09_set_option(int option, int value)
     case WC09_OPT_HD_ALL: OptHdMode = value ? 2 : 0; break;
     case WC09_OPT_HD_MODE: OptHdMode = std::clamp(value, 0, 3); break;
     case WC09_OPT_LINEAR_FILTER: LinearFilter = value != 0; break;
+    case WC09_OPT_LANGUAGE: OptLanguage = std::clamp(value, 0, 5); return;   // used at the next game start
     }
     ApplyHdOptions();
 }

@@ -43,6 +43,9 @@ endif()
 
 target_link_libraries(DualHD PRIVATE wc09mobile Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets PkgConfig::SDL2)
 target_include_directories(DualHD PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/frontend)
+if (MSVC)
+    target_compile_options(DualHD PRIVATE /utf-8)   # the UI text has accented letters and symbols
+endif()
 
 if (BUILD_STATIC)
     if (WIN32)

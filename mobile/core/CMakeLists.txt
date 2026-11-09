@@ -19,3 +19,7 @@ else()
     target_sources(wc09mobile PRIVATE ../../src/frontend/glad/glad.c)
     target_include_directories(wc09mobile PUBLIC ../../src/frontend/glad)
 endif()
+
+if (MSVC)
+    target_compile_options(wc09mobile PRIVATE /utf-8)   # strings like "60 fps · 4 ms" are UTF-8
+endif()

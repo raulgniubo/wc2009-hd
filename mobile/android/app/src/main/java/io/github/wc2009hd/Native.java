@@ -33,7 +33,7 @@ final class Native {
     /** "title\nsubtitle\npublisher" from the ROM's banner, icon into argb (32x32); null if unreadable */
     static native String romInfo(String path, int[] argb);
 
-    static final int OPT_HD_CARDS = 0, OPT_HD_TEXT = 1, OPT_SMOOTH_2D = 2, OPT_LINEAR_FILTER = 3, OPT_HD_ALL = 4, OPT_HD_MODE = 5;
+    static final int OPT_HD_CARDS = 0, OPT_HD_TEXT = 1, OPT_SMOOTH_2D = 2, OPT_LINEAR_FILTER = 3, OPT_HD_ALL = 4, OPT_HD_MODE = 5, OPT_LANGUAGE = 6;
     static native boolean isHdGame();
     /** "renderer: OpenGL" / "renderer: SOFTWARE (OpenGL failed)" + GL info and startup errors */
     static native String rendererReport();

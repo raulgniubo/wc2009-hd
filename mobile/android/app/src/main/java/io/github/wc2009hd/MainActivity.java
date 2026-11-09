@@ -593,7 +593,7 @@ public final class MainActivity extends Activity
         if (game == null) return;
         switch (key) {
             case "scale": { int s = SettingsView.scale(prefs); game.queueEvent(() -> Native.setScale(s)); break; }
-            case "filter": case "smooth2d": case "hdCards": case "hdText": case "hdAll": case "hdMode":
+            case "filter": case "smooth2d": case "hdCards": case "hdText": case "hdAll": case "hdMode": case "language":
                 game.queueEvent(this::applyOptions); break;
             case "buttons": case "padHide": controls.setShowButtons(showButtons()); relayout(); break;
             case "opacity": controls.setOpacity(SettingsView.opacity(prefs)); break;
@@ -610,6 +610,7 @@ public final class MainActivity extends Activity
         Native.setOption(Native.OPT_SMOOTH_2D, SettingsView.on(prefs, "smooth2d") ? 1 : 0);
         Native.setOption(Native.OPT_LINEAR_FILTER, SettingsView.on(prefs, "filter") ? 1 : 0);
         Native.setOption(Native.OPT_HD_MODE, SettingsView.hdMode(prefs));
+        Native.setOption(Native.OPT_LANGUAGE, SettingsView.language(prefs));
     }
 
     // ================================================================ game
